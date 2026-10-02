@@ -1,0 +1,11 @@
+{
+  "name": "youcloned",
+  "owner": { "name": "BNSN LLC" },
+  "plugins": [
+    {
+      "name": "youcloned",
+      "source": "./youcloned",
+      "description": "YouCloned: your AI clone inside the Claude app. Your rules, your crew, Codex checks, and SkillKey skills."
+    }
+  ]
+}
