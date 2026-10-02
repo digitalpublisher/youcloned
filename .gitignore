@@ -1,0 +1,4 @@
+# Written by Claude Code on each load; matches the installed Claude Code version.
+youcloned/.claude-plugin/types/
+youcloned/tsconfig.json
+.DS_Store

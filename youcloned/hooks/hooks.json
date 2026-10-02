@@ -1,0 +1,4 @@
+{
+  "description": "YouCloned hooks module",
+  "modules": ["./register.js"]
+}
