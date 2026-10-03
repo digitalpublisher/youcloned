@@ -201,10 +201,10 @@ async function togglePane($) {
   await openPane($, true)
 }
 
-// Opens the full dashboard in Claude's browser pane with the desktop app's own browser tools: start the
-// dashboard (launch.json "YouCloned"), open the pane on its address, then ask the app whether the pane shows.
-// If the app keeps it hidden, Claude is asked to open it (one line in the chat). Without the browser tools
-// (the terminal, an older app) the small panel opens instead.
+// Gets the full dashboard ready in Claude's browser pane with the desktop app's own browser tools: start the
+// dashboard (launch.json "YouCloned") and open the pane on its address. The app keeps that pane out of view
+// until the person presses its globe button, and nothing (add-on or Claude) can slide it open, so this adds
+// nothing to the chat. Without the browser tools (the terminal, an older app) the small panel opens instead.
 async function browserCall($, tool, args) {
   for (const server of ['Claude_Browser', 'Claude Browser']) {
     try {
@@ -219,9 +219,6 @@ async function showDashboard($) {
   const started = await browserCall($, 'preview_start', { name: 'YouCloned' })
   if (started === null) { await openPane($, false); return false }
   await browserCall($, 'preview_start', { url: DASH_URL + '/' })
-  const ctx = (await browserCall($, 'tabs_context', {})) || ''
-  if (/"browserOpen":\s*true/.test(ctx) && !/hidden/i.test(ctx)) return true
-  await openDashboard($)
   return true
 }
 

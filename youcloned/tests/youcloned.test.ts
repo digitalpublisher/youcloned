@@ -354,20 +354,17 @@ test('Claude starts with the full dashboard by default; the preferences file and
   expect(JSON.parse(writes.get(PROJECT + '/YouCloned preferences.json')).when_claude_starts).toBe('nothing')
 })
 
-for (const pane of ['displayed', 'hidden'] as const) {
-  test('in the desktop app the full dashboard opens in the browser pane (' + pane + ')', async ($, on) => {
-    const opened: string[] = []
-    const submitted: string[] = []
-    const mcpCalls: { server: string, tool: string, args: Record<string, unknown> }[] = []
-    const { clock } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' }, opened, submitted, mcpCalls, browser: pane })
-    on('http.fetch', () => ({ value: { status: 200, headers: {}, text: '{}' } }))
-    await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
-    await clock.advance(3000)
-    const browser = mcpCalls.filter(c => c.server === 'Claude_Browser')
-    expect(browser.map(c => c.tool)).toEqual(['preview_start', 'preview_start', 'tabs_context'])
-    expect(browser[1].args.url).toBe('http://127.0.0.1:4600/')
-    expect(opened).not.toContain('youcloned')
-    // Shown: nothing in the chat. Hidden: Claude is asked to open it.
-    expect(submitted.length).toBe(pane === 'displayed' ? 0 : 1)
-  })
-}
+test('in the desktop app the full dashboard is opened in the browser pane, with nothing added to the chat', async ($, on) => {
+  const opened: string[] = []
+  const submitted: string[] = []
+  const mcpCalls: { server: string, tool: string, args: Record<string, unknown> }[] = []
+  const { clock } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' }, opened, submitted, mcpCalls, browser: 'hidden' })
+  on('http.fetch', () => ({ value: { status: 200, headers: {}, text: '{}' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  await clock.advance(3000)
+  const browser = mcpCalls.filter(c => c.server === 'Claude_Browser')
+  expect(browser.map(c => c.tool)).toEqual(['preview_start', 'preview_start'])
+  expect(browser[1].args.url).toBe('http://127.0.0.1:4600/')
+  expect(opened).not.toContain('youcloned')
+  expect(submitted.length).toBe(0)
+})
