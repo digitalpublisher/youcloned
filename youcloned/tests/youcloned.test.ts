@@ -20,7 +20,7 @@ const SK = '4a62845f-77ec-431f-8b76-2d42902a60fb'
 const skTools = (server = SK) => ['list_skills', 'start_skill', 'run_skill', 'word_balance'].map(t => ({ name: 'mcp__' + server + '__' + t, description: '', mcp: true }))
 const fromSk = (body: string) => ({ content: [{ type: 'text', text: 'You are short on words.\n\n<<<YOUCLONED>>>\n' + body + '\n<<<END YOUCLONED>>>\n\nWhen you have everything the steps ask for, call run_skill with skill "x".' }], isError: false })
 
-function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[]) => unknown, toasts?: string[], lists?: Record<string, string[]>, cwd?: string, skillKey?: string | null, mcpCalls?: { server: string, tool: string, args: Record<string, unknown> }[], registered?: { name: string, prompt: string }[], owns?: (slug: string) => boolean } = {}) {
+function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[]) => unknown, toasts?: string[], lists?: Record<string, string[]>, cwd?: string, skillKey?: string | null, mcpCalls?: { server: string, tool: string, args: Record<string, unknown> }[], registered?: { name: string, prompt: string }[], owns?: (slug: string) => boolean, submitted?: string[] } = {}) {
   const writes = new Map<string, string>()
   const store = new Map<string, unknown>(opts.project ? [['project', opts.project]] : [])
   mock.clock(on)
@@ -53,6 +53,7 @@ function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: 
   on('session.messages', () => ({ value: [{ role: 'assistant', text: 'I wrote copy/letter.md', toolUses: [] }] }))
   on('process.run', ($, e) => ({ value: opts.process ? opts.process(e.argv) : { exitCode: 1, stdout: '', stderr: '' } }))
   on('tool.call', () => ({ result: 'ran' }))
+  on('prompt.submit', ($, e) => { opts.submitted?.push(e.text); return { value: undefined } })
   return { writes, store }
 }
 
@@ -171,8 +172,9 @@ test('the pane draws every tab in the terminal and the desktop app', async ($, o
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
     await ui.press({ key: 'tab-home' })
-    expect(await ui.find({ key: 'home-job-0' })).toBeDefined()
-    expect(await ui.find({ key: 'home-dash' })).toBeDefined()
+    const prefix = surface === 'desktop' ? 'tile-' : ''
+    expect(await ui.find({ key: prefix + 'home-job-0' })).toBeDefined()
+    expect(await ui.find({ key: prefix + 'home-dash' })).toBeDefined()
     await ui.press({ key: 'tab-do' })
     expect(await ui.find({ key: 'setup' })).toBeDefined()
     expect(await ui.find({ key: 'do-sales-letter' })).toBeDefined()
@@ -296,4 +298,19 @@ test('a helper the SkillKey account does not own stays off and says it comes wit
   expect(registered.map(r => r.name)).toEqual(['support'])
   const out = await $.command.run({ command: 'youcloned', args: 'crew inbox' })
   expect(out.text).toMatch(/comes with YouCloned Pro/)
+})
+
+test('the designed buttons in the desktop panel start their jobs', async ($, on) => {
+  const submitted: string[] = []
+  sessionStubs(on, { submitted })
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'tab-home' })
+  const tiles = await ui.findAll({ type: 'Client' })
+  expect(tiles.map(t => t.props.key)).toEqual(['tile-home-job-0', 'tile-home-job-1', 'tile-home-job-2', 'tile-home-job-3', 'tile-home-crew', 'tile-home-codex', 'tile-home-dash'])
+  await ui.post({ id: 'home-job-1' }, { in: 'tile-home-job-1' })
+  expect(submitted[0]).toMatch(/sales page/)
+  await ui.post({ id: 'home-crew' }, { in: 'tile-home-crew' })
+  expect(await ui.find({ key: 'run-support' })).toBeDefined()
+  await ui.unmount()
 })

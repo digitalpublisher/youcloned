@@ -53,10 +53,10 @@ const DASH_PORT = 4600
 const DASH_URL = 'http://127.0.0.1:' + DASH_PORT
 // One-tap jobs: the strip above Claude's message box and the dashboard both start these.
 const JOBS = [
-  { label: 'VSL lead', text: 'Write my VSL lead with Jon\'s VSL Lead Writer skill. Ask me which offer first if I have more than one.' },
-  { label: 'Sales page', text: 'Build a sales page for one of my offers with Jon\'s sales page skill. Ask me which offer first if I have more than one.' },
-  { label: 'YouTube video', text: 'Help me make my next YouTube video: topic, script in my voice, then the edit and two thumbnails.' },
-  { label: 'Clear my inbox', text: '/youcloned crew inbox' },
+  { label: 'VSL lead', hint: 'Jon\'s Lead Writer', text: 'Write my VSL lead with Jon\'s VSL Lead Writer skill. Ask me which offer first if I have more than one.' },
+  { label: 'Sales page', hint: 'Your offer, your brand', text: 'Build a sales page for one of my offers with Jon\'s sales page skill. Ask me which offer first if I have more than one.' },
+  { label: 'YouTube video', hint: 'Topic, script, thumbnails', text: 'Help me make my next YouTube video: topic, script in my voice, then the edit and two thumbnails.' },
+  { label: 'Clear my inbox', hint: 'Your inbox helper sorts it', text: '/youcloned crew inbox' },
 ]
 
 function dataDir() {
@@ -68,7 +68,7 @@ async function runJob($, text) {
   const t = String(text || '').trim()
   if (!t) return
   const m = /^\/youcloned\s*(.*)$/i.exec(t)
-  if (!m) { $.prompt.submit({ text: t, asUser: true }); return }
+  if (!m) { try { await $.prompt.submit({ text: t, asUser: true }) } catch (err) { $.ui.log('job not sent: ' + String(err)) } return }
   const args = m[1].trim()
   const word = args.split(/\s+/)[0].toLowerCase()
   if (word === 'setup') return startSetup($)
@@ -678,6 +678,18 @@ export function register(on) {
     return { text: project ? 'YouCloned is set up. Rules file: ' + project + '/' + RULES_NAME : 'YouCloned is not set up yet. Run /youcloned setup.' }
   })
 
+  // A designed button (hooks/tile.js) was pressed.
+  on('ui.message', async ($, e, next) => {
+    if (!/tile\.js$/.test(String(e.module || ''))) return next(e)
+    const id = e.data && typeof e.data === 'object' ? String(e.data.id || '') : ''
+    const job = /^home-job-(\d)$/.exec(id)
+    if (job && JOBS[Number(job[1])]) await runJob($, JOBS[Number(job[1])].text)
+    else if (id === 'home-crew') { tab = 'crew'; $.ui.invalidate('ui.render') }
+    else if (id === 'home-codex') await codexButton($)
+    else if (id === 'home-dash') openDashboard($)
+    return {}
+  })
+
   // A crew member finished.
   on('turn.complete', async ($, e, next) => {
     const name = e.agentId ? crewIds.get(e.agentId) : undefined
@@ -696,7 +708,11 @@ export function register(on) {
 
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     if (e.requestId !== PANE) return next(e)
-    const { Box, Text, Button, Input, Select, Svg, Link } = $.ui.resolve(e)
+    const { Box, Text, Button, Input, Select, Svg, Link, Client } = $.ui.resolve(e)
+    // A designed button (hooks/tile.js) where the surface can draw one, Claude's own Button elsewhere.
+    const tile = (id, label, sub, kind, onPress) => Client
+      ? Client({ key: 'tile-' + id, module: './tile.js', props: { id, label, sub, kind }, flexGrow: 1 })
+      : Button({ key: id, label, plain: true, onPress })
     const redraw = () => $.ui.invalidate('ui.render')
     const width = Math.max(30, (e.props.bodyColumns || 60) - 2)
     const now = await $.clock.now()
@@ -730,16 +746,25 @@ export function register(on) {
         body.push(Text({ bold: true, color: '#3375d7', children: ['YouCloned'] }))
         body.push(Text({ children: ['Claude plan left: ' + (left == null ? '?' : Math.round(left) + '%') + '   BNSN words: ' + (live.words == null ? 'not linked' : Number(live.words).toLocaleString('en-US'))] }))
       }
-      body.push(Box({ flexDirection: 'row', flexWrap: 'wrap', columnGap: 1, rowGap: 0, children: JOBS.map((j, i) =>
-        Button({ key: 'home-job-' + i, label: j.label, hotkey: String(i + 2), onPress: () => runJob($, j.text) })) }))
+      body.push(desk
+        ? Box({ flexDirection: 'column', rowGap: 1, children: [0, 2].map(r => Box({ key: 'jobs-' + r, flexDirection: 'row', columnGap: 1,
+            children: JOBS.slice(r, r + 2).map((j, i) => tile('home-job-' + (r + i), j.label, j.hint, 'primary', () => runJob($, j.text))) })) })
+        : Box({ flexDirection: 'row', flexWrap: 'wrap', columnGap: 1, rowGap: 0, children: JOBS.map((j, i) =>
+            Button({ key: 'home-job-' + i, label: j.label, hotkey: String(i + 2), onPress: () => runJob($, j.text) })) }))
       const rows = CREW.map(c => ({ title: c.title + ' helper', what: c.what, waiting: crew[c.name].drafts.length > 0,
         badge: crew[c.name].running ? 'Working' : crew[c.name].drafts.length ? crew[c.name].drafts.length + ' waiting' : 'Caught up' }))
       if (desk) body.push(pic('Your crew', crewSvg(rows), 54 + rows.length * 46))
-      body.push(Box({ flexDirection: 'row', columnGap: 2, children: [
-        Button({ key: 'home-crew', label: 'Open my crew', plain: true, onPress: () => { tab = 'crew'; redraw() } }),
-        Button({ key: 'home-codex', label: codex.busy ? 'Codex is checking…' : 'Check with Codex', plain: true, onPress: () => codexButton($) }),
-        Button({ key: 'home-dash', label: 'Full dashboard', plain: true, onPress: () => openDashboard($) }),
-      ] }))
+      body.push(desk
+        ? Box({ flexDirection: 'row', columnGap: 1, children: [
+            tile('home-crew', 'Open my crew', '', 'outline'),
+            tile('home-codex', codex.busy ? 'Codex is checking…' : 'Check with Codex', '', 'outline'),
+            tile('home-dash', 'Full dashboard', '', 'outline'),
+          ] })
+        : Box({ flexDirection: 'row', columnGap: 2, children: [
+            Button({ key: 'home-crew', label: 'Open my crew', plain: true, onPress: () => { tab = 'crew'; redraw() } }),
+            Button({ key: 'home-codex', label: codex.busy ? 'Codex is checking…' : 'Check with Codex', plain: true, onPress: () => codexButton($) }),
+            Button({ key: 'home-dash', label: 'Full dashboard', plain: true, onPress: () => openDashboard($) }),
+          ] }))
       if (desk) body.push(pic('Your BNSN apps', appsSvg(), 112))
       body.push(Box({ flexDirection: 'row', flexWrap: 'wrap', columnGap: 2, children: [
         Link({ href: 'https://app.bnsn.ai', label: 'BNSN' }),
