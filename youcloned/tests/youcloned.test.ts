@@ -23,7 +23,7 @@ const fromSk = (body: string) => ({ content: [{ type: 'text', text: 'You are sho
 function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[]) => unknown, toasts?: string[], lists?: Record<string, string[]>, cwd?: string, skillKey?: string | null, mcpCalls?: { server: string, tool: string, args: Record<string, unknown> }[], registered?: { name: string, prompt: string }[], owns?: (slug: string) => boolean, submitted?: string[], opened?: string[] } = {}) {
   const writes = new Map<string, string>()
   const store = new Map<string, unknown>(opts.project ? [['project', opts.project]] : [])
-  mock.clock(on)
+  const clock = mock.clock(on)
   on('env.get', ($, e) => ({ value: e.name === 'HOME' ? '/Users/pat' : undefined }))
   on('store.get', ($, e) => ({ value: store.get(e.key) }))
   on('store.set', ($, e) => { store.set(e.key, e.value); return { value: undefined } })
@@ -54,7 +54,7 @@ function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: 
   on('process.run', ($, e) => ({ value: opts.process ? opts.process(e.argv) : { exitCode: 1, stdout: '', stderr: '' } }))
   on('tool.call', () => ({ result: 'ran' }))
   on('prompt.submit', ($, e) => { opts.submitted?.push(e.text); return { value: undefined } })
-  return { writes, store }
+  return { writes, store, clock }
 }
 
 test('gate: crew reads anything and writes only inside its folder', () => {
@@ -330,4 +330,17 @@ test('the strip above the message box uses designed buttons that open YouCloned 
   await ui.post({ id: 'yc-open' }, { in: 'tile-yc-open' })
   expect(opened).toContain('youcloned')
   await ui.unmount()
+})
+
+test('YouCloned opens with Claude by default, writes the preferences file, and /youcloned start off stops it', async ($, on) => {
+  const opened: string[] = []
+  const { writes, clock } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' }, opened })
+  on('http.fetch', () => ({ value: { status: 200, headers: {}, text: '{}' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  await clock.advance(3000)
+  expect(opened).toContain('youcloned')
+  expect(JSON.parse(writes.get(PROJECT + '/YouCloned preferences.json'))).toEqual({ open_youcloned_when_claude_starts: true })
+  const off = await $.command.run({ command: 'youcloned', args: 'start off' })
+  expect(off.text).toMatch(/stays closed/)
+  expect(JSON.parse(writes.get(PROJECT + '/YouCloned preferences.json')).open_youcloned_when_claude_starts).toBe(false)
 })

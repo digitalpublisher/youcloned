@@ -49,6 +49,26 @@ let codexReady = false      // Codex is installed on this computer
 let everywhere = false      // after setup, YouCloned shows in every session unless the owner turns it off
 let live = { claudePct: null, claudeLabel: '', words: null } // numbers the strip and dashboard show
 
+// The owner's preferences, a small file in their clone folder they can open and change.
+const PREFS_NAME = 'YouCloned preferences.json'
+const PREFS_DEFAULT = { open_youcloned_when_claude_starts: true }
+
+async function readPrefs($) {
+  if (!project) return { ...PREFS_DEFAULT }
+  const file = project + '/' + PREFS_NAME
+  try {
+    if (await $.fs.exists(file)) return { ...PREFS_DEFAULT, ...JSON.parse(await $.fs.read(file)) }
+    await $.fs.write(file, JSON.stringify(PREFS_DEFAULT, null, 2) + '\n')
+  } catch {}
+  return { ...PREFS_DEFAULT }
+}
+
+async function writePrefs($, change) {
+  const prefs = { ...(await readPrefs($)), ...change }
+  if (project) await $.fs.write(project + '/' + PREFS_NAME, JSON.stringify(prefs, null, 2) + '\n')
+  return prefs
+}
+
 const DASH_PORT = 4600
 const DASH_URL = 'http://127.0.0.1:' + DASH_PORT
 // One-tap jobs: the strip above Claude's message box and the dashboard both start these.
@@ -158,6 +178,8 @@ async function turnOn($, cwd) {
   $.clock.every(20000, () => refreshLive($, false))
   $.clock.every(300000, () => refreshLive($, true))
   $.clock.after(2000, () => refreshLive($, true))
+  // YouCloned opens with Claude unless the owner's preferences say not to.
+  if ((await readPrefs($)).open_youcloned_when_claude_starts !== false) $.clock.after(800, () => openPane($, false))
   try { codexReady = !!(await findCodex($)) } catch {}
 }
 
@@ -551,7 +573,7 @@ export function register(on) {
       await $.command.register({
         name: 'youcloned',
         description: 'Open YouCloned. "setup" sets you up, "codex" checks the last work with Codex, "crew support" or "crew inbox" runs a crew member',
-        argumentHint: '[setup | on | off | codex [question] | crew <support|inbox>]',
+        argumentHint: '[setup | on | off | start on|off | codex [question] | crew <support|inbox>]',
         immediate: true,
       })
     } catch (err) { $.ui.log('/youcloned not registered: ' + String(err)) }
@@ -669,6 +691,13 @@ export function register(on) {
       everywhere = true
       await $.store.set('everywhere', true)
       return { text: 'YouCloned is on in every Claude session from your next one. Type /youcloned off to turn it off.' }
+    }
+    if (word === 'start') {
+      if (!project) return { text: 'Set up YouCloned first with /youcloned setup.' }
+      const opens = !/^(off|no|false)$/i.test(args.split(/\s+/)[1] || 'on')
+      await writePrefs($, { open_youcloned_when_claude_starts: opens })
+      return { text: opens ? 'YouCloned opens with Claude from your next session. Type /youcloned start off to stop that.'
+        : 'YouCloned stays closed when Claude starts; press the YouCloned button to open it. Type /youcloned start on to bring it back.' }
     }
     if (word === 'codex') return { text: await codexCheck($, args.slice(5).trim()) }
     if (word === 'crew') {
