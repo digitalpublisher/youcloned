@@ -572,8 +572,12 @@ export function register(on) {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (!cloneHere) return next(e)
     if (!dashOn) $.clock.after(0, () => turnOn($))
-    const { Box, Text, Button } = $.ui.resolve(e)
+    const { Box, Text, Button, Client } = $.ui.resolve(e)
     const theirs = await next(e)
+    // Designed buttons (hooks/tile.js) wherever the surface draws them; Claude's own with number keys elsewhere.
+    const chip = (id, label, kind, hotkey, onPress) => Client
+      ? Client({ key: 'tile-' + id, module: './tile.js', props: { id, label, kind } })
+      : Button({ key: id, label, hotkey, plain: true, onPress })
     const facts = []
     if (live.claudePct != null) facts.push('Claude ' + Math.round(Math.max(0, 100 - live.claudePct)) + '% left')
     if (live.words != null) facts.push(Number(live.words).toLocaleString('en-US') + ' words')
@@ -584,9 +588,9 @@ export function register(on) {
       ] }),
       Box({ flexDirection: 'row', columnGap: 2, children: [
         project
-          ? Button({ key: 'yc-open', label: 'YouCloned', hotkey: '1', plain: true, onPress: () => togglePane($) })
-          : Button({ key: 'yc-setup', label: 'Set up YouCloned', hotkey: '1', plain: true, onPress: () => openDashboard($) }),
-        ...JOBS.map((j, i) => Button({ key: 'yc-job-' + i, label: j.label, hotkey: String(i + 2), plain: true, onPress: () => runJob($, j.text) })),
+          ? chip('yc-open', 'YouCloned', 'chip-primary', '1', () => togglePane($))
+          : chip('yc-setup', 'Set up YouCloned', 'chip-primary', '1', () => openDashboard($)),
+        ...JOBS.map((j, i) => chip('yc-job-' + i, j.label, 'chip', String(i + 2), () => runJob($, j.text))),
       ] }),
     ] })
     return theirs ? Box({ flexDirection: 'column', children: [strip, theirs] }) : strip
@@ -682,11 +686,12 @@ export function register(on) {
   on('ui.message', async ($, e, next) => {
     if (!/tile\.js$/.test(String(e.module || ''))) return next(e)
     const id = e.data && typeof e.data === 'object' ? String(e.data.id || '') : ''
-    const job = /^home-job-(\d)$/.exec(id)
+    const job = /^(?:home|yc)-job-(\d)$/.exec(id)
     if (job && JOBS[Number(job[1])]) await runJob($, JOBS[Number(job[1])].text)
     else if (id === 'home-crew') { tab = 'crew'; $.ui.invalidate('ui.render') }
     else if (id === 'home-codex') await codexButton($)
-    else if (id === 'home-dash') openDashboard($)
+    else if (id === 'home-dash' || id === 'yc-setup') openDashboard($)
+    else if (id === 'yc-open') await togglePane($)
     return {}
   })
 

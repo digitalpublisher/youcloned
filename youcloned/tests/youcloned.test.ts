@@ -20,7 +20,7 @@ const SK = '4a62845f-77ec-431f-8b76-2d42902a60fb'
 const skTools = (server = SK) => ['list_skills', 'start_skill', 'run_skill', 'word_balance'].map(t => ({ name: 'mcp__' + server + '__' + t, description: '', mcp: true }))
 const fromSk = (body: string) => ({ content: [{ type: 'text', text: 'You are short on words.\n\n<<<YOUCLONED>>>\n' + body + '\n<<<END YOUCLONED>>>\n\nWhen you have everything the steps ask for, call run_skill with skill "x".' }], isError: false })
 
-function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[]) => unknown, toasts?: string[], lists?: Record<string, string[]>, cwd?: string, skillKey?: string | null, mcpCalls?: { server: string, tool: string, args: Record<string, unknown> }[], registered?: { name: string, prompt: string }[], owns?: (slug: string) => boolean, submitted?: string[] } = {}) {
+function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[]) => unknown, toasts?: string[], lists?: Record<string, string[]>, cwd?: string, skillKey?: string | null, mcpCalls?: { server: string, tool: string, args: Record<string, unknown> }[], registered?: { name: string, prompt: string }[], owns?: (slug: string) => boolean, submitted?: string[], opened?: string[] } = {}) {
   const writes = new Map<string, string>()
   const store = new Map<string, unknown>(opts.project ? [['project', opts.project]] : [])
   mock.clock(on)
@@ -45,7 +45,7 @@ function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: 
   on('agent.register', ($, e) => { opts.registered?.push({ name: e.name, prompt: e.prompt }); return { value: { agent: 'youcloned:' + e.name } } })
   on('agent.list', () => ({ value: opts.agents || [] }))
   on('command.register', () => ({ value: undefined }))
-  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.open', ($, e) => { opts.opened?.push(e.id); return { value: { isPlaced: true } } })
   on('ui.log', () => ({ value: undefined }))
   on('ui.toast', ($, e) => { opts.toasts?.push(e.text); return { value: undefined } })
   on('session.start', () => ({ cwd: opts.cwd || '/work' }))
@@ -312,5 +312,22 @@ test('the designed buttons in the desktop panel start their jobs', async ($, on)
   expect(submitted[0]).toMatch(/sales page/)
   await ui.post({ id: 'home-crew' }, { in: 'tile-home-crew' })
   expect(await ui.find({ key: 'run-support' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('the strip above the message box uses designed buttons that open YouCloned and start jobs', async ($, on) => {
+  const submitted: string[] = []
+  const opened: string[] = []
+  sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' }, submitted, opened })
+  on('ui.panes', () => ({ value: [] }))
+  on('ui.render', ($, e) => $.ui.resolve(e).Box({ children: [] }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  const ui = await $.ui.mount({ plugin: 'youcloned', component: 'AbovePrompt', requestId: 'band', surface: 'desktop', viewport: { columns: 140, rows: 40 }, props: {} })
+  const chips = await ui.findAll({ type: 'Client' })
+  expect(chips.map(c => c.props.key)).toEqual(['tile-yc-open', 'tile-yc-job-0', 'tile-yc-job-1', 'tile-yc-job-2', 'tile-yc-job-3'])
+  await ui.post({ id: 'yc-job-2' }, { in: 'tile-yc-job-2' })
+  expect(submitted[0]).toMatch(/YouTube video/)
+  await ui.post({ id: 'yc-open' }, { in: 'tile-yc-open' })
+  expect(opened).toContain('youcloned')
   await ui.unmount()
 })
