@@ -20,10 +20,10 @@ const SK = '4a62845f-77ec-431f-8b76-2d42902a60fb'
 const skTools = (server = SK) => ['list_skills', 'start_skill', 'run_skill', 'word_balance'].map(t => ({ name: 'mcp__' + server + '__' + t, description: '', mcp: true }))
 const fromSk = (body: string) => ({ content: [{ type: 'text', text: 'You are short on words.\n\n<<<YOUCLONED>>>\n' + body + '\n<<<END YOUCLONED>>>\n\nWhen you have everything the steps ask for, call run_skill with skill "x".' }], isError: false })
 
-function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[]) => unknown, toasts?: string[], lists?: Record<string, string[]>, cwd?: string, skillKey?: string | null, mcpCalls?: { server: string, tool: string, args: Record<string, unknown> }[], registered?: { name: string, prompt: string }[], owns?: (slug: string) => boolean, submitted?: string[], opened?: string[], browser?: 'displayed' | 'hidden' } = {}) {
+function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[]) => unknown, toasts?: string[], lists?: Record<string, string[]>, cwd?: string, skillKey?: string | null, mcpCalls?: { server: string, tool: string, args: Record<string, unknown> }[], registered?: { name: string, prompt: string }[], owns?: (slug: string) => boolean } = {}) {
   const writes = new Map<string, string>()
   const store = new Map<string, unknown>(opts.project ? [['project', opts.project]] : [])
-  const clock = mock.clock(on)
+  mock.clock(on)
   on('env.get', ($, e) => ({ value: e.name === 'HOME' ? '/Users/pat' : undefined }))
   on('store.get', ($, e) => ({ value: store.get(e.key) }))
   on('store.set', ($, e) => { store.set(e.key, e.value); return { value: undefined } })
@@ -36,10 +36,6 @@ function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: 
   on('tool.list', () => ({ value: sk ? skTools(sk) : [] }))
   on('mcp.call', ($, e) => {
     opts.mcpCalls?.push(e)
-    if (opts.browser && e.server === 'Claude_Browser') {
-      if (e.tool === 'tabs_context') return { value: { content: [{ type: 'text', text: '{"browserOpen": true, "tabs": []}\nThe Browser pane is currently ' + opts.browser + '.' }], isError: false } }
-      return { value: { content: [{ type: 'text', text: 'ok' }], isError: false } }
-    }
     if (!sk || (e.server !== sk && e.server !== 'claude.ai SkillKey')) throw new Error('no such server')
     if (e.tool === 'word_balance') return { value: { content: [{ type: 'text', text: 'Words left: 4,200' }], isError: false } }
     if (e.tool === 'start_skill') return { value: (opts.owns || (() => true))(String(e.args.skill)) ? fromSk('Instructions for ' + e.args.skill) : { content: [{ type: 'text', text: 'That skill is not on this account. Call list_skills to see the skills this person has.' }], isError: false } }
@@ -49,7 +45,7 @@ function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: 
   on('agent.register', ($, e) => { opts.registered?.push({ name: e.name, prompt: e.prompt }); return { value: { agent: 'youcloned:' + e.name } } })
   on('agent.list', () => ({ value: opts.agents || [] }))
   on('command.register', () => ({ value: undefined }))
-  on('ui.open', ($, e) => { opts.opened?.push(e.id); return { value: { isPlaced: true } } })
+  on('ui.open', () => ({ value: { isPlaced: true } }))
   on('ui.log', () => ({ value: undefined }))
   on('ui.toast', ($, e) => { opts.toasts?.push(e.text); return { value: undefined } })
   on('session.start', () => ({ cwd: opts.cwd || '/work' }))
@@ -57,8 +53,7 @@ function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: 
   on('session.messages', () => ({ value: [{ role: 'assistant', text: 'I wrote copy/letter.md', toolUses: [] }] }))
   on('process.run', ($, e) => ({ value: opts.process ? opts.process(e.argv) : { exitCode: 1, stdout: '', stderr: '' } }))
   on('tool.call', () => ({ result: 'ran' }))
-  on('prompt.submit', ($, e) => { opts.submitted?.push(e.text); return { value: undefined } })
-  return { writes, store, clock }
+  return { writes, store }
 }
 
 test('gate: crew reads anything and writes only inside its folder', () => {
@@ -176,9 +171,8 @@ test('the pane draws every tab in the terminal and the desktop app', async ($, o
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
     await ui.press({ key: 'tab-home' })
-    const prefix = surface === 'desktop' ? 'tile-' : ''
-    expect(await ui.find({ key: prefix + 'home-job-0' })).toBeDefined()
-    expect(await ui.find({ key: prefix + 'home-dash' })).toBeDefined()
+    expect(await ui.find({ key: 'home-job-0' })).toBeDefined()
+    expect(await ui.find({ key: 'home-dash' })).toBeDefined()
     await ui.press({ key: 'tab-do' })
     expect(await ui.find({ key: 'setup' })).toBeDefined()
     expect(await ui.find({ key: 'do-sales-letter' })).toBeDefined()
@@ -302,69 +296,4 @@ test('a helper the SkillKey account does not own stays off and says it comes wit
   expect(registered.map(r => r.name)).toEqual(['support'])
   const out = await $.command.run({ command: 'youcloned', args: 'crew inbox' })
   expect(out.text).toMatch(/comes with YouCloned Pro/)
-})
-
-test('the designed buttons in the desktop panel start their jobs', async ($, on) => {
-  const submitted: string[] = []
-  sessionStubs(on, { submitted })
-  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
-  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  await ui.press({ key: 'tab-home' })
-  const tiles = await ui.findAll({ type: 'Client' })
-  expect(tiles.map(t => t.props.key)).toEqual(['tile-home-job-0', 'tile-home-job-1', 'tile-home-job-2', 'tile-home-job-3', 'tile-home-crew', 'tile-home-codex', 'tile-home-dash'])
-  await ui.post({ id: 'home-job-1' }, { in: 'tile-home-job-1' })
-  expect(submitted[0]).toMatch(/sales page/)
-  await ui.post({ id: 'home-crew' }, { in: 'tile-home-crew' })
-  expect(await ui.find({ key: 'run-support' })).toBeDefined()
-  await ui.unmount()
-})
-
-test('the strip above the message box uses designed buttons that open YouCloned and start jobs', async ($, on) => {
-  const submitted: string[] = []
-  const opened: string[] = []
-  sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' }, submitted, opened })
-  on('ui.panes', () => ({ value: [] }))
-  on('ui.render', ($, e) => $.ui.resolve(e).Box({ children: [] }))
-  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
-  const ui = await $.ui.mount({ plugin: 'youcloned', component: 'AbovePrompt', requestId: 'band', surface: 'desktop', viewport: { columns: 140, rows: 40 }, props: {} })
-  const chips = await ui.findAll({ type: 'Client' })
-  expect(chips.map(c => c.props.key)).toEqual(['tile-yc-open', 'tile-yc-job-0', 'tile-yc-job-1', 'tile-yc-job-2', 'tile-yc-job-3'])
-  await ui.post({ id: 'yc-job-2' }, { in: 'tile-yc-job-2' })
-  expect(submitted[0]).toMatch(/YouTube video/)
-  await ui.post({ id: 'yc-open' }, { in: 'tile-yc-open' })
-  expect(opened).toContain('youcloned')
-  await ui.unmount()
-})
-
-test('Claude starts with the full dashboard by default; the preferences file and /youcloned start switch it', async ($, on) => {
-  const opened: string[] = []
-  const mcpCalls: { server: string, tool: string, args: Record<string, unknown> }[] = []
-  const { writes, clock } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' }, opened, mcpCalls })
-  on('http.fetch', () => ({ value: { status: 200, headers: {}, text: '{}' } }))
-  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
-  await clock.advance(3000)
-  // No desktop browser tools here (as in the terminal), so the small panel opens instead.
-  expect(mcpCalls.some(c => c.tool === 'preview_start' && c.args.name === 'YouCloned')).toBe(true)
-  expect(opened).toContain('youcloned')
-  expect(JSON.parse(writes.get(PROJECT + '/YouCloned preferences.json'))).toEqual({ when_claude_starts: 'dashboard' })
-  const panel = await $.command.run({ command: 'youcloned', args: 'start panel' })
-  expect(panel.text).toMatch(/small YouCloned panel/)
-  const off = await $.command.run({ command: 'youcloned', args: 'start off' })
-  expect(off.text).toMatch(/stays closed/)
-  expect(JSON.parse(writes.get(PROJECT + '/YouCloned preferences.json')).when_claude_starts).toBe('nothing')
-})
-
-test('in the desktop app the full dashboard is opened in the browser pane, with nothing added to the chat', async ($, on) => {
-  const opened: string[] = []
-  const submitted: string[] = []
-  const mcpCalls: { server: string, tool: string, args: Record<string, unknown> }[] = []
-  const { clock } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' }, opened, submitted, mcpCalls, browser: 'hidden' })
-  on('http.fetch', () => ({ value: { status: 200, headers: {}, text: '{}' } }))
-  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
-  await clock.advance(3000)
-  const browser = mcpCalls.filter(c => c.server === 'Claude_Browser')
-  expect(browser.map(c => c.tool)).toEqual(['preview_start', 'preview_start'])
-  expect(browser[1].args.url).toBe('http://127.0.0.1:4600/')
-  expect(opened).not.toContain('youcloned')
-  expect(submitted.length).toBe(0)
 })
