@@ -20,10 +20,10 @@ const SK = '4a62845f-77ec-431f-8b76-2d42902a60fb'
 const skTools = (server = SK) => ['list_skills', 'start_skill', 'run_skill', 'word_balance'].map(t => ({ name: 'mcp__' + server + '__' + t, description: '', mcp: true }))
 const fromSk = (body: string) => ({ content: [{ type: 'text', text: 'You are short on words.\n\n<<<YOUCLONED>>>\n' + body + '\n<<<END YOUCLONED>>>\n\nWhen you have everything the steps ask for, call run_skill with skill "x".' }], isError: false })
 
-function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[]) => unknown, toasts?: string[], lists?: Record<string, string[]>, cwd?: string, skillKey?: string | null, mcpCalls?: { server: string, tool: string, args: Record<string, unknown> }[], registered?: { name: string, prompt: string }[], owns?: (slug: string) => boolean } = {}) {
+function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[]) => unknown, toasts?: string[], lists?: Record<string, string[]>, cwd?: string, skillKey?: string | null, mcpCalls?: { server: string, tool: string, args: Record<string, unknown> }[], registered?: { name: string, prompt: string }[], owns?: (slug: string) => boolean, opened?: string[] } = {}) {
   const writes = new Map<string, string>()
   const store = new Map<string, unknown>(opts.project ? [['project', opts.project]] : [])
-  mock.clock(on)
+  const clock = mock.clock(on)
   on('env.get', ($, e) => ({ value: e.name === 'HOME' ? '/Users/pat' : undefined }))
   on('store.get', ($, e) => ({ value: store.get(e.key) }))
   on('store.set', ($, e) => { store.set(e.key, e.value); return { value: undefined } })
@@ -45,7 +45,7 @@ function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: 
   on('agent.register', ($, e) => { opts.registered?.push({ name: e.name, prompt: e.prompt }); return { value: { agent: 'youcloned:' + e.name } } })
   on('agent.list', () => ({ value: opts.agents || [] }))
   on('command.register', () => ({ value: undefined }))
-  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.open', ($, e) => { opts.opened?.push(e.id); return { value: { isPlaced: true } } })
   on('ui.log', () => ({ value: undefined }))
   on('ui.toast', ($, e) => { opts.toasts?.push(e.text); return { value: undefined } })
   on('session.start', () => ({ cwd: opts.cwd || '/work' }))
@@ -53,7 +53,7 @@ function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: 
   on('session.messages', () => ({ value: [{ role: 'assistant', text: 'I wrote copy/letter.md', toolUses: [] }] }))
   on('process.run', ($, e) => ({ value: opts.process ? opts.process(e.argv) : { exitCode: 1, stdout: '', stderr: '' } }))
   on('tool.call', () => ({ result: 'ran' }))
-  return { writes, store }
+  return { writes, store, clock }
 }
 
 test('gate: crew reads anything and writes only inside its folder', () => {
@@ -296,4 +296,13 @@ test('a helper the SkillKey account does not own stays off and says it comes wit
   expect(registered.map(r => r.name)).toEqual(['support'])
   const out = await $.command.run({ command: 'youcloned', args: 'crew inbox' })
   expect(out.text).toMatch(/comes with YouCloned Pro/)
+})
+
+test('the YouCloned panel opens itself on the Home tab when a session starts in the clone folder', async ($, on) => {
+  const opened: string[] = []
+  const { clock } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' }, opened })
+  on('http.fetch', () => ({ value: { status: 200, headers: {}, text: '{}' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  await clock.advance(2000)
+  expect(opened).toContain('youcloned')
 })
