@@ -201,25 +201,32 @@ async function togglePane($) {
   await openPane($, true)
 }
 
-// Opens the full dashboard in Claude's browser pane with the desktop app's own tool, no chat message.
-// Where that tool isn't there (the terminal, an older app), the small panel opens instead.
-async function showDashboard($) {
+// Opens the full dashboard in Claude's browser pane with the desktop app's own browser tools: start the
+// dashboard (launch.json "YouCloned"), open the pane on its address, then ask the app whether the pane shows.
+// If the app keeps it hidden, Claude is asked to open it (one line in the chat). Without the browser tools
+// (the terminal, an older app) the small panel opens instead.
+async function browserCall($, tool, args) {
   for (const server of ['Claude_Browser', 'Claude Browser']) {
     try {
-      const r = await $.mcp.call(server, 'preview_start', { name: 'YouCloned' })
-      if (r && !r.isError) return true
+      const r = await $.mcp.call(server, tool, args)
+      if (r && !r.isError) return (r.content || []).map(c => c.text || '').join('\n') || 'ok'
     } catch {}
   }
-  try {
-    const r = await $.tool.call({ tool: 'mcp__Claude_Browser__preview_start', name: 'YouCloned' })
-    if (r && !r.deny && !r.isError) return true
-  } catch {}
-  await openPane($, false)
-  return false
+  return null
 }
 
-function openDashboard($) {
-  $.prompt.submit({ text: 'Open the YouCloned dashboard in the Browser pane: start the "YouCloned" preview from .claude/launch.json (it starts its own server on port ' + DASH_PORT + '), then show it. No other work.' })
+async function showDashboard($) {
+  const started = await browserCall($, 'preview_start', { name: 'YouCloned' })
+  if (started === null) { await openPane($, false); return false }
+  await browserCall($, 'preview_start', { url: DASH_URL + '/' })
+  const ctx = (await browserCall($, 'tabs_context', {})) || ''
+  if (/"browserOpen":\s*true/.test(ctx) && !/hidden/i.test(ctx)) return true
+  await openDashboard($)
+  return true
+}
+
+async function openDashboard($) {
+  try { await $.prompt.submit({ text: 'Open the YouCloned dashboard in the Browser pane: start the "YouCloned" preview from .claude/launch.json (it starts its own server on port ' + DASH_PORT + '), then show it. No other work.' }) } catch (err) { $.ui.log('dashboard request not sent: ' + String(err)) }
 }
 
 function crewDir(name) {
