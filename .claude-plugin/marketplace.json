@@ -1,11 +1,67 @@
 {
   "name": "youcloned",
-  "owner": { "name": "BNSN LLC" },
+  "owner": {
+    "name": "BNSN LLC"
+  },
+  "metadata": {
+    "description": "YouCloned by BNSN, plus the open-source skills it ships with, each installed from its author."
+  },
   "plugins": [
     {
       "name": "youcloned",
       "source": "./youcloned",
       "description": "YouCloned: your AI clone inside the Claude app. Your rules, your crew, Codex checks, and SkillKey skills."
+    },
+    {
+      "name": "impeccable",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/pbakaus/impeccable.git"
+      },
+      "description": "Design skills by Paul Bakaus (Apache 2.0): polish, typeset, layout, colorize, audit and more. Installed from the author's own project.",
+      "category": "design",
+      "homepage": "https://impeccable.style"
+    },
+    {
+      "name": "ui-ux-pro-max",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill.git"
+      },
+      "description": "UI and UX design library by Next Level Builder (MIT): styles, palettes, font pairings, brand and slides. Installed from the author's own project.",
+      "category": "design"
+    },
+    {
+      "name": "hyperframes",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/heygen-com/hyperframes.git"
+      },
+      "description": "HyperFrames by HeyGen (Apache 2.0): make and render videos from HTML. Installed from the author's own project.",
+      "category": "video",
+      "homepage": "https://hyperframes.heygen.com"
+    },
+    {
+      "name": "printing-press",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/mvanhorn/cli-printing-press.git"
+      },
+      "description": "Printing Press by Matt Van Horn and Trevin Chow (MIT): turn any API into a command-line tool and skill. Installed from the author's own project.",
+      "category": "tools"
+    },
+    {
+      "name": "notebooklm",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/teng-lin/notebooklm-py.git"
+      },
+      "strict": false,
+      "skills": [
+        "./"
+      ],
+      "description": "NotebookLM by Teng Lin (MIT): notebooks, sources, audio overviews and more from Claude. Installed from the author's own project.",
+      "category": "research"
     }
   ]
 }
