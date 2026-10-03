@@ -158,6 +158,8 @@ async function turnOn($, cwd) {
   $.clock.every(20000, () => refreshLive($, false))
   $.clock.every(300000, () => refreshLive($, true))
   $.clock.after(2000, () => refreshLive($, true))
+  // The YouCloned panel opens itself as the session starts (the desktop app starts add-ons on the first message).
+  $.clock.after(800, () => { tab = 'home'; openPane($, false) })
   try { codexReady = !!(await findCodex($)) } catch {}
 }
 
