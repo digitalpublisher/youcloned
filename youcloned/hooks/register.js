@@ -117,19 +117,29 @@ async function dashboardUp($) {
   try { const r = await $.http.fetch(DASH_URL + '/state.json'); return r && r.status === 200 } catch { return false }
 }
 
-// Starts the dashboard server and tells Claude's Browser pane where it is.
-async function startDashboard($, cwd) {
-  if (!(await dashboardUp($))) {
-    // Started without waiting: the server keeps running for as long as the session does.
-    try { const run = $.process.spawn(['python3', $.plugin.root + '/dashboard/server.py', String(DASH_PORT)]); if (run && typeof run.catch === 'function') run.catch(() => {}) } catch (err) { $.ui.log('dashboard did not start: ' + String(err)) }
+// Finds Python: the desktop app gives add-ons a short program path, so known places are checked first.
+async function findPython($) {
+  for (const p of ['/opt/homebrew/bin/python3', '/usr/local/bin/python3', '/Library/Frameworks/Python.framework/Versions/Current/bin/python3', '/usr/bin/python3']) {
+    if (await $.fs.exists(p)) return p
   }
+  return 'python3'
+}
+
+// Tells Claude's Browser pane how to start the dashboard, then starts it if it isn't already running.
+async function startDashboard($, cwd) {
+  const python = await findPython($)
+  const server = $.plugin.root + '/dashboard/server.py'
+  const entry = { name: 'YouCloned', runtimeExecutable: python, runtimeArgs: [server, String(DASH_PORT)], port: DASH_PORT, autoPort: false }
   const launch = cwd + '/.claude/launch.json'
   let conf = { version: '0.0.1', configurations: [] }
-  try { if (await $.fs.exists(launch)) conf = JSON.parse(await $.fs.read(launch)) } catch { return }
-  conf.configurations = conf.configurations || []
-  if (!conf.configurations.some(c => c.name === 'YouCloned')) {
-    conf.configurations.push({ name: 'YouCloned', url: DASH_URL, port: DASH_PORT })
-    await $.fs.write(launch, JSON.stringify(conf, null, 2) + '\n')
+  try { if (await $.fs.exists(launch)) conf = JSON.parse(await $.fs.read(launch)) } catch { conf = null }
+  if (conf) {
+    conf.configurations = (conf.configurations || []).filter(c => c.name !== 'YouCloned')
+    conf.configurations.push(entry)
+    try { await $.fs.write(launch, JSON.stringify(conf, null, 2) + '\n') } catch {}
+  }
+  if (!(await dashboardUp($))) {
+    try { const run = $.process.spawn([python, server, String(DASH_PORT)]); if (run && typeof run.catch === 'function') run.catch(() => {}) } catch (err) { $.ui.log('dashboard did not start: ' + String(err)) }
   }
 }
 
@@ -145,7 +155,7 @@ async function turnOn($, cwd) {
 }
 
 function openDashboard($) {
-  $.prompt.submit({ text: 'Open the YouCloned dashboard in the Browser pane: it is the "YouCloned" preview in .claude/launch.json, already running at ' + DASH_URL + '. Just open it; no other work.' })
+  $.prompt.submit({ text: 'Open the YouCloned dashboard in the Browser pane: start the "YouCloned" preview from .claude/launch.json (it starts its own server on port ' + DASH_PORT + '), then show it. No other work.' })
 }
 
 function crewDir(name) {
