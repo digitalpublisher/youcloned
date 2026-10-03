@@ -20,7 +20,7 @@ const SK = '4a62845f-77ec-431f-8b76-2d42902a60fb'
 const skTools = (server = SK) => ['list_skills', 'start_skill', 'run_skill', 'word_balance'].map(t => ({ name: 'mcp__' + server + '__' + t, description: '', mcp: true }))
 const fromSk = (body: string) => ({ content: [{ type: 'text', text: 'You are short on words.\n\n<<<YOUCLONED>>>\n' + body + '\n<<<END YOUCLONED>>>\n\nWhen you have everything the steps ask for, call run_skill with skill "x".' }], isError: false })
 
-function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[]) => unknown, toasts?: string[], lists?: Record<string, string[]>, cwd?: string, skillKey?: string | null, mcpCalls?: { server: string, tool: string, args: Record<string, unknown> }[], registered?: { name: string, prompt: string }[] } = {}) {
+function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[]) => unknown, toasts?: string[], lists?: Record<string, string[]>, cwd?: string, skillKey?: string | null, mcpCalls?: { server: string, tool: string, args: Record<string, unknown> }[], registered?: { name: string, prompt: string }[], owns?: (slug: string) => boolean } = {}) {
   const writes = new Map<string, string>()
   const store = new Map<string, unknown>(opts.project ? [['project', opts.project]] : [])
   mock.clock(on)
@@ -38,7 +38,7 @@ function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: 
     opts.mcpCalls?.push(e)
     if (!sk || (e.server !== sk && e.server !== 'claude.ai SkillKey')) throw new Error('no such server')
     if (e.tool === 'word_balance') return { value: { content: [{ type: 'text', text: 'Words left: 4,200' }], isError: false } }
-    if (e.tool === 'start_skill') return { value: fromSk('Instructions for ' + e.args.skill) }
+    if (e.tool === 'start_skill') return { value: (opts.owns || (() => true))(String(e.args.skill)) ? fromSk('Instructions for ' + e.args.skill) : { content: [{ type: 'text', text: 'That skill is not on this account. Call list_skills to see the skills this person has.' }], isError: false } }
     return { value: { content: [], isError: true } }
   })
   on('tool.register', () => ({ value: undefined }))
@@ -273,4 +273,27 @@ test('SkillKey is found in the terminal by its usual name too', async ($, on) =>
   const out = await $.tool.call({ tool: 'mcp__youcloned__load_setup' })
   expect(mcpCalls[0].server).toBe('claude_ai_SkillKey')
   expect(out.result).toBe('Instructions for youcloned-setup')
+})
+
+test('the desktop panel pictures fill the panel: no fixed size, drawn wider than any panel', async ($, on) => {
+  sessionStubs(on)
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'tab-home' })
+  const pics = await ui.findAll({ type: 'Svg' })
+  expect(pics.length).toBe(3)
+  for (const p of pics) {
+    expect(p.props.width).toBeUndefined()
+    expect(p.props.source).toMatch(/^<svg[^>]* width="2400"/)
+  }
+  await ui.unmount()
+})
+
+test('a helper the SkillKey account does not own stays off and says it comes with Pro', async ($, on) => {
+  const registered: { name: string, prompt: string }[] = []
+  sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' }, registered, owns: (slug) => slug !== 'youcloned-crew-inbox' })
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: PROJECT })
+  expect(registered.map(r => r.name)).toEqual(['support'])
+  const out = await $.command.run({ command: 'youcloned', args: 'crew inbox' })
+  expect(out.text).toMatch(/comes with YouCloned Pro/)
 })

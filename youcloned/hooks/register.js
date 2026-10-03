@@ -41,6 +41,7 @@ let skills = []             // the skills this plugin ships
 let skillKey = false        // the SkillKey connector is on in this session
 let skillKeyServer = null   // its name for $.mcp.call: "claude.ai SkillKey" in the terminal, an id in the desktop app
 const crewReady = new Set() // crew members registered with their instructions from SkillKey
+const notOwned = new Set()  // YouCloned skills SkillKey says this account does not have (their plan decides)
 let cloneHere = false       // this session runs in the customer's clone folder
 let watched = false         // a person is looking at this session (terminal or desktop app)
 let dashOn = false          // the dashboard and its timers are running for this session
@@ -289,13 +290,16 @@ async function fromSkillKey($, slug) {
     const r = await skillKeyCall($, 'start_skill', { skill: slug })
     const text = (r.content || []).map(c => c.text || '').join('\n')
     const m = /<<<YOUCLONED>>>\n([\s\S]*?)\n<<<END YOUCLONED>>>/.exec(text)
-    return m ? m[1].trim() : null
+    if (m) { notOwned.delete(slug); return m[1].trim() }
+    if (/not on this account/i.test(text)) notOwned.add(slug)
+    return null
   } catch (err) {
     $.ui.log('SkillKey ' + slug + ': ' + String(err).slice(0, 200))
     return null
   }
 }
 
+const PRO_ONLY = (title) => 'The ' + title + ' helper comes with YouCloned Pro. Your SkillKey account has YouCloned Free, so this one stays off.'
 const NEEDS_SKILLKEY = 'YouCloned loads its instructions from SkillKey, and SkillKey is not connected in this Claude app yet. Connect SkillKey (Settings, Connectors), then try again.'
 
 async function readRules($) {
@@ -411,7 +415,7 @@ async function runCrew($, name) {
   if (!project) return 'Set up YouCloned first (/youcloned setup), so the crew knows who you are and where to put drafts.'
   if (crew[name].running) return c.title + ' is already working.'
   if (!crewReady.has(name)) { await checkSkillKey($); try { await registerCrew($) } catch {} }
-  if (!crewReady.has(name)) return NEEDS_SKILLKEY
+  if (!crewReady.has(name)) return notOwned.has('youcloned-crew-' + name) ? PRO_ONLY(c.title) : NEEDS_SKILLKEY
   const today = new Date(await $.clock.now()).toISOString().slice(0, 10)
   let work = ''
   if (name === 'support') {
@@ -714,9 +718,10 @@ export function register(on) {
       const lines = waiting.filter(x => x.n).map(x => x.c.title + ' helper: ' + x.n + (x.n === 1 ? ' draft' : ' drafts') + ' waiting for you')
       if (!lines.length) lines.push('Your crew is caught up')
       lines.push('New from Jon: VSL Story, step 2 of 9')
-      const px = Math.max(320, Math.min(PANEL_W, Math.round((e.props.bodyColumns || 80) * 8)))
-      const fit = (h) => Math.round(h * px / PANEL_W)
-      const pic = (alt, svg, h) => Svg({ alt, width: px, height: fit(h), source: svg })
+      // No fixed size: the drawing is marked wider than any panel, so the desktop app draws it at the
+      // panel's full width and keeps its shape.
+      const BIG = 2400
+      const pic = (alt, svg, h) => Svg({ alt, source: svg.replace(' width="' + PANEL_W + '" height="' + h + '"', ' width="' + BIG + '" height="' + Math.round(h * BIG / PANEL_W) + '"') })
       if (desk) {
         let name = ''
         try { const m = ((await readRules($)) || '').match(/^#+\s*Who I am\s*\n+([^\n]+)/m); name = m ? m[1].trim().split(/[ ,]/)[0] : '' } catch {}
