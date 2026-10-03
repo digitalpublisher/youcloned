@@ -281,11 +281,26 @@ test('the desktop panel pictures fill the panel: no fixed size, drawn wider than
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await ui.press({ key: 'tab-home' })
   const pics = await ui.findAll({ type: 'Svg' })
-  expect(pics.length).toBe(3)
+  expect(pics.length).toBe(6)
   for (const p of pics) {
     expect(p.props.width).toBeUndefined()
     expect(p.props.source).toMatch(/^<svg[^>]* width="2400"/)
   }
+  await ui.unmount()
+})
+
+test('the desktop Home tab is the full dashboard: logo bar, greeting, money (marked Sample), crew, apps, newest video', async ($, on) => {
+  sessionStubs(on)
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'tab-home' })
+  const alts = (await ui.findAll({ type: 'Svg' })).map(p => String(p.props.alt))
+  expect(alts[0]).toBe('YouCloned')
+  expect(alts.some(a => /Made or saved this week \(sample\)/.test(a))).toBe(true)
+  const money = (await ui.findAll({ type: 'Svg' })).find(p => /Made or saved/.test(String(p.props.alt)))
+  expect(money.props.source).toMatch(/>Sample</)
+  expect(alts.some(a => a.startsWith('New from Jon'))).toBe(true)
+  expect(await ui.find({ key: 'home-new' })).toBeDefined()
   await ui.unmount()
 })
 
