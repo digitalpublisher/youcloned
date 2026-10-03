@@ -1,0 +1,532 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>YouCloned</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=Schibsted+Grotesk:wght@500;600;700;800&display=swap">
+<style>
+:root{
+  --page:#e8ebf1; --page-ink:#141e30; --page-muted:#55627a;
+  /* YouCloned */
+  --ground:#f2f5fa; --surface:#ffffff; --sunk:#eceff5; --line:#dde3eb; --line-strong:#c6cfdb;
+  --ink:#141e30; --ink-2:#435069; --ink-3:#687489;
+  --accent:#3375d7; --accent-ink:#1f5bb5; --accent-soft:#e6eefb; --on-accent:#fbfcff;
+  --amber:#b7791f; --amber-soft:#faefd9; --rose:#c2416d; --violet:#6d5bd0; --claude-o:#d27a55; --plate:#0e1830;
+  --hero-bg:radial-gradient(90% 120% at 0% 0%,#4c8ff0 0%,#2f6fd0 45%,#1d4fa6 100%);
+  /* Claude's own chrome */
+  --c-bg:#faf9f5; --c-side:#f3f1ea; --c-line:#e4e1d8; --c-ink:#1f1e1b; --c-ink2:#55534c; --c-ink3:#8a877e; --c-bubble:#efece3; --c-box:#ffffff;
+  --display:"Schibsted Grotesk","Hanken Grotesk",system-ui,sans-serif;
+  --body:"Hanken Grotesk",system-ui,sans-serif;
+  --ui:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Arial,sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  color-scheme:dark;
+  --page:#090c12; --page-ink:#e6ebf3; --page-muted:#94a0b4;
+  --ground:#0f141d; --surface:#161d29; --sunk:#1d2635; --line:#283346; --line-strong:#3a4760;
+  --ink:#e6ebf3; --ink-2:#aab4c5; --ink-3:#808c9f;
+  --accent:#5a92ea; --accent-ink:#8fb6f4; --accent-soft:#1a2942; --on-accent:#0a1120;
+  --amber:#e8b25c; --amber-soft:#2c2313; --rose:#ef7fa6; --violet:#a598f5; --claude-o:#e59672; --plate:#22304a;
+  --hero-bg:radial-gradient(90% 120% at 0% 0%,#2e6ad0 0%,#1c4597 45%,#122f6b 100%);
+  --c-bg:#262624; --c-side:#1f1e1d; --c-line:#3a3936; --c-ink:#ece9e3; --c-ink2:#c3c0b9; --c-ink3:#8f8c86; --c-bubble:#33322f; --c-box:#30302e;
+}}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --page:#090c12; --page-ink:#e6ebf3; --page-muted:#94a0b4;
+  --ground:#0f141d; --surface:#161d29; --sunk:#1d2635; --line:#283346; --line-strong:#3a4760;
+  --ink:#e6ebf3; --ink-2:#aab4c5; --ink-3:#808c9f;
+  --accent:#5a92ea; --accent-ink:#8fb6f4; --accent-soft:#1a2942; --on-accent:#0a1120;
+  --amber:#e8b25c; --amber-soft:#2c2313; --rose:#ef7fa6; --violet:#a598f5; --claude-o:#e59672; --plate:#22304a;
+  --hero-bg:radial-gradient(90% 120% at 0% 0%,#2e6ad0 0%,#1c4597 45%,#122f6b 100%);
+  --c-bg:#262624; --c-side:#1f1e1d; --c-line:#3a3936; --c-ink:#ece9e3; --c-ink2:#c3c0b9; --c-ink3:#8f8c86; --c-bubble:#33322f; --c-box:#30302e;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;background:var(--page);color:var(--page-ink);font:15px/1.55 var(--body);padding-inline:16px;padding-block:26px 60px;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+h1,h2,h3{margin:0;font-family:var(--display);text-wrap:balance}
+p{margin:0}
+.wrap{max-width:1440px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+.lg-dk{display:none}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .lg-lt{display:none}:root:not([data-theme="light"]) .lg-dk{display:block}}
+:root[data-theme="dark"] .lg-lt{display:none}:root[data-theme="dark"] .lg-dk{display:block}
+
+/* page header */
+.intro{display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap}
+.intro h1{font-size:30px;letter-spacing:-.02em}
+.intro p{color:var(--page-muted);margin-top:6px;max-width:72ch}
+.intro .sp{flex:1}
+.tg{display:inline-flex;background:color-mix(in oklab,var(--page-ink),transparent 92%);border-radius:9px;padding:3px;gap:2px}
+.tg button{border:0;background:transparent;color:var(--page-muted);font:600 13px var(--body);padding:6px 13px;border-radius:7px;cursor:pointer}
+.tg button[aria-pressed="true"]{background:var(--surface);color:var(--page-ink);box-shadow:0 0 0 1px var(--line)}
+.moments{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.moments button{display:flex;gap:12px;align-items:flex-start;text-align:left;border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:12px 14px;cursor:pointer}
+.moments button b{display:block;font-family:var(--display);font-size:15px}
+.moments button small{display:block;color:var(--ink-3);font-size:13px}
+.moments .n{flex:none;width:26px;height:26px;border-radius:50%;border:1.5px solid var(--line-strong);display:grid;place-items:center;font:700 12px var(--display);color:var(--ink-3)}
+.moments button[aria-pressed="true"]{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.moments button[aria-pressed="true"] .n{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+
+/* the Claude window */
+.win{border-radius:12px;overflow:hidden;border:1px solid color-mix(in oklab,var(--page-ink),transparent 80%);box-shadow:0 30px 70px rgba(0,0,0,.22);display:grid;grid-template-columns:172px minmax(330px,400px) minmax(0,1fr);grid-template-rows:40px minmax(0,1fr);height:800px;background:var(--c-bg)}
+.ctop{grid-column:1/-1;display:flex;align-items:center;gap:10px;padding:0 14px;background:var(--c-side);border-bottom:1px solid var(--c-line);font:500 13px var(--ui);color:var(--c-ink)}
+.ctop .lights{display:flex;gap:7px;margin-right:96px}
+.ctop .lights i{width:12px;height:12px;border-radius:50%;background:var(--c-line);display:block}
+.ctop small{color:var(--c-ink3);font-weight:400}
+.cside{background:var(--c-side);border-right:1px solid var(--c-line);padding:10px 8px;display:flex;flex-direction:column;gap:2px;font:13px var(--ui);color:var(--c-ink2)}
+.cside div{padding:6px 10px;border-radius:7px}
+.cside .on{background:var(--c-bubble);color:var(--c-ink)}
+.cside .lbl{font-size:11.5px;color:var(--c-ink3);padding-top:12px}
+
+/* left: Claude's chat, dressed by YouCloned */
+.chat{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--c-line);font:14px/1.5 var(--ui);color:var(--c-ink)}
+.tx{flex:1;overflow:auto;padding:16px 16px 8px;display:flex;flex-direction:column;gap:12px}
+.um{align-self:flex-end;background:var(--c-bubble);border-radius:14px;padding:8px 13px;max-width:90%}
+.am{font-size:13.5px}
+.am p+p{margin-top:8px}
+.yc{border:1px solid var(--line);border-left:3px solid var(--accent);background:var(--surface);color:var(--ink);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:7px;font:12.5px/1.45 var(--body)}
+.yc .hd{display:flex;align-items:center;gap:7px;font-weight:700;font-size:12.5px}
+.yc .hd img{width:16px;height:16px}
+.yc .r{display:flex;gap:8px;align-items:center;color:var(--ink-2)}
+.yc .k{font-size:10.5px;font-weight:700;padding:1px 7px;border-radius:999px;flex:none;background:var(--accent-soft);color:var(--accent-ink)}
+.yc .k.you{background:color-mix(in oklab,var(--claude-o),transparent 85%);color:var(--claude-o)}
+.yc .open{align-self:flex-start;border:0;background:transparent;color:var(--accent-ink);font:600 12.5px var(--body);padding:0;cursor:pointer}
+.think{font:13px var(--ui);color:var(--c-ink3);display:flex;align-items:center;gap:8px}
+.think img{width:16px;height:16px;animation:pulse 1.2s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.4;transform:scale(.9)}}
+.strip{margin:0 12px;background:var(--surface);border:1px solid var(--line);border-bottom:0;border-radius:11px 11px 0 0;padding:8px 10px;display:flex;flex-direction:column;gap:7px;font-family:var(--body)}
+.strip .top{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink-3)}
+.strip .top img{width:18px;height:18px}
+.strip .top b{color:var(--ink);font-size:12.5px}
+.strip .top .w{margin-left:auto;color:var(--accent-ink);font-weight:700}
+.strip .jobs{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none}
+.strip .jobs button{flex:none;border:1px solid var(--line);background:var(--ground);border-radius:999px;padding:4px 10px;font:600 12px var(--body);color:var(--ink);cursor:pointer;white-space:nowrap}
+.strip .jobs button:hover,.strip .jobs button.hot{border-color:var(--accent);background:var(--accent-soft);color:var(--accent-ink)}
+.box{margin:0 12px 12px;border:1px solid var(--c-line);border-radius:0 0 12px 12px;background:var(--c-box);padding:10px 12px;color:var(--c-ink3);font:13.5px var(--ui);display:flex;align-items:center;gap:8px}
+.box .mic{margin-left:auto;width:26px;height:26px;border-radius:50%;background:var(--accent);display:grid;place-items:center}
+.box .mic svg{width:13px;height:13px;stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round}
+
+/* right: what your clone is showing you */
+.view{display:flex;flex-direction:column;min-height:0;min-width:0;background:var(--ground);font-family:var(--body);color:var(--ink)}
+.vbar{display:flex;align-items:center;gap:12px;height:52px;padding:0 18px;background:var(--surface);border-bottom:1px solid var(--line);flex:none}
+.vbar .logo img{height:22px;width:auto;display:block}
+.vbar .logo .lg-dk{display:none}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .vbar .logo .lg-lt{display:none}:root:not([data-theme="light"]) .vbar .logo .lg-dk{display:block}}
+:root[data-theme="dark"] .vbar .logo .lg-lt{display:none}:root[data-theme="dark"] .vbar .logo .lg-dk{display:block}
+.vbody > *{flex:none}
+.crumbs{display:flex;gap:4px;margin-left:8px;overflow-x:auto;scrollbar-width:none}
+.crumbs button{border:0;background:transparent;border-radius:7px;padding:5px 10px;font:600 13px var(--body);color:var(--ink-3);cursor:pointer;white-space:nowrap}
+.crumbs button.on{background:var(--accent-soft);color:var(--accent-ink)}
+.vbar .sp{flex:1}
+.vbody{flex:1;overflow:auto;padding:18px;display:flex;flex-direction:column;gap:14px}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:12px;min-width:0}
+.ph{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)}
+.ph h2{font-size:15.5px;font-weight:600}
+.ph .meta{margin-left:auto;font-size:12px;color:var(--ink-3)}
+.pb{padding:14px 16px}
+.hic{width:24px;height:24px;border-radius:7px;flex:none;display:grid;place-items:center;background:color-mix(in oklab,var(--hc),transparent 86%);color:var(--hc)}
+.hic svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.num{font-family:var(--display);font-weight:700;letter-spacing:-.02em;line-height:1}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;padding:2px 9px 2px 8px;border-radius:999px;white-space:nowrap;background:var(--accent-soft);color:var(--accent-ink)}
+.pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.pill.warn{background:var(--amber-soft);color:var(--amber)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:34px;padding:0 13px;border-radius:8px;border:1px solid var(--line-strong);background:var(--surface);color:var(--ink);font:600 13px var(--body);cursor:pointer;white-space:nowrap}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.btn.sm{height:30px;font-size:12px;padding:0 10px}
+
+/* home view */
+.hero{position:relative;overflow:hidden;border-radius:14px;padding:20px 22px;background:var(--hero-bg);color:#eef3fc;display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:20px;align-items:center}
+.hero::before{content:"";position:absolute;width:360px;height:360px;right:-110px;top:-160px;border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,.16),transparent 65%)}
+.hero > *{position:relative}
+.who{display:flex;align-items:center;gap:24px}
+.mark{position:relative;width:70px;height:70px;border-radius:50%;flex:none;display:grid;place-items:center;border:0;padding:0;cursor:pointer;background:rgba(255,255,255,.1);box-shadow:0 0 0 1px rgba(255,255,255,.22)}
+.mark img{width:44px;height:44px;position:relative;z-index:1}
+.mark .ring{position:absolute;inset:0;border-radius:50%;border:1.5px solid rgba(190,215,255,.6);opacity:0;animation:ripple 4.5s ease-out infinite}
+.hero.live .mark .ring{animation-duration:1.6s}
+.hero.live .mark .ring:nth-child(2){animation-delay:.53s}
+.hero.live .mark .ring:nth-child(3){animation-delay:1.06s}
+@keyframes ripple{0%{transform:scale(1);opacity:.75}100%{transform:scale(1.8);opacity:0}}
+.hero h2{font-size:24px;color:#fff;font-weight:700;letter-spacing:-.01em}
+.hero .sub{color:#c8d7f2;font-size:13px;margin-top:3px}
+.today{margin-top:14px;display:flex;flex-direction:column;gap:6px;font-size:13.5px;color:#e6eefb}
+.today div{display:flex;gap:8px;align-items:center}
+.today i{width:6px;height:6px;border-radius:50%;background:#bcd3f7;flex:none}
+.meters{display:flex;flex-direction:column;gap:8px}
+.meter{display:flex;align-items:center;gap:12px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);border-radius:11px;padding:8px 12px}
+.meter svg.g{width:40px;height:40px;flex:none}
+.meter .num{font-size:20px;color:#fff}
+.meter .num small{font-size:12px;color:#a9bde0}
+.meter .l{font-size:12px;color:#c8d7f2}
+.meter .wl{width:40px;height:40px;border-radius:10px;background:rgba(255,255,255,.14);display:grid;place-items:center;flex:none}
+.meter .wl svg{width:26px;height:26px}
+.wave{animation:drift 6s linear infinite}
+@keyframes drift{to{transform:translateX(-120px)}}
+.duo{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}
+.big{font-size:38px}
+.mini-split{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12.5px;color:var(--ink-2);margin-top:8px}
+.mini-split span{display:flex;align-items:center;gap:6px}
+.mini-split i{width:8px;height:8px;border-radius:2px;display:block}
+.need{display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--line);font-size:13.5px}
+.need:first-child{border-top:0;padding-top:0}
+.need b{font-weight:600}
+.need small{display:block;color:var(--ink-3);font-size:12px}
+.need .pill{margin-left:auto}
+.apps{display:flex;gap:10px;overflow-x:auto;padding-bottom:4px;scrollbar-width:thin}
+.app{flex:0 0 160px;display:flex;flex-direction:column;gap:8px}
+.app .plate{height:48px;border-radius:9px;background:var(--plate);display:grid;place-items:center;padding:0 12px}
+.app .plate img{max-height:20px;max-width:100%}
+.app .plate .ob{display:flex;align-items:center;gap:7px;color:#fff;font:600 14px var(--display)}
+.app .plate .ob span{width:20px;height:20px;border-radius:5px;background:#3375d7;display:grid;place-items:center}
+.app .plate .ob svg{width:12px;height:12px;stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round}
+.app .btn{height:28px;font-size:12px}
+.vid{display:grid;grid-template-columns:150px minmax(0,1fr);gap:14px;align-items:center}
+.vid .th{aspect-ratio:16/9;border-radius:8px;background:url(assets/latest-video.jpg) center/cover;max-width:100%}
+.vid b{font-family:var(--display);font-size:14.5px;display:block}
+.vid p{font-size:12.5px;color:var(--ink-2);margin:4px 0 8px}
+
+/* job view */
+.jobhead{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.jobhead h2{font-size:22px;letter-spacing:-.01em}
+.jobhead p{color:var(--ink-2);font-size:13.5px}
+.jobhead .sp{flex:1}
+.track{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.stp{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--surface);display:flex;flex-direction:column;gap:3px;font-size:12.5px;color:var(--ink-2)}
+.stp b{color:var(--ink);font-size:13px}
+.stp .who2{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--accent-ink)}
+.stp.cl .who2{color:var(--claude-o)}
+.stp.done{border-color:color-mix(in oklab,var(--accent),transparent 55%)}
+.stp.now{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.doc{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:22px 26px;font:16px/1.7 Georgia,"Times New Roman",serif;color:var(--ink);max-width:68ch}
+.doc .lbl{font:600 12px var(--body);color:var(--ink-3);margin-bottom:10px;display:flex;gap:8px;align-items:center}
+.doc mark{background:var(--accent-soft);color:inherit;border-radius:3px;padding:0 2px}
+.next{display:flex;flex-wrap:wrap;gap:8px}
+.next .btn .tag{font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:999px;background:var(--amber-soft);color:var(--amber)}
+.stats{display:flex;gap:18px;flex-wrap:wrap;font-size:13px;color:var(--ink-2)}
+.stats b{color:var(--ink);font-family:var(--display);font-size:18px;display:block}
+
+/* money view */
+.chart svg{display:block;width:100%;height:auto}
+.barrow{display:grid;grid-template-columns:150px 1fr 60px;gap:10px;align-items:center;padding:7px 0;font-size:13px}
+.barrow .tr{height:11px;background:var(--sunk);border-radius:0 4px 4px 0}
+.barrow .fl{height:100%;background:var(--accent);border-radius:0 4px 4px 0}
+.barrow .v{text-align:right;color:var(--ink-2)}
+.find{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:9px 0;border-top:1px solid var(--line);font-size:13.5px}
+.find:first-child{border-top:0;padding-top:0}
+.find .amt{font-weight:700;color:var(--amber);text-align:right}
+.find small{color:var(--ink-3);font-size:12px}
+
+/* explainer */
+.rules{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.rules div{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+.rules b{display:block;font-family:var(--display);font-size:16px;margin-bottom:4px}
+.rules p{color:var(--page-muted);font-size:14px}
+
+@media (prefers-reduced-motion:reduce){.wave,.mark .ring,.think img{animation:none}}
+@media (max-width:1180px){.win{grid-template-columns:minmax(300px,380px) minmax(0,1fr)}.cside{display:none}.track{grid-template-columns:1fr 1fr}}
+@media (max-width:900px){.win{grid-template-columns:1fr;grid-template-rows:40px auto auto;height:auto}.chat{border-right:0;border-bottom:1px solid var(--c-line);min-height:460px}.view{min-height:640px}.hero,.duo{grid-template-columns:1fr}.moments,.rules{grid-template-columns:1fr}.ctop .lights{margin-right:12px}}
+/* round 2: views, quiet logo, calm animation */
+.vbar .logo{border:0;background:transparent;padding:0;cursor:pointer}
+.vhead h2{font-size:22px;letter-spacing:-.01em}
+.vhead p{color:var(--ink-2);font-size:13.5px;margin-top:4px;max-width:64ch}
+.vhead.row{display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap}
+.prog .sb{flex:none;height:7px}
+.prog{margin-left:auto;min-width:200px;display:flex;flex-direction:column;gap:6px;font-size:13px}
+.sb{display:block;flex:1;height:7px;border-radius:4px;background:var(--sunk);overflow:hidden;min-width:60px}
+.sb i{display:block;height:100%;background:var(--accent);border-radius:4px}
+.crewgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.bot{padding:14px 16px;display:flex;flex-direction:column;gap:8px}
+.bot .bt{display:flex;align-items:center;gap:8px}
+.bot .bt b,.bot.add b{font-family:var(--display);font-size:15px}
+.bot .bt .pill{margin-left:auto}
+.bot p{font-size:13px;color:var(--ink-2)}
+.bot .score{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--ink-3)}
+.bot .btn{align-self:flex-start}
+.bot.add{border-style:dashed;background:transparent}
+.meterline{display:flex;align-items:center;gap:10px;font-size:12.5px;color:var(--ink-3)}
+.meterline b{color:var(--ink)}
+.ss{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.ss li{display:grid;grid-template-columns:30px minmax(0,1fr) auto;gap:12px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:12px 14px}
+.ss li b{font-family:var(--display);font-size:14.5px}
+.ss li p{color:var(--ink-2);font-size:13px;margin-top:1px}
+.ss .sn{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font:700 12px var(--display);border:1.5px solid var(--line-strong);color:var(--ink-3)}
+.ss li.done .sn{background:var(--accent);border-color:var(--accent);color:#fff}
+.ss li.now{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.ss li.now .sn{border-color:var(--accent);color:var(--accent-ink)}
+.ss li:not(.done):not(.now){opacity:.85}
+.les{display:inline-block;margin:6px 6px 0 0;font-size:12px;font-weight:600;color:var(--accent-ink);background:var(--accent-soft);border-radius:999px;padding:2px 9px}
+.extras{font-size:13px;color:var(--ink-3)}
+.lessons .lw{display:flex;align-items:center;gap:10px;padding:7px 0;border-top:1px solid var(--line);font-size:13.5px}
+.lessons .lw:first-child{border-top:0;padding-top:0}
+.lessons .lw::before{content:"";width:14px;height:14px;border-radius:50%;background:var(--accent);box-shadow:inset 0 0 0 3px var(--surface);border:1.5px solid var(--accent);flex:none}
+.lessons .lw.no{color:var(--ink-3)}
+.lessons .lw.no::before{background:transparent;border-color:var(--line-strong)}
+.back{border:0;background:transparent;color:var(--accent-ink);font:600 13px var(--body);padding:0;cursor:pointer;align-self:flex-start}
+.btn[disabled]{opacity:.55;cursor:default}
+/* the talking logo: still until tapped, slow ripples while listening */
+.mark .ring{animation:none!important;opacity:0}
+.hero.live .mark .ring{animation:ripple 3s ease-out infinite!important}
+.hero.live .mark .ring:nth-child(2){animation-delay:1s!important}
+.hero.live .mark .ring:nth-child(3){animation-delay:2s!important}
+@media (max-width:900px){.crewgrid{grid-template-columns:1fr}}
+@media (max-width:560px){.ss li{grid-template-columns:28px minmax(0,1fr)}.ss li > :last-child{grid-column:2;justify-self:start}}
+.one{background:var(--surface);border:1px solid var(--accent);box-shadow:0 0 0 4px var(--accent-soft);border-radius:16px;padding:22px 24px;display:flex;flex-direction:column;gap:10px;max-width:720px}
+.one .dots{display:flex;gap:6px}
+.one .dots i{width:26px;height:6px;border-radius:3px;background:var(--sunk);display:block}
+.one .dots i.d{background:var(--accent)}
+.one .dots i.c{background:color-mix(in oklab,var(--accent),transparent 50%)}
+.one .stepof{font-size:12.5px;color:var(--ink-3);font-weight:600}
+.one h3{font-family:var(--display);font-size:24px;letter-spacing:-.01em}
+.one p{color:var(--ink-2);font-size:14.5px;max-width:60ch}
+.one ul{margin:0;padding-left:1.2em;color:var(--ink-2);font-size:14px;display:flex;flex-direction:column;gap:4px}
+.one .acts{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:6px}
+.lesbtn{display:inline-flex;align-items:center;gap:10px;border:0;background:transparent;color:var(--accent-ink);font:600 13px var(--body);cursor:pointer;padding:0}
+.lesbtn .th2{width:64px;height:36px;border-radius:6px;background:url(assets/latest-video.jpg) center/cover;flex:none}
+
+html,body{height:100%}
+body{padding:0;background:var(--ground)}
+.view.app{min-height:100vh}
+.sample{display:inline-block;font:600 11px var(--body);color:var(--ink-3);background:var(--sunk);border-radius:5px;padding:2px 7px;margin-left:8px}
+.toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--ink);color:var(--surface);border-radius:10px;padding:9px 14px;font:600 13px var(--body);opacity:0;transition:opacity .2s;pointer-events:none;z-index:9}
+.toast.on{opacity:1}
+</style></head><body>
+    <section class="view app" aria-label="YouCloned view">
+      <div class="vbar">
+        <button class="logo" type="button" data-m="home" aria-label="YouCloned home"><img class="lg-lt" src="assets/youcloned-logo-blue.png" alt="YouCloned"><img class="lg-dk" src="assets/youcloned-logo-blue-dark.png" alt="YouCloned"></button>
+        <div class="crumbs" role="tablist"><button type="button" data-m="home" class="on">Dashboard</button><button type="button" data-m="money">Money</button><button type="button" data-m="crew">Crew</button><button type="button" data-m="codex">Codex</button><button type="button" data-m="setup">Setup</button><button type="button" data-m="learn">Learn</button></div>
+        <span class="sp"></span>
+      </div>
+
+      <!-- HOME -->
+      <div class="vbody" data-v="home">
+        <div class="hero" id="hero">
+          <div>
+            <div class="who">
+              <button class="mark" type="button" id="talk" aria-label="Talk to your clone"><span class="ring"></span><span class="ring"></span><span class="ring"></span><img src="assets/youcloned-mark-white.png" alt=""></button>
+              <div><h2>Good morning, <span id="who">Jon</span></h2><div class="sub" id="talkhint">Type in Claude, or tap a job</div></div>
+            </div>
+            <div class="today">
+              <div><i></i>Three emails need you</div>
+              <div><i></i>Four support drafts are ready</div>
+              <div><i></i>Garden Course launch: VSL lead is next</div>
+            </div>
+          </div>
+          <div class="meters">
+            <div class="meter"><svg class="g" viewBox="0 0 100 100" aria-hidden="true"><defs><clipPath id="c1"><circle cx="50" cy="50" r="44"/></clipPath></defs><circle cx="50" cy="50" r="44" fill="rgba(255,255,255,.1)"/><g clip-path="url(#c1)"><g class="wave"><path d="M0 64 Q15 58 30 64 T60 64 T90 64 T120 64 T150 64 T180 64 T210 64 T240 64 V100 H0 Z" fill="#e59672"/></g></g></svg><div><div class="num"><span id="claudePct">34</span><small>%</small></div><div class="l" id="claudeL">Claude plan · this 5 hours</div></div></div>
+            <div class="meter"><svg class="g" viewBox="0 0 100 100" aria-hidden="true"><defs><clipPath id="c2"><circle cx="50" cy="50" r="44"/></clipPath></defs><circle cx="50" cy="50" r="44" fill="rgba(255,255,255,.1)"/><g clip-path="url(#c2)"><g class="wave" style="animation-duration:7.5s"><path d="M0 62 Q15 56 30 62 T60 62 T90 62 T120 62 T150 62 T180 62 T210 62 T240 62 V100 H0 Z" fill="#8fb6f4"/></g></g></svg><div><div class="num">38<small>%</small></div><div class="l">Codex plan · resets Monday</div></div></div>
+            <div class="meter"><span class="wl" aria-hidden="true"><svg viewBox="0 0 96 96"><rect x="12" y="24" width="72" height="54" rx="12" fill="none" stroke="#fff" stroke-width="6"/><path d="M20 24l38-10c4-1 8 2 8 6v4" fill="none" stroke="#fff" stroke-width="6" stroke-linejoin="round"/><g stroke="#fff" stroke-width="6" stroke-linecap="round"><path d="M25 43h26"/><path d="M25 56h18"/></g><rect x="60" y="44" width="24" height="18" rx="6" fill="#fff"/></svg></span><div><div class="num" id="words">82,360</div><div class="l">BNSN words</div></div></div>
+          </div>
+        </div>
+
+        <div class="duo">
+          <div class="panel"><div class="ph"><span class="hic" style="--hc:var(--accent)"><svg viewBox="0 0 24 24"><path d="M12 3v18M16 7.5c0-1.9-1.8-3-4-3s-4 1.1-4 3 1.8 2.6 4 3 4 1.2 4 3.2-1.8 3.3-4 3.3-4-1.2-4-3.1"/></svg></span><h2>Made or saved this week</h2><span class="sample">Sample</span></div>
+            <div class="pb"><div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><span class="num big">$7,514</span><span class="pill">Up 17%</span></div>
+              <div class="mini-split"><span><i style="background:var(--accent)"></i>Sales $4,120</span><span><i style="background:var(--violet)"></i>Time $3,180</span><span><i style="background:var(--amber)"></i>Bills $214</span></div></div></div>
+          <div class="panel"><div class="ph"><span class="hic" style="--hc:var(--amber)"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.4"/><path d="M3.5 19c.7-3 2.8-4.5 5.5-4.5s4.8 1.5 5.5 4.5M15 14.3c2.4 0 4.2 1.3 5 3.7"/></svg></span><h2>Your crew</h2><span class="sample">Sample</span><span class="meta">4 need you</span></div>
+            <div class="pb">
+              <div class="need"><div><b>Inbox helper</b><small>Sorted 38 emails</small></div><span class="pill warn">3 need you</span></div>
+              <div class="need"><div><b>Support helper</b><small>Answers from your rules</small></div><span class="pill">4 drafts</span></div>
+              <div class="need"><div><b>Comment helper</b><small>Skipped two trolls</small></div><span class="pill">12 drafts</span></div>
+            </div></div>
+        </div>
+
+        <div class="panel"><div class="ph"><span class="hic" style="--hc:var(--accent)"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span><h2>Your BNSN apps</h2></div>
+          <div class="pb"><div class="apps">
+            <div class="app"><div class="plate"><img src="assets/logo-bnsn-white.png" alt="BNSN"></div><button class="btn" type="button">Open</button></div>
+            <div class="app"><div class="plate"><img src="assets/logo-bookbuilder-white.png" alt="BookBuilder"></div><button class="btn" type="button">Open</button></div>
+            <div class="app"><div class="plate"><img src="assets/logo-improver-white.png" alt="Improver"></div><button class="btn" type="button">Open</button></div>
+            <div class="app"><div class="plate"><img src="assets/logo-coursebuilder-white.png" alt="CourseBuilder"></div><button class="btn primary" type="button">Get it</button></div>
+            <div class="app"><div class="plate"><span class="ob"><span><svg viewBox="0 0 24 24"><circle cx="7" cy="12" r="3"/><circle cx="17" cy="12" r="3"/><path d="M10 12h4"/></svg></span>OfferBuilder</span></div><button class="btn primary" type="button">Get it</button></div>
+            <div class="app"><div class="plate"><img src="assets/logo-aic-white.png" alt="AI Collective"></div><button class="btn primary" type="button">Join</button></div>
+          </div></div></div>
+
+        <div class="panel"><div class="ph"><span class="hic" style="--hc:var(--rose)"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></span><h2>New from Jon</h2></div>
+          <div class="pb vid"><div class="th" aria-hidden="true"></div><div><b>How To Write The Story In A Video Sales Letter (VSL) With AI: Step 2 of 9</b><p>The skill that writes your story section is ready.</p><button class="btn sm primary" type="button">Write my story section</button></div></div></div>
+      </div>
+
+      <!-- JOB -->
+      <div class="vbody" data-v="job" hidden>
+        <button class="back" type="button" data-m="home">‹ Back to your day</button>
+        <div class="jobhead"><div><h2>VSL lead</h2><p>Backyard Garden Course · started from Claude a minute ago</p></div><span class="sp"></span><span class="pill">Passed every check</span></div>
+        <div class="track">
+          <div class="stp done"><span class="who2">SkillKey</span><b>Brief</b>Jon's method, for this job</div>
+          <div class="stp done cl"><span class="who2">Your Claude</span><b>Draft</b>Written on your plan</div>
+          <div class="stp done"><span class="who2">SkillKey</span><b>Jon's checklist</b>Two fixes made</div>
+          <div class="stp done"><span class="who2">Codex</span><b>Second opinion</b>No problems found</div>
+        </div>
+        <div class="doc">
+          <div class="lbl">Your lead · draft 2</div>
+          <p>If you've ever planted tomatoes in May and pulled up nothing but leaves in August, the problem was never your thumb, and I can prove it in the next four minutes.</p>
+          <p style="margin-top:12px">Because the reason most backyard gardens fail has nothing to do with sun, water or seeds. It's <mark>one mistake you make before you plant anything</mark>, and once you see it, you'll never lose another season.</p>
+        </div>
+        <div class="stats"><span><b>1,850</b>words from your wallet</span><span><b>1.5 hours</b>saved</span><span><b>$180</b>at your rate</span></div>
+        <div class="next">
+          <button class="btn primary" type="button">Write the story section next</button>
+          <button class="btn" type="button">Save to my project</button>
+          <button class="btn" type="button">Make it sell harder with Improver</button>
+          <button class="btn" type="button">Turn it into a course <span class="tag">Get CourseBuilder</span></button>
+        </div>
+      </div>
+
+      <!-- MONEY -->
+      <div class="vbody" data-v="money" hidden>
+        <div class="panel"><div class="ph"><span class="hic" style="--hc:var(--accent)"><svg viewBox="0 0 24 24"><path d="M12 3v18M16 7.5c0-1.9-1.8-3-4-3s-4 1.1-4 3 1.8 2.6 4 3 4 1.2 4 3.2-1.8 3.3-4 3.3-4-1.2-4-3.1"/></svg></span><h2>Made or saved this week</h2><span class="sample">Sample</span><span class="meta">Sales from Stripe · hours from your jobs</span></div>
+          <div class="pb"><div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><span class="num big">$7,514</span><span class="pill">Up 17% on last week</span></div>
+            <div class="mini-split"><span><i style="background:var(--accent)"></i>Sales $4,120</span><span><i style="background:var(--violet)"></i>Time saved $3,180 (26.5 hours at $120)</span><span><i style="background:var(--amber)"></i>Bills found $214</span></div>
+            <div class="chart" id="trend" style="margin-top:12px"></div></div></div>
+        <div class="duo">
+          <div class="panel"><div class="ph"><span class="hic" style="--hc:var(--accent)"><svg viewBox="0 0 24 24"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></svg></span><h2>Sales by product</h2><span class="sample">Sample</span></div><div class="pb" id="bars"></div></div>
+          <div class="panel"><div class="ph"><span class="hic" style="--hc:var(--amber)"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></svg></span><h2>Money finder</h2><span class="sample">Sample</span></div>
+            <div class="pb">
+              <div class="find"><b>Old email tool</b><span class="amt">$183/mo</span><small>Your list moved in June</small></div>
+              <div class="find"><b>Zoom Pro</b><span class="amt">$16/mo</span><small>No meetings in 60 days</small></div>
+              <div class="find"><b>Canva Pro</b><span class="amt">$15/mo</span><small>Last used 94 days ago</small></div>
+            </div></div>
+        </div>
+      </div>
+      <!-- CREW -->
+      <div class="vbody" data-v="crew" hidden>
+        <div class="vhead"><h2>Your crew</h2><span class="sample">Sample</span><p>Each helper has one job, a playbook and a passed test. None of them can send, post or spend without your OK.</p></div>
+        <div class="crewgrid">
+          <div class="panel bot"><div class="bt"><b>Inbox helper</b><span class="pill warn">3 need you</span></div><p>Sorts Gmail every 30 minutes and drafts replies in your voice.</p><div class="score"><span class="sb"><i style="width:99%"></i></span>412 of 416 test questions</div><button class="btn sm primary" type="button">Review 3 emails</button></div>
+          <div class="panel bot"><div class="bt"><b>Support helper</b><span class="pill">4 drafts</span></div><p>Answers customer questions from your rules. Hands refunds to you.</p><div class="score"><span class="sb"><i style="width:99.7%"></i></span>1,212 of 1,216 test questions</div><button class="btn sm primary" type="button">Review 4 drafts</button></div>
+          <div class="panel bot"><div class="bt"><b>Comment helper</b><span class="pill">12 drafts</span></div><p>Drafts YouTube replies, skips trolls and arguments.</p><div class="score"><span class="sb"><i style="width:98%"></i></span>196 of 200 test questions</div><button class="btn sm" type="button">Review 12 replies</button></div>
+          <div class="panel bot"><div class="bt"><b>Clip cutter</b><span class="pill">Waiting</span></div><p>Cuts 20 clips from every new video for Shorts and Reels.</p><div class="score"><span class="sb"><i style="width:100%"></i></span>40 of 40 test clips</div></div>
+          <div class="panel bot"><div class="bt"><b>Watchdog</b><span class="pill">All on time</span></div><p>Checks every helper ran and tells you when one didn't.</p><div class="score"><span class="sb"><i style="width:100%"></i></span>25 of 25 test checks</div></div>
+          <div class="panel bot add"><b>Add a helper</b><p>Pick one job. Your clone writes the playbook and the hardest test it can.</p><button class="btn sm" type="button">Add a helper</button></div>
+        </div>
+      </div>
+
+      <!-- CODEX -->
+      <div class="vbody" data-v="codex" hidden>
+        <div class="vhead"><h2>Codex</h2><p>A second AI that checks Claude's work before you use it. It runs on your own ChatGPT plan.</p></div>
+        <div class="duo">
+          <div class="panel"><div class="ph"><h2>Recent second opinions</h2><span class="sample">Sample</span><span class="meta">This week</span></div>
+            <div class="pb">
+              <div class="need"><div><b>VSL lead, Garden Course</b><small>No problems found</small></div><span class="pill">Passed</span></div>
+              <div class="need"><div><b>Sales page, Seed Starter Kit</b><small>Refund said 30 days in one place, 60 in another</small></div><span class="pill warn">Fixed</span></div>
+              <div class="need"><div><b>Welcome email 3</b><small>A link pointed to the old checkout</small></div><span class="pill warn">Fixed</span></div>
+            </div></div>
+          <div class="panel"><div class="ph"><h2>Check anything</h2></div>
+            <div class="pb" style="display:flex;flex-direction:column;gap:12px">
+              <p style="color:var(--ink-2);font-size:13.5px">Pick a page, an email or a file, and Codex reads it for mistakes, contradictions and broken links.</p>
+              <button class="btn primary" type="button">Check something with Codex</button>
+              <div class="meterline"><span>Codex plan this week</span><span class="sb"><i style="width:38%"></i></span><b>38%</b></div>
+            </div></div>
+        </div>
+      </div>
+
+      <!-- SETUP -->
+      <div class="vbody" data-v="setup" hidden>
+        <div class="vhead row"><div><h2>Set up your clone</h2><p>About ten minutes. Each step is one click and YouCloned does the work. Watch Jon's lesson for any step, or skip it.</p></div><div class="prog"><b>3 of 9 done</b><span class="sb"><i style="width:33%"></i></span></div></div>
+        <div class="one">
+          <div class="dots" aria-label="Step 4 of 9"><i class="d"></i><i class="d"></i><i class="d"></i><i class="c"></i><i></i><i></i><i></i><i></i><i></i></div>
+          <span class="stepof">Step 4 of 9</span>
+          <h3>Your database</h3>
+          <p>Your clone needs a place to keep your dashboard numbers and your crew's memory. YouCloned sets up a free Supabase account for you. It takes about a minute.</p>
+          <ul>
+            <li>Opens Supabase so you can sign up with Google or your email</li>
+            <li>Creates your clone's database and connects it</li>
+            <li>Saves the connection where your clone can find it, never in a shared file</li>
+          </ul>
+          <div class="acts"><button class="btn primary" type="button">Do it for me</button><button class="btn" type="button">Skip for now</button><button class="lesbtn" type="button"><span class="th2" aria-hidden="true"></span>Watch Jon's lesson: Supabase</button></div>
+        </div>
+        <button class="back" type="button" id="allsteps">See all 9 steps</button>
+        <ol class="ss" id="steplist" hidden>
+          <li class="done"><span class="sn">1</span><div><b>Your clone's home</b><p>Pick a folder. It becomes your Obsidian vault, where your clone keeps your notes, rules and work.</p><span class="les">Lesson: Obsidian</span></div><span class="pill">Done</span></li>
+          <li class="done"><span class="sn">2</span><div><b>Your tools</b><p>Installs Obsidian, Git, Node, Python and the video tools your skills use. Skips anything you already have.</p><span class="les">Lesson: Claude Code</span><span class="les">Lesson: The AI Stack</span></div><span class="pill">Done</span></li>
+          <li class="done"><span class="sn">3</span><div><b>Back up to GitHub</b><p>A private copy of your clone folder, saved every hour.</p><span class="les">Lesson: Git and GitHub</span></div><span class="pill">Done</span></li>
+          <li class="now"><span class="sn">4</span><div><b>Your database</b><p>A free Supabase account for your dashboard numbers and your crew's memory.</p><span class="les">Lesson: Supabase</span></div><button class="btn sm primary" type="button">Set it up</button></li>
+          <li><span class="sn">5</span><div><b>Jon's skills and your apps</b><p>Connect SkillKey (free) for every skill Jon releases, plus BNSN, BookBuilder or CourseBuilder if you own them.</p><span class="les">Lesson: Workflow Integration</span></div><button class="btn sm" type="button" disabled>Connect</button></li>
+          <li><span class="sn">6</span><div><b>Codex, your second opinion</b><p>Connect Codex with your ChatGPT plan so it checks Claude's work. Skip it if you don't use ChatGPT.</p></div><button class="btn sm" type="button" disabled>Connect</button></li>
+          <li><span class="sn">7</span><div><b>Teach your clone</b><p>A ten-minute interview: your voice, brand, offers and two pieces of your writing.</p><span class="les">Lesson: Intro and the AI Clone Guide</span></div><button class="btn sm" type="button" disabled>Start</button></li>
+          <li><span class="sn">8</span><div><b>Turn on protection</b><p>Blocks passwords and keys from shared files, and stops overnight helpers from approving anything on their own.</p></div><button class="btn sm" type="button" disabled>Turn on</button></li>
+          <li><span class="sn">9</span><div><b>Turn on your crew</b><p>Connect Gmail and YouTube, then each helper passes its test and starts.</p><span class="les">Lesson: Give every bot one job</span></div><button class="btn sm" type="button" disabled>Turn on</button></li>
+        </ol>
+        <p class="extras">Optional: NotebookLM and Cursor, each with its lesson, from Learn.</p>
+      </div>
+
+      <!-- LEARN -->
+      <div class="vbody" data-v="learn" hidden>
+        <div class="vhead"><h2>Learn</h2><p>Every lesson comes with a "Set it up for me" button, so you never have to do it by hand.</p></div>
+        <div class="panel"><div class="ph"><h2>New from Jon</h2></div>
+          <div class="pb vid"><div class="th" aria-hidden="true"></div><div><b>How To Write The Story In A Video Sales Letter (VSL) With AI: Step 2 of 9</b><p>The skill that writes your story section is ready.</p><button class="btn sm primary" type="button">Write my story section</button></div></div></div>
+        <div class="duo">
+          <div class="panel"><div class="ph"><h2>The YouCloned course</h2><span class="meta">7 of 9 watched</span></div>
+            <div class="pb lessons"><div class="lw">Intro and the AI Clone Guide</div><div class="lw">Obsidian</div><div class="lw">Claude Code</div><div class="lw">Git and GitHub</div><div class="lw">Workflow Integration</div><div class="lw">Supabase</div><div class="lw">The AI Stack</div><div class="lw no">Cursor</div><div class="lw no">NotebookLM</div></div></div>
+          <div class="panel"><div class="ph"><h2>More from Jon</h2></div>
+            <div class="pb" style="display:flex;flex-direction:column;gap:8px">
+              <button class="btn" type="button">AI Clone Guide PDF</button>
+              <button class="btn" type="button">Over My Shoulder</button>
+              <button class="btn" type="button">YouCloned community</button>
+            </div></div>
+        </div>
+      </div>
+    </section>
+<script>
+(function () {
+  var hero = document.getElementById("hero");
+  function show(m) {
+    document.querySelectorAll(".crumbs [data-m]").forEach(function (b) { b.classList.toggle("on", b.dataset.m === m); });
+    document.querySelectorAll("[data-v]").forEach(function (v) { v.hidden = v.dataset.v !== m; });
+    if (m !== "home") hero.classList.remove("live");
+  }
+  document.querySelectorAll("[data-m]").forEach(function (b) { b.addEventListener("click", function () { show(b.dataset.m); }); });
+  var all = document.getElementById("allsteps");
+  if (all) all.addEventListener("click", function () { var l = document.getElementById("steplist"); l.hidden = !l.hidden; all.textContent = l.hidden ? "See all 9 steps" : "Hide the list"; });
+  document.getElementById("talk").addEventListener("click", function () { hero.classList.toggle("live"); });
+
+  // Buttons that start work send it to Claude's chat through the YouCloned add-on.
+  var toast = document.createElement("div"); toast.className = "toast"; document.body.appendChild(toast);
+  function say(t) { toast.textContent = t; toast.classList.add("on"); setTimeout(function () { toast.classList.remove("on"); }, 2600); }
+  function send(text) {
+    fetch("/do", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: text }) })
+      .then(function (r) { say(r.ok ? "Sent to your Claude chat" : "Could not reach YouCloned"); })
+      .catch(function () { say("Could not reach YouCloned"); });
+  }
+  document.querySelectorAll("button").forEach(function (b) {
+    var t = b.textContent.trim();
+    var map = {
+      "Write my story section": "Write the story section of my VSL with Jon's VSL Story Writer skill.",
+      "Check something with Codex": "/youcloned codex",
+      "Review 3 emails": "/youcloned crew inbox",
+      "Review 4 drafts": "/youcloned crew support",
+      "Do it for me": "/youcloned setup"
+    };
+    if (map[t]) b.addEventListener("click", function () { send(map[t]); });
+  });
+
+  // Live numbers from the add-on: plan usage, words, name.
+  function fmt(n) { return Number(n).toLocaleString("en-US"); }
+  function load() {
+    fetch("/state.json", { cache: "no-store" }).then(function (r) { return r.ok ? r.json() : null; }).then(function (s) {
+      if (!s) return;
+      if (s.name) document.getElementById("who").textContent = s.name;
+      if (s.claudePct != null) document.getElementById("claudePct").textContent = Math.round(s.claudePct);
+      if (s.claudeLabel) document.getElementById("claudeL").textContent = s.claudeLabel;
+      if (s.words != null) document.getElementById("words").textContent = fmt(s.words);
+    }).catch(function () {});
+  }
+  load(); setInterval(load, 15000);
+
+  // money trend: one series (sample)
+  var weeks = ["Aug 16","Aug 23","Aug 30","Sep 6","Sep 13","Sep 20","Sep 27","This week"];
+  var vals = [3120, 4010, 3640, 5180, 4790, 6050, 6420, 7514];
+  var W = 640, H = 150, pl = 40, pr = 10, pt = 8, pb = 22, max = 8000;
+  var x = function (i) { return pl + i * (W - pl - pr) / (vals.length - 1); };
+  var y = function (v) { return pt + (1 - v / max) * (H - pt - pb); };
+  var line = vals.map(function (v, i) { return (i ? "L" : "M") + x(i).toFixed(1) + " " + y(v).toFixed(1); }).join(" ");
+  var area = line + " L" + x(vals.length - 1) + " " + y(0) + " L" + x(0) + " " + y(0) + " Z";
+  var grid = [0, 4000, 8000].map(function (g) { return '<line x1="' + pl + '" x2="' + (W - pr) + '" y1="' + y(g) + '" y2="' + y(g) + '" stroke="var(--line)"/><text x="' + (pl - 6) + '" y="' + (y(g) + 4) + '" text-anchor="end" font-size="11" fill="var(--ink-3)">$' + g / 1000 + 'k</text>'; }).join("");
+  var tr = document.getElementById("trend");
+  if (tr) tr.innerHTML = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Made or saved per week">' + grid + '<path d="' + area + '" fill="var(--accent-soft)"/><path d="' + line + '" fill="none" stroke="var(--accent)" stroke-width="2"/><circle cx="' + x(7) + '" cy="' + y(7514) + '" r="5" fill="var(--accent)" stroke="var(--surface)" stroke-width="2"/></svg>';
+  var bars = document.getElementById("bars");
+  if (bars) [["Backyard Garden Course", 2970], ["Seed Starter Kit", 780], ["Coaching call", 370]].forEach(function (p) {
+    var r = document.createElement("div"); r.className = "barrow";
+    var n = document.createElement("span"); n.textContent = p[0];
+    var t = document.createElement("div"); t.className = "tr"; var f = document.createElement("div"); f.className = "fl"; f.style.width = (p[1] / 3000 * 100) + "%"; t.appendChild(f);
+    var v = document.createElement("span"); v.className = "v"; v.textContent = "$" + fmt(p[1]);
+    r.append(n, t, v); bars.appendChild(r);
+  });
+})();
+</script>
+</body></html>

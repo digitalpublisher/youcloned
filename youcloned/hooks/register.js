@@ -37,6 +37,101 @@ const notCrew = new Set()
 const gatePassed = new Set() // tool_use_ids of crew calls the gate allowed
 let skills = []             // the skills this plugin ships
 let skillKey = false        // the SkillKey connector is on in this session
+let cloneHere = false       // this session runs in the customer's clone folder
+let live = { claudePct: null, claudeLabel: '', words: null } // numbers the strip and dashboard show
+
+const DASH_PORT = 4600
+const DASH_URL = 'http://127.0.0.1:' + DASH_PORT
+// One-tap jobs: the strip above Claude's message box and the dashboard both start these.
+const JOBS = [
+  { label: 'VSL lead', text: 'Write my VSL lead with Jon\'s VSL Lead Writer skill. Ask me which offer first if I have more than one.' },
+  { label: 'Sales page', text: 'Build a sales page for one of my offers with Jon\'s sales page skill. Ask me which offer first if I have more than one.' },
+  { label: 'YouTube video', text: 'Help me make my next YouTube video: topic, script in my voice, then the edit and two thumbnails.' },
+  { label: 'Clear my inbox', text: '/youcloned crew inbox' },
+]
+
+function dataDir() {
+  return home + '/.youcloned'
+}
+
+// Runs a job from the strip or the dashboard: YouCloned commands run here, anything else goes to the chat as the owner's words.
+async function runJob($, text) {
+  const t = String(text || '').trim()
+  if (!t) return
+  const m = /^\/youcloned\s*(.*)$/i.exec(t)
+  if (!m) { $.prompt.submit({ text: t, asUser: true }); return }
+  const args = m[1].trim()
+  const word = args.split(/\s+/)[0].toLowerCase()
+  if (word === 'setup') return startSetup($)
+  if (word === 'codex') return codexButton($)
+  if (word === 'crew') { $.ui.toast(await runCrew($, (args.split(/\s+/)[1] || '').toLowerCase())); return }
+}
+
+// Reads jobs the dashboard queued and starts them.
+async function drainJobs($) {
+  const file = dataDir() + '/jobs.jsonl'
+  if (!(await $.fs.exists(file))) return
+  const text = await $.fs.read(file)
+  if (!text.trim()) return
+  await $.fs.write(file, '')
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue
+    try { await runJob($, JSON.parse(line).text) } catch {}
+  }
+}
+
+// Plan usage from Claude itself, words from SkillKey; written where the dashboard reads them.
+async function refreshLive($, withWords) {
+  try {
+    const u = await $.session.usage()
+    const w = (u.rateLimits || []).find(r => r.kind === 'five_hour') || (u.rateLimits || [])[0]
+    if (w) {
+      live.claudePct = w.percentUsed
+      let label = 'Claude plan · this 5 hours'
+      if (w.resetsAt) {
+        const d = new Date(w.resetsAt)
+        label = 'Claude plan · resets ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+      }
+      live.claudeLabel = label
+    }
+  } catch {}
+  if (withWords) {
+    try {
+      const r = await $.mcp.call('claude.ai SkillKey', 'word_balance', {})
+      const txt = (r.content || []).map(c => c.text || '').join(' ')
+      const m = txt.replace(/,/g, '').match(/(\d+)\s*words/i) || txt.replace(/,/g, '').match(/(\d{3,})/)
+      if (m) live.words = Number(m[1])
+    } catch {}
+  }
+  try {
+    const name = project ? ((await readRules($)) || '').match(/^#+\s*Who I am\s*\n+([^\n]+)/m) : null
+    await $.fs.write(dataDir() + '/state.json', JSON.stringify({ ...live, name: name ? name[1].trim().split(/[ ,]/)[0] : undefined, at: await $.clock.now() }))
+  } catch {}
+  $.ui.invalidate('ui.render')
+}
+
+async function dashboardUp($) {
+  try { const r = await $.http.fetch(DASH_URL + '/state.json'); return r && r.status === 200 } catch { return false }
+}
+
+// Starts the dashboard server and tells Claude's Browser pane where it is.
+async function startDashboard($, cwd) {
+  if (!(await dashboardUp($))) {
+    try { await $.process.spawn(['python3', $.plugin.root + '/dashboard/server.py', String(DASH_PORT)]) } catch (err) { $.ui.log('dashboard did not start: ' + String(err)) }
+  }
+  const launch = cwd + '/.claude/launch.json'
+  let conf = { version: '0.0.1', configurations: [] }
+  try { if (await $.fs.exists(launch)) conf = JSON.parse(await $.fs.read(launch)) } catch { return }
+  conf.configurations = conf.configurations || []
+  if (!conf.configurations.some(c => c.name === 'YouCloned')) {
+    conf.configurations.push({ name: 'YouCloned', url: DASH_URL, port: DASH_PORT })
+    await $.fs.write(launch, JSON.stringify(conf, null, 2) + '\n')
+  }
+}
+
+function openDashboard($) {
+  $.prompt.submit({ text: 'Open the YouCloned dashboard in the Browser pane: it is the "YouCloned" preview in .claude/launch.json, already running at ' + DASH_URL + '. Just open it; no other work.' })
+}
 
 function crewDir(name) {
   return project ? project + '/crew/' + name : null
@@ -316,6 +411,20 @@ export function register(on) {
     try { await loadSkills($) } catch {}
     try { await refreshDrafts($) } catch {}
     await checkSkillKey($)
+    // YouCloned shows itself only in the clone folder: a folder with the rules file, or the one setup saved.
+    try {
+      const cwd = await $.session.cwd()
+      const rulesHere = await $.fs.exists(cwd + '/' + RULES_NAME)
+      cloneHere = rulesHere || !!(project && (cwd === project || cwd.startsWith(project + '/')))
+      if (rulesHere) project = cwd
+      if (cloneHere && e.isInteractive) {
+        await startDashboard($, cwd)
+        $.clock.every(1500, () => drainJobs($))
+        $.clock.every(20000, () => refreshLive($, false))
+        $.clock.every(300000, () => refreshLive($, true))
+        $.clock.after(2000, () => refreshLive($, true))
+      }
+    } catch (err) { $.ui.log('YouCloned clone check failed: ' + String(err)) }
     try {
       await $.tool.register({
         name: 'save_setup',
@@ -339,7 +448,7 @@ export function register(on) {
         inputSchema: { type: 'object', properties: { question: { type: 'string', description: 'What Codex should check; leave out to check the last piece of work' } } },
       })
     } catch (err) { $.ui.log('codex_check not registered: ' + String(err)) }
-    try { await registerCrew($) } catch (err) { $.ui.log('crew not registered: ' + String(err)) }
+    if (cloneHere) { try { await registerCrew($) } catch (err) { $.ui.log('crew not registered: ' + String(err)) } }
     try {
       await $.command.register({
         name: 'youcloned',
@@ -348,7 +457,7 @@ export function register(on) {
         immediate: true,
       })
     } catch (err) { $.ui.log('/youcloned not registered: ' + String(err)) }
-    if (e.isInteractive) {
+    if (e.isInteractive && cloneHere) {
       // Runs scheduled crew members when their time comes.
       $.clock.every(60000, async () => {
         const now = await $.clock.now()
@@ -357,14 +466,41 @@ export function register(on) {
           if (s.every > 0 && !s.running && now - s.lastRun >= s.every * 60000) await runCrew($, c.name)
         }
       })
-      $.clock.after(1000, () => openPane($, false))
     }
     return next(e)
+  })
+
+  // The YouCloned strip above Claude's message box: plan, words, the dashboard and one-tap jobs.
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (!cloneHere) return next(e)
+    const { Box, Text, Button } = $.ui.resolve(e)
+    const theirs = await next(e)
+    const facts = []
+    if (live.claudePct != null) facts.push('Claude ' + Math.round(live.claudePct) + '%')
+    if (live.words != null) facts.push(Number(live.words).toLocaleString('en-US') + ' words')
+    const strip = Box({ flexDirection: 'column', rowGap: 0, children: [
+      Box({ flexDirection: 'row', columnGap: 2, children: [
+        Text({ bold: true, color: '#3375d7', children: ['YouCloned'] }),
+        Text({ dimColor: true, children: [facts.join(' · ') || 'your clone is on'] }),
+        Button({ key: 'yc-dash', label: 'Dashboard', plain: true, onPress: () => openDashboard($) }),
+      ] }),
+      Box({ flexDirection: 'row', columnGap: 2, children: JOBS.map((j, i) => Button({
+        key: 'yc-job-' + i, label: j.label, hotkey: String(i + 1), plain: true, onPress: () => runJob($, j.text),
+      })) }),
+    ] })
+    return theirs ? Box({ flexDirection: 'column', children: [strip, theirs] }) : strip
+  })
+
+  // Claude's working line says YouCloned is on it.
+  on('ui.render', { component: 'Spinner' }, async ($, e, next) => {
+    if (!cloneHere) return next(e)
+    return next({ ...e, props: { ...e.props, suffix: (e.props.suffix || '') + ' · YouCloned' } })
   })
 
   // Every conversation reads the customer's rules file.
   on('prompt.context', async ($, e, next) => {
     const result = await next(e)
+    if (!cloneHere) return result
     const rules = await readRules($)
     if (!rules) return result
     const block = { name: 'youcloned', text: 'The owner\'s YouCloned rules, from ' + project + '/' + RULES_NAME +
