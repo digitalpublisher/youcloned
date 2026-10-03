@@ -15,7 +15,12 @@ const PANE = {
 } as const
 
 // Stubs for everything session.start touches, with the project already set up.
-function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[]) => unknown, toasts?: string[], lists?: Record<string, string[]>, cwd?: string } = {}) {
+// SkillKey as the desktop app names it (an id) unless a test says otherwise.
+const SK = '4a62845f-77ec-431f-8b76-2d42902a60fb'
+const skTools = (server = SK) => ['list_skills', 'start_skill', 'run_skill', 'word_balance'].map(t => ({ name: 'mcp__' + server + '__' + t, description: '', mcp: true }))
+const fromSk = (body: string) => ({ content: [{ type: 'text', text: 'You are short on words.\n\n<<<YOUCLONED>>>\n' + body + '\n<<<END YOUCLONED>>>\n\nWhen you have everything the steps ask for, call run_skill with skill "x".' }], isError: false })
+
+function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[]) => unknown, toasts?: string[], lists?: Record<string, string[]>, cwd?: string, skillKey?: string | null, mcpCalls?: { server: string, tool: string, args: Record<string, unknown> }[], registered?: { name: string, prompt: string }[] } = {}) {
   const writes = new Map<string, string>()
   const store = new Map<string, unknown>(opts.project ? [['project', opts.project]] : [])
   mock.clock(on)
@@ -27,9 +32,17 @@ function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: 
     : (opts.lists?.[e.path] || []).map(name => ({ name, kind: 'file', size: 1, mtimeMs: 0, isLink: false })) }))
   on('fs.read', ($, e) => ({ value: (opts.files || {})[e.path] ?? (e.path.endsWith('SKILL.md') ? 'description: Set up YouCloned. More.' : 'crew prompt') }))
   on('fs.write', ($, e) => { writes.set(e.path, e.text); return { value: undefined } })
-  on('tool.list', () => ({ value: [] }))
+  const sk = opts.skillKey === undefined ? SK : opts.skillKey
+  on('tool.list', () => ({ value: sk ? skTools(sk) : [] }))
+  on('mcp.call', ($, e) => {
+    opts.mcpCalls?.push(e)
+    if (!sk || (e.server !== sk && e.server !== 'claude.ai SkillKey')) throw new Error('no such server')
+    if (e.tool === 'word_balance') return { value: { content: [{ type: 'text', text: 'Words left: 4,200' }], isError: false } }
+    if (e.tool === 'start_skill') return { value: fromSk('Instructions for ' + e.args.skill) }
+    return { value: { content: [], isError: true } }
+  })
   on('tool.register', () => ({ value: undefined }))
-  on('agent.register', () => ({ value: { agent: 'youcloned:x' } }))
+  on('agent.register', ($, e) => { opts.registered?.push({ name: e.name, prompt: e.prompt }); return { value: { agent: 'youcloned:' + e.name } } })
   on('agent.list', () => ({ value: opts.agents || [] }))
   on('command.register', () => ({ value: undefined }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
@@ -225,4 +238,39 @@ test('after setup YouCloned shows everywhere; /youcloned off and on switch it', 
   const back = await $.command.run({ command: 'youcloned', args: 'on' })
   expect(back.text).toMatch(/on in every Claude session/)
   expect(store.get('everywhere')).toBe(true)
+})
+
+test('crew instructions come from SkillKey, never from a file in the add-on', async ($, on) => {
+  const registered: { name: string, prompt: string }[] = []
+  const mcpCalls: { server: string, tool: string, args: Record<string, unknown> }[] = []
+  sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' }, registered, mcpCalls })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  expect(registered.map(r => r.name).sort()).toEqual(['inbox', 'support'])
+  expect(registered.find(r => r.name === 'support').prompt).toBe('Instructions for youcloned-crew-support')
+  expect(mcpCalls.every(c => c.server === SK)).toBe(true)
+})
+
+test('without SkillKey the crew does not start and says how to connect it', async ($, on) => {
+  const registered: { name: string, prompt: string }[] = []
+  sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' }, skillKey: null, registered })
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: PROJECT })
+  expect(registered.length).toBe(0)
+  const out = await $.command.run({ command: 'youcloned', args: 'crew inbox' })
+  expect(out.text).toMatch(/SkillKey is not connected/)
+})
+
+test('load_setup hands Claude the setup interview from SkillKey, markers and SkillKey notes removed', async ($, on) => {
+  sessionStubs(on)
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  const out = await $.tool.call({ tool: 'mcp__youcloned__load_setup' })
+  expect(out.result).toBe('Instructions for youcloned-setup')
+})
+
+test('SkillKey is found in the terminal by its usual name too', async ($, on) => {
+  const mcpCalls: { server: string, tool: string, args: Record<string, unknown> }[] = []
+  sessionStubs(on, { skillKey: 'claude_ai_SkillKey', mcpCalls })
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  const out = await $.tool.call({ tool: 'mcp__youcloned__load_setup' })
+  expect(mcpCalls[0].server).toBe('claude_ai_SkillKey')
+  expect(out.result).toBe('Instructions for youcloned-setup')
 })

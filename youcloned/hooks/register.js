@@ -4,6 +4,7 @@
 // - The YouCloned pane: Do, Crew, Voice and Skills tabs.
 // - "Check with Codex" runs the customer's own Codex on Claude's work and puts the answer in the chat.
 // - Crew templates (support drafter, inbox sorter) run as subagents behind a safety gate in code.
+// - Jon's instructions (setup interview, crew) live on SkillKey and load when needed, never as files here.
 
 import { judge, denyText } from './gate.js'
 import { RULES_NAME, checkSetup, rulesMarkdown } from './rules.js'
@@ -38,6 +39,8 @@ const notCrew = new Set()
 const gatePassed = new Set() // tool_use_ids of crew calls the gate allowed
 let skills = []             // the skills this plugin ships
 let skillKey = false        // the SkillKey connector is on in this session
+let skillKeyServer = null   // its name for $.mcp.call: "claude.ai SkillKey" in the terminal, an id in the desktop app
+const crewReady = new Set() // crew members registered with their instructions from SkillKey
 let cloneHere = false       // this session runs in the customer's clone folder
 let watched = false         // a person is looking at this session (terminal or desktop app)
 let dashOn = false          // the dashboard and its timers are running for this session
@@ -102,7 +105,7 @@ async function refreshLive($, withWords) {
   } catch {}
   if (withWords) {
     try {
-      const r = await $.mcp.call('claude.ai SkillKey', 'word_balance', {})
+      const r = await skillKeyCall($, 'word_balance', {})
       const txt = (r.content || []).map(c => c.text || '').join(' ')
       const m = txt.replace(/,/g, '').match(/(\d+)\s*words/i) || txt.replace(/,/g, '').match(/(\d{3,})/)
       if (m) live.words = Number(m[1])
@@ -241,14 +244,59 @@ async function loadSkills($) {
   }
 }
 
+// SkillKey is the connector with both start_skill and word_balance. The desktop app names
+// connectors by an id instead of "claude.ai SkillKey", so it is found by its tools.
+function skillKeyFrom(names) {
+  const servers = new Set(names.map(n => (/^mcp__(.+)__word_balance$/.exec(n) || [])[1]).filter(Boolean))
+  for (const n of names) {
+    const m = /^mcp__(.+)__start_skill$/.exec(n)
+    if (m && servers.has(m[1])) return m[1]
+  }
+  return null
+}
+
 async function checkSkillKey($) {
   try {
-    const tools = await $.tool.list()
-    skillKey = tools.some(t => /skillkey/i.test(typeof t === 'string' ? t : t.name || ''))
-  } catch {
-    skillKey = false
+    const names = (await $.tool.list()).map(t => typeof t === 'string' ? t : t.name || '')
+    const found = skillKeyFrom(names)
+    if (found) { skillKeyServer = found; await $.store.set('skillKeyServer', found) }
+  } catch {}
+  if (!skillKeyServer) { const saved = await $.store.get('skillKeyServer'); if (typeof saved === 'string' && saved) skillKeyServer = saved }
+  skillKey = !!skillKeyServer
+}
+
+async function skillKeyCall($, tool, args) {
+  const names = skillKeyServer ? [skillKeyServer] : ['claude.ai SkillKey']
+  if (skillKeyServer && skillKeyServer !== 'claude.ai SkillKey') names.push('claude.ai SkillKey')
+  let last
+  for (const server of names) {
+    try {
+      const r = await $.mcp.call(server, tool, args)
+      if (r && !r.isError) {
+        if (server !== skillKeyServer) { skillKeyServer = server; skillKey = true; await $.store.set('skillKeyServer', server) }
+        return r
+      }
+      last = r
+    } catch (err) { last = err }
+  }
+  throw new Error('SkillKey did not answer: ' + String(last && (last.message || last)).slice(0, 200))
+}
+
+// Jon's instructions for one YouCloned skill, from SkillKey. Only the part between the markers
+// is used, so SkillKey's own notes (word balance, run_skill) never reach the crew.
+async function fromSkillKey($, slug) {
+  try {
+    const r = await skillKeyCall($, 'start_skill', { skill: slug })
+    const text = (r.content || []).map(c => c.text || '').join('\n')
+    const m = /<<<YOUCLONED>>>\n([\s\S]*?)\n<<<END YOUCLONED>>>/.exec(text)
+    return m ? m[1].trim() : null
+  } catch (err) {
+    $.ui.log('SkillKey ' + slug + ': ' + String(err).slice(0, 200))
+    return null
   }
 }
+
+const NEEDS_SKILLKEY = 'YouCloned loads its instructions from SkillKey, and SkillKey is not connected in this Claude app yet. Connect SkillKey (Settings, Connectors), then try again.'
 
 async function readRules($) {
   if (!project) return null
@@ -342,14 +390,18 @@ async function isCrew($, e) {
 
 async function registerCrew($) {
   for (const c of CREW) {
+    if (crewReady.has(c.name)) continue
+    const prompt = await fromSkillKey($, 'youcloned-crew-' + c.name)
+    if (!prompt) continue
     await $.agent.register({
       name: c.name,
       description: 'YouCloned crew, ' + c.title + ': ' + c.what + '. Reads and drafts only.',
-      prompt: await $.fs.read($.plugin.root + '/crew/' + c.name + '.md'),
+      prompt,
       disallowedTools: ['Bash', 'Edit', 'MultiEdit', 'NotebookEdit', 'Agent', 'Task'],
       maxTurns: 60,
       omitClaudeMd: true,
     })
+    crewReady.add(c.name)
   }
 }
 
@@ -358,6 +410,8 @@ async function runCrew($, name) {
   if (!c) return 'There is no crew member called ' + name + '.'
   if (!project) return 'Set up YouCloned first (/youcloned setup), so the crew knows who you are and where to put drafts.'
   if (crew[name].running) return c.title + ' is already working.'
+  if (!crewReady.has(name)) { await checkSkillKey($); try { await registerCrew($) } catch {} }
+  if (!crewReady.has(name)) return NEEDS_SKILLKEY
   const today = new Date(await $.clock.now()).toISOString().slice(0, 10)
   let work = ''
   if (name === 'support') {
@@ -476,6 +530,13 @@ export function register(on) {
     } catch (err) { $.ui.log('save_setup not registered: ' + String(err)) }
     try {
       await $.tool.register({
+        name: 'load_setup',
+        description: 'Loads the YouCloned setup interview from SkillKey. Call it first whenever the person wants to set up or redo YouCloned, then follow what it returns exactly.',
+        inputSchema: { type: 'object', properties: {} },
+      })
+    } catch (err) { $.ui.log('load_setup not registered: ' + String(err)) }
+    try {
+      await $.tool.register({
         name: 'codex_check',
         description: 'Ask the customer\'s own Codex (OpenAI) to check work, read-only. With no question it reviews the uncommitted changes, or your last answer and the files it names. Use it when the customer asks for a second opinion or a Codex check.',
         inputSchema: { type: 'object', properties: { question: { type: 'string', description: 'What Codex should check; leave out to check the last piece of work' } } },
@@ -561,6 +622,22 @@ export function register(on) {
     await refreshDrafts($)
     $.ui.invalidate('ui.render')
     return { result: 'Saved. Rules file: ' + folder + '/' + RULES_NAME + '. Crew folders: ' + folder + '/crew/support and ' + folder + '/crew/inbox. Every new conversation reads the rules file.' }
+  })
+
+  on('tool.call', { tool: 'mcp__youcloned__load_setup' }, async ($) => {
+    if (!skillKeyServer) await checkSkillKey($)
+    const text = await fromSkillKey($, 'youcloned-setup')
+    return { result: text || NEEDS_SKILLKEY + ' Tell the person exactly that, and stop.' }
+  })
+
+  // Learns SkillKey's name the moment Claude itself uses it, for apps whose tool list leaves it out.
+  on('tool.call', { tool: /^mcp__.+__(list_skills|start_skill|run_skill|word_balance)$/ }, async ($, e, next) => {
+    const m = /^mcp__(.+)__(list_skills|start_skill|run_skill|word_balance)$/.exec(e.tool || '')
+    if (m && m[1] !== skillKeyServer && !/youcloned/.test(m[1])) {
+      skillKeyServer = m[1]; skillKey = true
+      try { await $.store.set('skillKeyServer', m[1]) } catch {}
+    }
+    return next(e)
   })
 
   on('tool.call', { tool: 'mcp__youcloned__codex_check' }, async ($, e) => {
