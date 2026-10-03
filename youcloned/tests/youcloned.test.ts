@@ -20,7 +20,7 @@ const SK = '4a62845f-77ec-431f-8b76-2d42902a60fb'
 const skTools = (server = SK) => ['list_skills', 'start_skill', 'run_skill', 'word_balance'].map(t => ({ name: 'mcp__' + server + '__' + t, description: '', mcp: true }))
 const fromSk = (body: string) => ({ content: [{ type: 'text', text: 'You are short on words.\n\n<<<YOUCLONED>>>\n' + body + '\n<<<END YOUCLONED>>>\n\nWhen you have everything the steps ask for, call run_skill with skill "x".' }], isError: false })
 
-function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[]) => unknown, toasts?: string[], lists?: Record<string, string[]>, cwd?: string, skillKey?: string | null, mcpCalls?: { server: string, tool: string, args: Record<string, unknown> }[], registered?: { name: string, prompt: string }[], owns?: (slug: string) => boolean, submitted?: string[], opened?: string[] } = {}) {
+function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[]) => unknown, toasts?: string[], lists?: Record<string, string[]>, cwd?: string, skillKey?: string | null, mcpCalls?: { server: string, tool: string, args: Record<string, unknown> }[], registered?: { name: string, prompt: string }[], owns?: (slug: string) => boolean, submitted?: string[], opened?: string[], browser?: 'displayed' | 'hidden' } = {}) {
   const writes = new Map<string, string>()
   const store = new Map<string, unknown>(opts.project ? [['project', opts.project]] : [])
   const clock = mock.clock(on)
@@ -36,6 +36,10 @@ function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: 
   on('tool.list', () => ({ value: sk ? skTools(sk) : [] }))
   on('mcp.call', ($, e) => {
     opts.mcpCalls?.push(e)
+    if (opts.browser && e.server === 'Claude_Browser') {
+      if (e.tool === 'tabs_context') return { value: { content: [{ type: 'text', text: '{"browserOpen": true, "tabs": []}\nThe Browser pane is currently ' + opts.browser + '.' }], isError: false } }
+      return { value: { content: [{ type: 'text', text: 'ok' }], isError: false } }
+    }
     if (!sk || (e.server !== sk && e.server !== 'claude.ai SkillKey')) throw new Error('no such server')
     if (e.tool === 'word_balance') return { value: { content: [{ type: 'text', text: 'Words left: 4,200' }], isError: false } }
     if (e.tool === 'start_skill') return { value: (opts.owns || (() => true))(String(e.args.skill)) ? fromSk('Instructions for ' + e.args.skill) : { content: [{ type: 'text', text: 'That skill is not on this account. Call list_skills to see the skills this person has.' }], isError: false } }
@@ -339,9 +343,9 @@ test('Claude starts with the full dashboard by default; the preferences file and
   on('http.fetch', () => ({ value: { status: 200, headers: {}, text: '{}' } }))
   await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
   await clock.advance(3000)
-  // The dashboard opens through the desktop app's browser tool, so the small panel stays closed.
+  // No desktop browser tools here (as in the terminal), so the small panel opens instead.
   expect(mcpCalls.some(c => c.tool === 'preview_start' && c.args.name === 'YouCloned')).toBe(true)
-  expect(opened).not.toContain('youcloned')
+  expect(opened).toContain('youcloned')
   expect(JSON.parse(writes.get(PROJECT + '/YouCloned preferences.json'))).toEqual({ when_claude_starts: 'dashboard' })
   const panel = await $.command.run({ command: 'youcloned', args: 'start panel' })
   expect(panel.text).toMatch(/small YouCloned panel/)
@@ -349,3 +353,21 @@ test('Claude starts with the full dashboard by default; the preferences file and
   expect(off.text).toMatch(/stays closed/)
   expect(JSON.parse(writes.get(PROJECT + '/YouCloned preferences.json')).when_claude_starts).toBe('nothing')
 })
+
+for (const pane of ['displayed', 'hidden'] as const) {
+  test('in the desktop app the full dashboard opens in the browser pane (' + pane + ')', async ($, on) => {
+    const opened: string[] = []
+    const submitted: string[] = []
+    const mcpCalls: { server: string, tool: string, args: Record<string, unknown> }[] = []
+    const { clock } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' }, opened, submitted, mcpCalls, browser: pane })
+    on('http.fetch', () => ({ value: { status: 200, headers: {}, text: '{}' } }))
+    await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+    await clock.advance(3000)
+    const browser = mcpCalls.filter(c => c.server === 'Claude_Browser')
+    expect(browser.map(c => c.tool)).toEqual(['preview_start', 'preview_start', 'tabs_context'])
+    expect(browser[1].args.url).toBe('http://127.0.0.1:4600/')
+    expect(opened).not.toContain('youcloned')
+    // Shown: nothing in the chat. Hidden: Claude is asked to open it.
+    expect(submitted.length).toBe(pane === 'displayed' ? 0 : 1)
+  })
+}
