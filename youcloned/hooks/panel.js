@@ -49,7 +49,7 @@ export function heroSvg({ name, left, reset, words, codex, lines }) {
     '<rect width="' + W + '" height="230" rx="16" fill="url(#bg)"/>' +
     '<clipPath id="hc"><rect width="' + W + '" height="230" rx="16"/></clipPath><circle clip-path="url(#hc)" cx="560" cy="0" r="170" fill="url(#glow)"/>' +
     '<circle cx="56" cy="62" r="38" fill="#ffffff" fill-opacity=".08" stroke="#ffffff" stroke-opacity=".22"/>' +
-    '<image href="' + MARK_WHITE + '" xlink:href="' + MARK_WHITE + '" x="30" y="36" width="52" height="52"/>' +
+    '<image href="' + MARK_WHITE + '" x="30" y="36" width="52" height="52"/>' +
     '<text x="108" y="58" ' + FONT + ' font-size="25" font-weight="700" fill="#ffffff">' + esc(hi + ', ' + (name || 'there')) + '</text>' +
     '<text x="108" y="81" ' + FONT + ' font-size="13" fill="#c8d7f2">Tap a job below, or just type in Claude</text>' +
     list + claude + cdx + wordTile + '</svg>'
@@ -113,7 +113,7 @@ export function topSvg() {
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
   return svgOpen(h) +
     '<rect x=".5" y=".5" width="' + (W - 1) + '" height="' + (h - 1) + '" rx="13" fill="' + SURFACE + '" stroke="' + LINE + '"/>' +
-    '<image href="' + WORDMARK.src + '" xlink:href="' + WORDMARK.src + '" x="18" y="' + ((h - lh) / 2).toFixed(1) + '" width="' + lw + '" height="' + lh.toFixed(1) + '"/>' +
+    '<image href="' + WORDMARK.src + '" x="18" y="' + ((h - lh) / 2).toFixed(1) + '" width="' + lw + '" height="' + lh.toFixed(1) + '"/>' +
     '<text x="' + (W - 18) + '" y="33" text-anchor="end" ' + FONT + ' font-size="12.5" fill="' + INK3 + '">' + esc(today) + '</text></svg>'
 }
 
@@ -176,7 +176,7 @@ export function appsSvg() {
     }
     const w = Math.min(pw - 36, a.w * 22 / a.h)
     const ih = w * a.h / a.w
-    return plate + '<image href="' + a.src + '" xlink:href="' + a.src + '" x="' + (x + (pw - w) / 2).toFixed(1) + '" y="' + (y + (ph - ih) / 2).toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + ih.toFixed(1) + '"/>'
+    return plate + '<image href="' + a.src + '" x="' + (x + (pw - w) / 2).toFixed(1) + '" y="' + (y + (ph - ih) / 2).toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + ih.toFixed(1) + '"/>'
   }).join('')
   return svgOpen(h) + card(h, { icon: 'apps', color: BLUE, title: 'Your BNSN apps' }) + plates + '</svg>'
 }
@@ -191,6 +191,6 @@ export function videoSvg({ title, note }) {
     '<text x="' + tx + '" y="' + (84 + lines.length * 21 + 6) + '" ' + FONT + ' font-size="12.5" fill="' + INK2 + '">' + esc(note) + '</text>'
   return svgOpen(h) + card(h, { icon: 'play', color: BLUE, title: 'New from Jon' }) +
     '<clipPath id="vt"><rect x="20" y="64" width="' + tw + '" height="' + th.toFixed(1) + '" rx="9"/></clipPath>' +
-    '<image clip-path="url(#vt)" href="' + LATEST_VIDEO + '" xlink:href="' + LATEST_VIDEO + '" x="20" y="64" width="' + tw + '" height="' + th.toFixed(1) + '" preserveAspectRatio="xMidYMid slice"/>' +
+    '<image clip-path="url(#vt)" href="' + LATEST_VIDEO + '" x="20" y="64" width="' + tw + '" height="' + th.toFixed(1) + '" preserveAspectRatio="xMidYMid slice"/>' +
     text + '</svg>'
 }
