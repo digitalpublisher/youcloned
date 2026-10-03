@@ -8,7 +8,7 @@
 
 import { judge, denyText } from './gate.js'
 import { RULES_NAME, checkSetup, rulesMarkdown } from './rules.js'
-import { heroSvg, crewSvg, appsSvg, W as PANEL_W } from './panel.js'
+import { topSvg, heroSvg, moneySvg, crewSvg, appsSvg, videoSvg } from './panel.js'
 
 const PANE = 'youcloned'
 const TABS = [['home', 'Home', 'h'], ['do', 'Do', 'd'], ['crew', 'Crew', 'r'], ['voice', 'Voice', 'v'], ['skills', 'Skills', 'k']]
@@ -58,6 +58,17 @@ const JOBS = [
   { label: 'YouTube video', text: 'Help me make my next YouTube video: topic, script in my voice, then the edit and two thumbnails.' },
   { label: 'Clear my inbox', text: '/youcloned crew inbox' },
 ]
+// Jon's newest video and the job it unlocks, shown on the Home tab.
+const NEW_FROM_JON = {
+  title: 'How To Write The Story In A Video Sales Letter (VSL) With AI: Step 2 of 9',
+  note: 'The skill that writes your story section is ready.',
+  button: 'Write my story section',
+  text: 'Write the story section of my VSL with Jon\'s VSL Story Writer skill.',
+}
+// Made or saved this week. Sample figures, labelled Sample, until the owner's Stripe and job hours are wired.
+const MONEY_SAMPLE = { total: 7514, up: 17, sample: true, parts: [
+  { label: 'Sales', value: 4120, color: '#5a92ea' }, { label: 'Time', value: 3180, color: '#a598f5' }, { label: 'Bills', value: 214, color: '#e8b25c' },
+] }
 
 function dataDir() {
   return home + '/.youcloned'
@@ -711,6 +722,11 @@ export function register(on) {
       key: 'tab-' + id, label, hotkey, plain: true, dimColor: tab !== id, onPress: () => { tab = id; redraw() },
     })) })
 
+    // No fixed size: each drawing is marked wider than any panel, so the desktop app draws it at the
+    // panel's full width and keeps its shape.
+    const BIG = 2400
+    const pic = (alt, svg) => Svg({ alt, source: svg.replace(/ width="(\d+)" height="(\d+)"/, (_, w, h) => ' width="' + BIG + '" height="' + Math.round(h * BIG / w) + '"') })
+
     let body = []
     if (tab === 'home') {
       const desk = e.surface === 'desktop'
@@ -720,14 +736,10 @@ export function register(on) {
       const lines = waiting.filter(x => x.n).map(x => x.c.title + ' helper: ' + x.n + (x.n === 1 ? ' draft' : ' drafts') + ' waiting for you')
       if (!lines.length) lines.push('Your crew is caught up')
       lines.push('New from Jon: VSL Story, step 2 of 9')
-      // No fixed size: the drawing is marked wider than any panel, so the desktop app draws it at the
-      // panel's full width and keeps its shape.
-      const BIG = 2400
-      const pic = (alt, svg, h) => Svg({ alt, source: svg.replace(' width="' + PANEL_W + '" height="' + h + '"', ' width="' + BIG + '" height="' + Math.round(h * BIG / PANEL_W) + '"') })
       if (desk) {
         let name = ''
         try { const m = ((await readRules($)) || '').match(/^#+\s*Who I am\s*\n+([^\n]+)/m); name = m ? m[1].trim().split(/[ ,]/)[0] : '' } catch {}
-        body.push(pic('Your day: plan left, Codex and BNSN words', heroSvg({ name, left, reset, words: live.words, codex: codexReady, lines }), 230))
+        body.push(pic('Your day: plan left, Codex and BNSN words', heroSvg({ name, left, reset, words: live.words, codex: codexReady, lines })))
       } else {
         body.push(Text({ bold: true, color: '#3375d7', children: ['YouCloned'] }))
         body.push(Text({ children: ['Claude plan left: ' + (left == null ? '?' : Math.round(left) + '%') + '   BNSN words: ' + (live.words == null ? 'not linked' : Number(live.words).toLocaleString('en-US'))] }))
@@ -736,13 +748,14 @@ export function register(on) {
         Button({ key: 'home-job-' + i, label: j.label, hotkey: String(i + 2), onPress: () => runJob($, j.text) })) }))
       const rows = CREW.map(c => ({ title: c.title + ' helper', what: c.what, waiting: crew[c.name].drafts.length > 0,
         badge: crew[c.name].running ? 'Working' : crew[c.name].drafts.length ? crew[c.name].drafts.length + ' waiting' : 'Caught up' }))
-      if (desk) body.push(pic('Your crew', crewSvg(rows), 54 + rows.length * 46))
+      if (desk) body.push(pic('Made or saved this week (sample)', moneySvg(MONEY_SAMPLE)))
+      if (desk) body.push(pic('Your crew', crewSvg(rows)))
       body.push(Box({ flexDirection: 'row', columnGap: 2, children: [
         Button({ key: 'home-crew', label: 'Open my crew', plain: true, onPress: () => { tab = 'crew'; redraw() } }),
         Button({ key: 'home-codex', label: codex.busy ? 'Codex is checking…' : 'Check with Codex', plain: true, onPress: () => codexButton($) }),
         Button({ key: 'home-dash', label: 'Full dashboard', plain: true, onPress: () => openDashboard($) }),
       ] }))
-      if (desk) body.push(pic('Your BNSN apps', appsSvg(), 112))
+      if (desk) body.push(pic('Your BNSN apps', appsSvg()))
       body.push(Box({ flexDirection: 'row', flexWrap: 'wrap', columnGap: 2, children: [
         Link({ href: 'https://app.bnsn.ai', label: 'BNSN' }),
         Link({ href: 'https://bookbuilder.bnsn.ai', label: 'BookBuilder' }),
@@ -750,6 +763,9 @@ export function register(on) {
         Link({ href: 'https://coursebuilder.bnsn.ai', label: 'CourseBuilder' }),
         Link({ href: 'https://community.bnsn.ai', label: 'AI Collective' }),
       ] }))
+      if (desk) body.push(pic('New from Jon: ' + NEW_FROM_JON.title, videoSvg(NEW_FROM_JON)))
+      else body.push(Text({ wrap: 'wrap', children: ['New from Jon: ' + NEW_FROM_JON.title] }))
+      body.push(Button({ key: 'home-new', label: NEW_FROM_JON.button, onPress: () => runJob($, NEW_FROM_JON.text) }))
     }
     if (tab === 'do') {
       body.push(Text({ bold: true, children: ['What do you want to do?'] }))
@@ -809,7 +825,7 @@ export function register(on) {
       }
     }
 
-    const top = tab === 'home' && e.surface === 'desktop' ? [tabs] : [header, tabs]
+    const top = tab === 'home' && e.surface === 'desktop' ? [pic('YouCloned', topSvg()), tabs] : [header, tabs]
     return Box({ flexDirection: 'column', width, rowGap: 1, children: [...top, ...body] })
   })
 }
