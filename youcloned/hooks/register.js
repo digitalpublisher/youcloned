@@ -499,7 +499,7 @@ export function register(on) {
     const { Box, Text, Button } = $.ui.resolve(e)
     const theirs = await next(e)
     const facts = []
-    if (live.claudePct != null) facts.push('Claude ' + Math.round(live.claudePct) + '%')
+    if (live.claudePct != null) facts.push('Claude ' + Math.round(Math.max(0, 100 - live.claudePct)) + '% left')
     if (live.words != null) facts.push(Number(live.words).toLocaleString('en-US') + ' words')
     const strip = Box({ flexDirection: 'column', rowGap: 0, children: [
       Box({ flexDirection: 'row', columnGap: 2, children: [
