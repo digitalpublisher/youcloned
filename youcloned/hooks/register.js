@@ -7,7 +7,7 @@
 
 import { judge, denyText } from './gate.js'
 import { RULES_NAME, checkSetup, rulesMarkdown } from './rules.js'
-import { MARK } from './logo.js'
+import { heroSvg, crewSvg, appsSvg, W as PANEL_W } from './panel.js'
 
 const PANE = 'youcloned'
 const TABS = [['home', 'Home', 'h'], ['do', 'Do', 'd'], ['crew', 'Crew', 'r'], ['voice', 'Voice', 'v'], ['skills', 'Skills', 'k']]
@@ -41,6 +41,7 @@ let skillKey = false        // the SkillKey connector is on in this session
 let cloneHere = false       // this session runs in the customer's clone folder
 let watched = false         // a person is looking at this session (terminal or desktop app)
 let dashOn = false          // the dashboard and its timers are running for this session
+let codexReady = false      // Codex is installed on this computer
 let everywhere = false      // after setup, YouCloned shows in every session unless the owner turns it off
 let live = { claudePct: null, claudeLabel: '', words: null } // numbers the strip and dashboard show
 
@@ -154,6 +155,7 @@ async function turnOn($, cwd) {
   $.clock.every(300000, () => refreshLive($, true))
   $.clock.after(2000, () => refreshLive($, true))
   $.clock.after(800, () => openPane($, false))
+  try { codexReady = !!(await findCodex($)) } catch {}
 }
 
 function openDashboard($) {
@@ -396,30 +398,6 @@ function ago(ms, now) {
   return h + (h === 1 ? ' hour ago' : ' hours ago')
 }
 
-// The panel's header in the desktop app: the YouCloned mark and name.
-function headerSvg() {
-  return '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="300" height="56" viewBox="0 0 300 56">' +
-    '<image href="' + MARK + '" xlink:href="' + MARK + '" x="0" y="4" width="48" height="48"/>' +
-    '<text x="60" y="30" font-family="-apple-system,Helvetica,Arial,sans-serif" font-size="21" font-weight="700" fill="#3375d7">YouCloned</text>' +
-    '<text x="61" y="48" font-family="-apple-system,Helvetica,Arial,sans-serif" font-size="11" letter-spacing="2" fill="#7f8aa0">GET MORE OF YOU</text></svg>'
-}
-
-// A ring that shows how much of the Claude plan is left, plus the words count.
-function metersSvg(left, words) {
-  const r = 24, c = 2 * Math.PI * r
-  const pct = left == null ? 0 : Math.max(0, Math.min(100, left))
-  const arc = (c * pct / 100).toFixed(1)
-  const font = 'font-family="-apple-system,Helvetica,Arial,sans-serif"'
-  return '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="64" viewBox="0 0 300 64">' +
-    '<circle cx="32" cy="32" r="' + r + '" fill="none" stroke="#7f8aa0" stroke-opacity=".25" stroke-width="7"/>' +
-    '<circle cx="32" cy="32" r="' + r + '" fill="none" stroke="#d27a55" stroke-width="7" stroke-linecap="round" stroke-dasharray="' + arc + ' ' + c.toFixed(1) + '" transform="rotate(-90 32 32)"/>' +
-    '<text x="32" y="37" text-anchor="middle" ' + font + ' font-size="13" font-weight="700" fill="#3375d7">' + (left == null ? '?' : Math.round(pct) + '%') + '</text>' +
-    '<text x="68" y="27" ' + font + ' font-size="13" font-weight="600" fill="#7f8aa0">Claude plan left</text>' +
-    '<text x="190" y="27" ' + font + ' font-size="13" font-weight="600" fill="#7f8aa0">BNSN words</text>' +
-    '<text x="190" y="47" ' + font + ' font-size="17" font-weight="700" fill="#3375d7">' + (words == null ? 'not linked' : Number(words).toLocaleString('en-US')) + '</text>' +
-    '<text x="68" y="47" ' + font + ' font-size="12" fill="#7f8aa0">' + (live.claudeLabel ? live.claudeLabel.replace('Claude plan · ', '') : '') + '</text></svg>'
-}
-
 export function register(on) {
   // The safety gate runs first, so no crew call reaches a tool without it. It fails closed.
   on('tool.call', async ($, e, next) => {
@@ -628,7 +606,7 @@ export function register(on) {
 
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     if (e.requestId !== PANE) return next(e)
-    const { Box, Text, Button, Input, Select, Svg } = $.ui.resolve(e)
+    const { Box, Text, Button, Input, Select, Svg, Link } = $.ui.resolve(e)
     const redraw = () => $.ui.invalidate('ui.render')
     const width = Math.max(30, (e.props.bodyColumns || 60) - 2)
     const now = await $.clock.now()
@@ -645,21 +623,39 @@ export function register(on) {
     if (tab === 'home') {
       const desk = e.surface === 'desktop'
       const left = live.claudePct == null ? null : 100 - live.claudePct
+      const reset = live.claudeLabel && live.claudeLabel.includes('resets ') ? live.claudeLabel.split('resets ')[1] : ''
+      const waiting = CREW.map(c => ({ c, n: crew[c.name].drafts.length }))
+      const lines = waiting.filter(x => x.n).map(x => x.c.title + ' helper: ' + x.n + (x.n === 1 ? ' draft' : ' drafts') + ' waiting for you')
+      if (!lines.length) lines.push('Your crew is caught up')
+      lines.push('New from Jon: VSL Story, step 2 of 9')
+      const px = Math.max(320, Math.min(PANEL_W, Math.round((e.props.bodyColumns || 80) * 8)))
+      const fit = (h) => Math.round(h * px / PANEL_W)
+      const pic = (alt, svg, h) => Svg({ alt, width: px, height: fit(h), source: svg })
       if (desk) {
-        body.push(Svg({ alt: 'YouCloned', width: 300, height: 56, source: headerSvg() }))
-        body.push(Svg({ alt: 'Claude plan left and BNSN words', width: 300, height: 64, source: metersSvg(left, live.words) }))
+        let name = ''
+        try { const m = ((await readRules($)) || '').match(/^#+\s*Who I am\s*\n+([^\n]+)/m); name = m ? m[1].trim().split(/[ ,]/)[0] : '' } catch {}
+        body.push(pic('Your day: plan left, Codex and BNSN words', heroSvg({ name, left, reset, words: live.words, codex: codexReady, lines }), 230))
       } else {
+        body.push(Text({ bold: true, color: '#3375d7', children: ['YouCloned'] }))
         body.push(Text({ children: ['Claude plan left: ' + (left == null ? '?' : Math.round(left) + '%') + '   BNSN words: ' + (live.words == null ? 'not linked' : Number(live.words).toLocaleString('en-US'))] }))
       }
-      const waiting = CREW.map(c => ({ c, n: crew[c.name].drafts.length })).filter(x => x.n)
-      body.push(Text({ bold: true, children: ['Needs you'] }))
-      if (waiting.length) for (const x of waiting) body.push(Button({ key: 'need-' + x.c.name, plain: true, label: x.c.title + ': ' + x.n + (x.n === 1 ? ' draft' : ' drafts') + ' waiting', onPress: () => { tab = 'crew'; redraw() } }))
-      else body.push(Text({ dimColor: true, children: ['Nothing waiting. Your crew is caught up.'] }))
-      body.push(Text({ bold: true, children: ['Start a job'] }))
-      for (let i = 0; i < JOBS.length; i++) body.push(Button({ key: 'home-job-' + i, label: JOBS[i].label, hotkey: String(i + 1), onPress: () => runJob($, JOBS[i].text) }))
+      body.push(Box({ flexDirection: 'row', flexWrap: 'wrap', columnGap: 1, rowGap: 0, children: JOBS.map((j, i) =>
+        Button({ key: 'home-job-' + i, label: j.label, hotkey: String(i + 1), onPress: () => runJob($, j.text) })) }))
+      const rows = CREW.map(c => ({ title: c.title + ' helper', what: c.what, waiting: crew[c.name].drafts.length > 0,
+        badge: crew[c.name].running ? 'Working' : crew[c.name].drafts.length ? crew[c.name].drafts.length + ' waiting' : 'Caught up' }))
+      if (desk) body.push(pic('Your crew', crewSvg(rows), 54 + rows.length * 46))
       body.push(Box({ flexDirection: 'row', columnGap: 2, children: [
-        Button({ key: 'home-dash', label: 'Full dashboard', plain: true, onPress: () => openDashboard($) }),
+        Button({ key: 'home-crew', label: 'Open my crew', plain: true, onPress: () => { tab = 'crew'; redraw() } }),
         Button({ key: 'home-codex', label: codex.busy ? 'Codex is checking…' : 'Check with Codex', plain: true, onPress: () => codexButton($) }),
+        Button({ key: 'home-dash', label: 'Full dashboard', plain: true, onPress: () => openDashboard($) }),
+      ] }))
+      if (desk) body.push(pic('Your BNSN apps', appsSvg(), 112))
+      body.push(Box({ flexDirection: 'row', flexWrap: 'wrap', columnGap: 2, children: [
+        Link({ href: 'https://app.bnsn.ai', label: 'BNSN' }),
+        Link({ href: 'https://bookbuilder.bnsn.ai', label: 'BookBuilder' }),
+        Link({ href: 'https://improver.bnsn.ai', label: 'Improver' }),
+        Link({ href: 'https://coursebuilder.bnsn.ai', label: 'CourseBuilder' }),
+        Link({ href: 'https://community.bnsn.ai', label: 'AI Collective' }),
       ] }))
     }
     if (tab === 'do') {
@@ -720,6 +716,7 @@ export function register(on) {
       }
     }
 
-    return Box({ flexDirection: 'column', width, rowGap: 1, children: [header, tabs, ...body] })
+    const top = tab === 'home' && e.surface === 'desktop' ? [tabs] : [header, tabs]
+    return Box({ flexDirection: 'column', width, rowGap: 1, children: [...top, ...body] })
   })
 }
