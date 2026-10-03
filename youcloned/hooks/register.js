@@ -154,8 +154,15 @@ async function turnOn($, cwd) {
   $.clock.every(20000, () => refreshLive($, false))
   $.clock.every(300000, () => refreshLive($, true))
   $.clock.after(2000, () => refreshLive($, true))
-  $.clock.after(800, () => openPane($, false))
   try { codexReady = !!(await findCodex($)) } catch {}
+}
+
+// Opens the YouCloned panel, or closes it when it is already open.
+async function togglePane($) {
+  let open = false
+  try { open = (await $.ui.panes()).some(p => (p.id || p) === PANE) } catch {}
+  if (open) { try { await $.ui.close({ id: PANE }) } catch { try { await $.ui.close(PANE) } catch {} } return }
+  await openPane($, true)
 }
 
 function openDashboard($) {
@@ -509,11 +516,13 @@ export function register(on) {
       Box({ flexDirection: 'row', columnGap: 2, children: [
         Text({ bold: true, color: '#3375d7', children: ['YouCloned'] }),
         Text({ dimColor: true, children: [facts.join(' · ') || 'your clone is on'] }),
-        Button({ key: 'yc-dash', label: 'Dashboard', plain: true, onPress: () => openDashboard($) }),
       ] }),
-      Box({ flexDirection: 'row', columnGap: 2, children: JOBS.map((j, i) => Button({
-        key: 'yc-job-' + i, label: j.label, hotkey: String(i + 1), plain: true, onPress: () => runJob($, j.text),
-      })) }),
+      Box({ flexDirection: 'row', columnGap: 2, children: [
+        project
+          ? Button({ key: 'yc-open', label: 'YouCloned', hotkey: '1', plain: true, onPress: () => togglePane($) })
+          : Button({ key: 'yc-setup', label: 'Set up YouCloned', hotkey: '1', plain: true, onPress: () => openDashboard($) }),
+        ...JOBS.map((j, i) => Button({ key: 'yc-job-' + i, label: j.label, hotkey: String(i + 2), plain: true, onPress: () => runJob($, j.text) })),
+      ] }),
     ] })
     return theirs ? Box({ flexDirection: 'column', children: [strip, theirs] }) : strip
   })
@@ -640,7 +649,7 @@ export function register(on) {
         body.push(Text({ children: ['Claude plan left: ' + (left == null ? '?' : Math.round(left) + '%') + '   BNSN words: ' + (live.words == null ? 'not linked' : Number(live.words).toLocaleString('en-US'))] }))
       }
       body.push(Box({ flexDirection: 'row', flexWrap: 'wrap', columnGap: 1, rowGap: 0, children: JOBS.map((j, i) =>
-        Button({ key: 'home-job-' + i, label: j.label, hotkey: String(i + 1), onPress: () => runJob($, j.text) })) }))
+        Button({ key: 'home-job-' + i, label: j.label, hotkey: String(i + 2), onPress: () => runJob($, j.text) })) }))
       const rows = CREW.map(c => ({ title: c.title + ' helper', what: c.what, waiting: crew[c.name].drafts.length > 0,
         badge: crew[c.name].running ? 'Working' : crew[c.name].drafts.length ? crew[c.name].drafts.length + ' waiting' : 'Caught up' }))
       if (desk) body.push(pic('Your crew', crewSvg(rows), 54 + rows.length * 46))
