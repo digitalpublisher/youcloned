@@ -209,3 +209,16 @@ test('the support crew gets only the questions that have no draft yet', async ($
   expect(spawned[0]).toMatch(/inbox\/tom\.txt/)
   expect(spawned[0]).not.toMatch(/maria\.txt/)
 })
+
+test('after setup YouCloned shows everywhere; /youcloned off and on switch it', async ($, on) => {
+  const { store } = sessionStubs(on, { project: PROJECT })
+  store.set('everywhere', true)
+  on('prompt.context', ($, e) => ({ blocks: e.blocks }))
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  const off = await $.command.run({ command: 'youcloned', args: 'off' })
+  expect(off.text).toMatch(/off in your other sessions/)
+  expect(store.get('everywhere')).toBe(false)
+  const back = await $.command.run({ command: 'youcloned', args: 'on' })
+  expect(back.text).toMatch(/on in every Claude session/)
+  expect(store.get('everywhere')).toBe(true)
+})
