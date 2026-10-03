@@ -332,15 +332,20 @@ test('the strip above the message box uses designed buttons that open YouCloned 
   await ui.unmount()
 })
 
-test('YouCloned opens with Claude by default, writes the preferences file, and /youcloned start off stops it', async ($, on) => {
+test('Claude starts with the full dashboard by default; the preferences file and /youcloned start switch it', async ($, on) => {
   const opened: string[] = []
-  const { writes, clock } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' }, opened })
+  const mcpCalls: { server: string, tool: string, args: Record<string, unknown> }[] = []
+  const { writes, clock } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' }, opened, mcpCalls })
   on('http.fetch', () => ({ value: { status: 200, headers: {}, text: '{}' } }))
   await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
   await clock.advance(3000)
-  expect(opened).toContain('youcloned')
-  expect(JSON.parse(writes.get(PROJECT + '/YouCloned preferences.json'))).toEqual({ open_youcloned_when_claude_starts: true })
+  // The dashboard opens through the desktop app's browser tool, so the small panel stays closed.
+  expect(mcpCalls.some(c => c.tool === 'preview_start' && c.args.name === 'YouCloned')).toBe(true)
+  expect(opened).not.toContain('youcloned')
+  expect(JSON.parse(writes.get(PROJECT + '/YouCloned preferences.json'))).toEqual({ when_claude_starts: 'dashboard' })
+  const panel = await $.command.run({ command: 'youcloned', args: 'start panel' })
+  expect(panel.text).toMatch(/small YouCloned panel/)
   const off = await $.command.run({ command: 'youcloned', args: 'start off' })
   expect(off.text).toMatch(/stays closed/)
-  expect(JSON.parse(writes.get(PROJECT + '/YouCloned preferences.json')).open_youcloned_when_claude_starts).toBe(false)
+  expect(JSON.parse(writes.get(PROJECT + '/YouCloned preferences.json')).when_claude_starts).toBe('nothing')
 })

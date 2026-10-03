@@ -51,13 +51,21 @@ let live = { claudePct: null, claudeLabel: '', words: null } // numbers the stri
 
 // The owner's preferences, a small file in their clone folder they can open and change.
 const PREFS_NAME = 'YouCloned preferences.json'
-const PREFS_DEFAULT = { open_youcloned_when_claude_starts: true }
+// when_claude_starts: "dashboard" (the full dashboard in Claude's browser pane), "panel" (the small one), or "nothing".
+const PREFS_DEFAULT = { when_claude_starts: 'dashboard' }
+const START_CHOICES = ['dashboard', 'panel', 'nothing']
 
 async function readPrefs($) {
   if (!project) return { ...PREFS_DEFAULT }
   const file = project + '/' + PREFS_NAME
   try {
-    if (await $.fs.exists(file)) return { ...PREFS_DEFAULT, ...JSON.parse(await $.fs.read(file)) }
+    if (await $.fs.exists(file)) {
+      const saved = JSON.parse(await $.fs.read(file))
+      // 0.5.4 wrote a yes/no switch; false meant stay closed.
+      if (saved.when_claude_starts === undefined && saved.open_youcloned_when_claude_starts === false) saved.when_claude_starts = 'nothing'
+      delete saved.open_youcloned_when_claude_starts
+      return { ...PREFS_DEFAULT, ...saved }
+    }
     await $.fs.write(file, JSON.stringify(PREFS_DEFAULT, null, 2) + '\n')
   } catch {}
   return { ...PREFS_DEFAULT }
@@ -178,8 +186,10 @@ async function turnOn($, cwd) {
   $.clock.every(20000, () => refreshLive($, false))
   $.clock.every(300000, () => refreshLive($, true))
   $.clock.after(2000, () => refreshLive($, true))
-  // YouCloned opens with Claude unless the owner's preferences say not to.
-  if ((await readPrefs($)).open_youcloned_when_claude_starts !== false) $.clock.after(800, () => openPane($, false))
+  // YouCloned opens with Claude the way the owner's preferences say: the full dashboard unless they chose otherwise.
+  const start = (await readPrefs($)).when_claude_starts
+  if (start === 'panel') $.clock.after(800, () => openPane($, false))
+  else if (start !== 'nothing') $.clock.after(1500, () => showDashboard($))
   try { codexReady = !!(await findCodex($)) } catch {}
 }
 
@@ -189,6 +199,23 @@ async function togglePane($) {
   try { open = (await $.ui.panes()).some(p => (p.id || p) === PANE) } catch {}
   if (open) { try { await $.ui.close({ id: PANE }) } catch { try { await $.ui.close(PANE) } catch {} } return }
   await openPane($, true)
+}
+
+// Opens the full dashboard in Claude's browser pane with the desktop app's own tool, no chat message.
+// Where that tool isn't there (the terminal, an older app), the small panel opens instead.
+async function showDashboard($) {
+  for (const server of ['Claude_Browser', 'Claude Browser']) {
+    try {
+      const r = await $.mcp.call(server, 'preview_start', { name: 'YouCloned' })
+      if (r && !r.isError) return true
+    } catch {}
+  }
+  try {
+    const r = await $.tool.call({ tool: 'mcp__Claude_Browser__preview_start', name: 'YouCloned' })
+    if (r && !r.deny && !r.isError) return true
+  } catch {}
+  await openPane($, false)
+  return false
 }
 
 function openDashboard($) {
@@ -573,7 +600,7 @@ export function register(on) {
       await $.command.register({
         name: 'youcloned',
         description: 'Open YouCloned. "setup" sets you up, "codex" checks the last work with Codex, "crew support" or "crew inbox" runs a crew member',
-        argumentHint: '[setup | on | off | start on|off | codex [question] | crew <support|inbox>]',
+        argumentHint: '[setup | on | off | start dashboard|panel|off | codex [question] | crew <support|inbox>]',
         immediate: true,
       })
     } catch (err) { $.ui.log('/youcloned not registered: ' + String(err)) }
@@ -694,10 +721,14 @@ export function register(on) {
     }
     if (word === 'start') {
       if (!project) return { text: 'Set up YouCloned first with /youcloned setup.' }
-      const opens = !/^(off|no|false)$/i.test(args.split(/\s+/)[1] || 'on')
-      await writePrefs($, { open_youcloned_when_claude_starts: opens })
-      return { text: opens ? 'YouCloned opens with Claude from your next session. Type /youcloned start off to stop that.'
-        : 'YouCloned stays closed when Claude starts; press the YouCloned button to open it. Type /youcloned start on to bring it back.' }
+      let pick = (args.split(/\s+/)[1] || 'dashboard').toLowerCase()
+      if (/^(off|no|false|none)$/.test(pick)) pick = 'nothing'
+      if (/^(on|yes|true|full)$/.test(pick)) pick = 'dashboard'
+      if (!START_CHOICES.includes(pick)) return { text: 'Say /youcloned start dashboard, /youcloned start panel or /youcloned start off.' }
+      await writePrefs($, { when_claude_starts: pick })
+      return { text: pick === 'dashboard' ? 'From your next session, Claude opens with your full YouCloned dashboard.'
+        : pick === 'panel' ? 'From your next session, Claude opens with the small YouCloned panel.'
+        : 'YouCloned stays closed when Claude starts; press the YouCloned button to open it. Type /youcloned start dashboard to bring it back.' }
     }
     if (word === 'codex') return { text: await codexCheck($, args.slice(5).trim()) }
     if (word === 'crew') {
