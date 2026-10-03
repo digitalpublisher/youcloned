@@ -15,7 +15,7 @@ const PANE = {
 } as const
 
 // Stubs for everything session.start touches, with the project already set up.
-function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[]) => unknown, toasts?: string[], lists?: Record<string, string[]> } = {}) {
+function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[]) => unknown, toasts?: string[], lists?: Record<string, string[]>, cwd?: string } = {}) {
   const writes = new Map<string, string>()
   const store = new Map<string, unknown>(opts.project ? [['project', opts.project]] : [])
   mock.clock(on)
@@ -35,8 +35,8 @@ function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: 
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('ui.log', () => ({ value: undefined }))
   on('ui.toast', ($, e) => { opts.toasts?.push(e.text); return { value: undefined } })
-  on('session.start', () => ({ cwd: '/work' }))
-  on('session.cwd', () => ({ value: '/work' }))
+  on('session.start', () => ({ cwd: opts.cwd || '/work' }))
+  on('session.cwd', () => ({ value: opts.cwd || '/work' }))
   on('session.messages', () => ({ value: [{ role: 'assistant', text: 'I wrote copy/letter.md', toolUses: [] }] }))
   on('process.run', ($, e) => ({ value: opts.process ? opts.process(e.argv) : { exitCode: 1, stdout: '', stderr: '' } }))
   on('tool.call', () => ({ result: 'ran' }))
@@ -107,13 +107,21 @@ test('the gate refuses a crew member writing outside its folder, and lets everyo
   expect(main.result).toBe('ran')
 })
 
-test('every conversation gets the rules file', async ($, on) => {
-  sessionStubs(on, { project: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# My YouCloned rules\nPat' } })
+test('every conversation in the clone folder gets the rules file', async ($, on) => {
+  sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# My YouCloned rules\nPat' } })
   on('prompt.context', ($, e) => ({ blocks: e.blocks }))
   await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
   const out = await $.prompt.context({ blocks: [{ name: 'currentDate', text: 'today' }] })
   expect(out.blocks.length).toBe(2)
   expect(out.blocks[1].text).toMatch(/My YouCloned rules\nPat/)
+})
+
+test('a conversation outside the clone folder gets no rules and no YouCloned strip', async ($, on) => {
+  sessionStubs(on, { project: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# My YouCloned rules\nPat' } })
+  on('prompt.context', ($, e) => ({ blocks: e.blocks }))
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  const out = await $.prompt.context({ blocks: [{ name: 'currentDate', text: 'today' }] })
+  expect(out.blocks.length).toBe(1)
 })
 
 test('/youcloned codex runs Codex read-only and returns its answer', async ($, on) => {
