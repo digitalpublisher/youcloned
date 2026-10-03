@@ -39,6 +39,7 @@ let skills = []             // the skills this plugin ships
 let skillKey = false        // the SkillKey connector is on in this session
 let cloneHere = false       // this session runs in the customer's clone folder
 let watched = false         // a person is looking at this session (terminal or desktop app)
+let dashOn = false          // the dashboard and its timers are running for this session
 let live = { claudePct: null, claudeLabel: '', words: null } // numbers the strip and dashboard show
 
 const DASH_PORT = 4600
@@ -129,6 +130,17 @@ async function startDashboard($, cwd) {
     conf.configurations.push({ name: 'YouCloned', url: DASH_URL, port: DASH_PORT })
     await $.fs.write(launch, JSON.stringify(conf, null, 2) + '\n')
   }
+}
+
+// Starts the dashboard and the timers that feed it, once per session.
+async function turnOn($, cwd) {
+  if (dashOn) return
+  dashOn = true
+  await startDashboard($, cwd || (await $.session.cwd()))
+  $.clock.every(1500, () => drainJobs($))
+  $.clock.every(20000, () => refreshLive($, false))
+  $.clock.every(300000, () => refreshLive($, true))
+  $.clock.after(2000, () => refreshLive($, true))
 }
 
 function openDashboard($) {
@@ -421,13 +433,7 @@ export function register(on) {
       if (rulesHere) project = cwd
       // The desktop app reports its sessions as not interactive, so it counts by its surface.
       watched = e.isInteractive || e.surface === 'desktop'
-      if (cloneHere && watched) {
-        await startDashboard($, cwd)
-        $.clock.every(1500, () => drainJobs($))
-        $.clock.every(20000, () => refreshLive($, false))
-        $.clock.every(300000, () => refreshLive($, true))
-        $.clock.after(2000, () => refreshLive($, true))
-      }
+      if (cloneHere && watched) await turnOn($, cwd)
     } catch (err) { $.ui.log('YouCloned clone check failed: ' + String(err)) }
     try {
       await $.tool.register({
@@ -477,6 +483,7 @@ export function register(on) {
   // The YouCloned strip above Claude's message box: plan, words, the dashboard and one-tap jobs.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (!cloneHere) return next(e)
+    if (!dashOn) $.clock.after(0, () => turnOn($))
     const { Box, Text, Button } = $.ui.resolve(e)
     const theirs = await next(e)
     const facts = []
