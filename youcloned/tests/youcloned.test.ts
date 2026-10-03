@@ -157,6 +157,10 @@ test('the pane draws every tab in the terminal and the desktop app', async ($, o
   await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
+    await ui.press({ key: 'tab-home' })
+    expect(await ui.find({ key: 'home-job-0' })).toBeDefined()
+    expect(await ui.find({ key: 'home-dash' })).toBeDefined()
+    await ui.press({ key: 'tab-do' })
     expect(await ui.find({ key: 'setup' })).toBeDefined()
     expect(await ui.find({ key: 'do-sales-letter' })).toBeDefined()
     expect(await ui.find({ key: 'codex' })).toBeDefined()
