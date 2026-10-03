@@ -40,6 +40,7 @@ let skillKey = false        // the SkillKey connector is on in this session
 let cloneHere = false       // this session runs in the customer's clone folder
 let watched = false         // a person is looking at this session (terminal or desktop app)
 let dashOn = false          // the dashboard and its timers are running for this session
+let everywhere = false      // after setup, YouCloned shows in every session unless the owner turns it off
 let live = { claudePct: null, claudeLabel: '', words: null } // numbers the strip and dashboard show
 
 const DASH_PORT = 4600
@@ -160,6 +161,7 @@ function expandHome(p) {
 
 async function loadState($) {
   home = (await $.env.get('HOME')) || (await $.env.get('USERPROFILE')) || ''
+  everywhere = (await $.store.get('everywhere')) === true
   const saved = await $.store.get('project')
   project = typeof saved === 'string' && saved ? saved : null
   const stored = (await $.store.get('crew')) || {}
@@ -429,7 +431,7 @@ export function register(on) {
     try {
       const cwd = await $.session.cwd()
       const rulesHere = await $.fs.exists(cwd + '/' + RULES_NAME)
-      cloneHere = rulesHere || !!(project && (cwd === project || cwd.startsWith(project + '/')))
+      cloneHere = rulesHere || !!(project && (cwd === project || cwd.startsWith(project + '/'))) || !!(everywhere && project)
       if (rulesHere) project = cwd
       // The desktop app reports its sessions as not interactive, so it counts by its surface.
       watched = e.isInteractive || e.surface === 'desktop'
@@ -463,7 +465,7 @@ export function register(on) {
       await $.command.register({
         name: 'youcloned',
         description: 'Open YouCloned. "setup" sets you up, "codex" checks the last work with Codex, "crew support" or "crew inbox" runs a crew member',
-        argumentHint: '[setup | codex [question] | crew <support|inbox>]',
+        argumentHint: '[setup | on | off | codex [question] | crew <support|inbox>]',
         immediate: true,
       })
     } catch (err) { $.ui.log('/youcloned not registered: ' + String(err)) }
@@ -531,6 +533,8 @@ export function register(on) {
     }
     project = folder
     await $.store.set('project', folder)
+    everywhere = true
+    await $.store.set('everywhere', true)
     await refreshDrafts($)
     $.ui.invalidate('ui.render')
     return { result: 'Saved. Rules file: ' + folder + '/' + RULES_NAME + '. Crew folders: ' + folder + '/crew/support and ' + folder + '/crew/inbox. Every new conversation reads the rules file.' }
@@ -546,6 +550,17 @@ export function register(on) {
     if (word === 'setup') {
       startSetup($)
       return {}
+    }
+    if (word === 'off') {
+      everywhere = false
+      await $.store.set('everywhere', false)
+      return { text: 'YouCloned is off in your other sessions. It still shows in your clone folder' + (project ? ' (' + project + ')' : '') + '. Type /youcloned on to bring it back everywhere.' }
+    }
+    if (word === 'on') {
+      if (!project) return { text: 'Set up YouCloned first with /youcloned setup, then it shows in every session.' }
+      everywhere = true
+      await $.store.set('everywhere', true)
+      return { text: 'YouCloned is on in every Claude session from your next one. Type /youcloned off to turn it off.' }
     }
     if (word === 'codex') return { text: await codexCheck($, args.slice(5).trim()) }
     if (word === 'crew') {
