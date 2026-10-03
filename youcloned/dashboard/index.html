@@ -311,8 +311,8 @@ body{padding:0;background:var(--ground)}
             </div>
           </div>
           <div class="meters">
-            <div class="meter"><svg class="g" viewBox="0 0 100 100" aria-hidden="true"><defs><clipPath id="c1"><circle cx="50" cy="50" r="44"/></clipPath></defs><circle cx="50" cy="50" r="44" fill="rgba(255,255,255,.1)"/><g clip-path="url(#c1)"><g class="wave"><path d="M0 64 Q15 58 30 64 T60 64 T90 64 T120 64 T150 64 T180 64 T210 64 T240 64 V100 H0 Z" fill="#e59672"/></g></g></svg><div><div class="num"><span id="claudePct">34</span><small>%</small></div><div class="l" id="claudeL">Claude plan · this 5 hours</div></div></div>
-            <div class="meter"><svg class="g" viewBox="0 0 100 100" aria-hidden="true"><defs><clipPath id="c2"><circle cx="50" cy="50" r="44"/></clipPath></defs><circle cx="50" cy="50" r="44" fill="rgba(255,255,255,.1)"/><g clip-path="url(#c2)"><g class="wave" style="animation-duration:7.5s"><path d="M0 62 Q15 56 30 62 T60 62 T90 62 T120 62 T150 62 T180 62 T210 62 T240 62 V100 H0 Z" fill="#8fb6f4"/></g></g></svg><div><div class="num">38<small>%</small></div><div class="l">Codex plan · resets Monday</div></div></div>
+            <div class="meter"><svg class="g" viewBox="0 0 100 100" aria-hidden="true"><defs><clipPath id="c1"><circle cx="50" cy="50" r="44"/></clipPath></defs><circle cx="50" cy="50" r="44" fill="rgba(255,255,255,.1)"/><g clip-path="url(#c1)"><g id="claudeFill"><g class="wave"><path d="M0 64 Q15 58 30 64 T60 64 T90 64 T120 64 T150 64 T180 64 T210 64 T240 64 V100 H0 Z" fill="#e59672"/></g></g></g></svg><div><div class="num"><span id="claudePct">66</span><small>% left</small></div><div class="l" id="claudeL">Claude plan · this 5 hours</div></div></div>
+            <div class="meter"><svg class="g" viewBox="0 0 100 100" aria-hidden="true"><defs><clipPath id="c2"><circle cx="50" cy="50" r="44"/></clipPath></defs><circle cx="50" cy="50" r="44" fill="rgba(255,255,255,.1)"/><g clip-path="url(#c2)"><g transform="translate(0,-23)"><g class="wave" style="animation-duration:7.5s"><path d="M0 62 Q15 56 30 62 T60 62 T90 62 T120 62 T150 62 T180 62 T210 62 T240 62 V100 H0 Z" fill="#8fb6f4"/></g></g></g></svg><div><div class="num">62<small>% left</small></div><div class="l">Codex plan · resets Monday</div></div></div>
             <div class="meter"><span class="wl" aria-hidden="true"><svg viewBox="0 0 96 96"><rect x="12" y="24" width="72" height="54" rx="12" fill="none" stroke="#fff" stroke-width="6"/><path d="M20 24l38-10c4-1 8 2 8 6v4" fill="none" stroke="#fff" stroke-width="6" stroke-linejoin="round"/><g stroke="#fff" stroke-width="6" stroke-linecap="round"><path d="M25 43h26"/><path d="M25 56h18"/></g><rect x="60" y="44" width="24" height="18" rx="6" fill="#fff"/></svg></span><div><div class="num" id="words">82,360</div><div class="l">BNSN words</div></div></div>
           </div>
         </div>
@@ -501,7 +501,13 @@ body{padding:0;background:var(--ground)}
     fetch("/state.json", { cache: "no-store" }).then(function (r) { return r.ok ? r.json() : null; }).then(function (s) {
       if (!s) return;
       if (s.name) document.getElementById("who").textContent = s.name;
-      if (s.claudePct != null) document.getElementById("claudePct").textContent = Math.round(s.claudePct);
+      if (s.claudePct != null) {
+        var left = Math.max(0, Math.min(100, 100 - s.claudePct));
+        document.getElementById("claudePct").textContent = Math.round(left);
+        // The wave sits at y=64 for 34% full; the circle runs from y=6 (full) to y=94 (empty).
+        var y = 94 - 88 * left / 100;
+        document.getElementById("claudeFill").setAttribute("transform", "translate(0," + (y - 64).toFixed(1) + ")");
+      }
       if (s.claudeLabel) document.getElementById("claudeL").textContent = s.claudeLabel;
       if (s.words != null) document.getElementById("words").textContent = fmt(s.words);
     }).catch(function () {});
