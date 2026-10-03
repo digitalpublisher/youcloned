@@ -42,6 +42,15 @@
       "homepage": "https://hyperframes.heygen.com"
     },
     {
+      "name": "video-shotcraft",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/digitalpublisher/video-shotcraft.git"
+      },
+      "description": "Video Shotcraft by Wei Yihao (Apache 2.0): cinematic product videos from shot recipes. Hosted by BNSN after the original project went offline.",
+      "category": "video"
+    },
+    {
       "name": "printing-press",
       "source": {
         "source": "url",
