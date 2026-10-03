@@ -38,6 +38,7 @@ const gatePassed = new Set() // tool_use_ids of crew calls the gate allowed
 let skills = []             // the skills this plugin ships
 let skillKey = false        // the SkillKey connector is on in this session
 let cloneHere = false       // this session runs in the customer's clone folder
+let watched = false         // a person is looking at this session (terminal or desktop app)
 let live = { claudePct: null, claudeLabel: '', words: null } // numbers the strip and dashboard show
 
 const DASH_PORT = 4600
@@ -117,7 +118,8 @@ async function dashboardUp($) {
 // Starts the dashboard server and tells Claude's Browser pane where it is.
 async function startDashboard($, cwd) {
   if (!(await dashboardUp($))) {
-    try { await $.process.spawn(['python3', $.plugin.root + '/dashboard/server.py', String(DASH_PORT)]) } catch (err) { $.ui.log('dashboard did not start: ' + String(err)) }
+    // Started without waiting: the server keeps running for as long as the session does.
+    try { const run = $.process.spawn(['python3', $.plugin.root + '/dashboard/server.py', String(DASH_PORT)]); if (run && typeof run.catch === 'function') run.catch(() => {}) } catch (err) { $.ui.log('dashboard did not start: ' + String(err)) }
   }
   const launch = cwd + '/.claude/launch.json'
   let conf = { version: '0.0.1', configurations: [] }
@@ -417,7 +419,9 @@ export function register(on) {
       const rulesHere = await $.fs.exists(cwd + '/' + RULES_NAME)
       cloneHere = rulesHere || !!(project && (cwd === project || cwd.startsWith(project + '/')))
       if (rulesHere) project = cwd
-      if (cloneHere && e.isInteractive) {
+      // The desktop app reports its sessions as not interactive, so it counts by its surface.
+      watched = e.isInteractive || e.surface === 'desktop'
+      if (cloneHere && watched) {
         await startDashboard($, cwd)
         $.clock.every(1500, () => drainJobs($))
         $.clock.every(20000, () => refreshLive($, false))
@@ -457,7 +461,7 @@ export function register(on) {
         immediate: true,
       })
     } catch (err) { $.ui.log('/youcloned not registered: ' + String(err)) }
-    if (e.isInteractive && cloneHere) {
+    if (watched && cloneHere) {
       // Runs scheduled crew members when their time comes.
       $.clock.every(60000, async () => {
         const now = await $.clock.now()
