@@ -49,42 +49,14 @@ let codexReady = false      // Codex is installed on this computer
 let everywhere = false      // after setup, YouCloned shows in every session unless the owner turns it off
 let live = { claudePct: null, claudeLabel: '', words: null } // numbers the strip and dashboard show
 
-// The owner's preferences, a small file in their clone folder they can open and change.
-const PREFS_NAME = 'YouCloned preferences.json'
-// when_claude_starts: "dashboard" (the full dashboard in Claude's browser pane), "panel" (the small one), or "nothing".
-const PREFS_DEFAULT = { when_claude_starts: 'dashboard' }
-const START_CHOICES = ['dashboard', 'panel', 'nothing']
-
-async function readPrefs($) {
-  if (!project) return { ...PREFS_DEFAULT }
-  const file = project + '/' + PREFS_NAME
-  try {
-    if (await $.fs.exists(file)) {
-      const saved = JSON.parse(await $.fs.read(file))
-      // 0.5.4 wrote a yes/no switch; false meant stay closed.
-      if (saved.when_claude_starts === undefined && saved.open_youcloned_when_claude_starts === false) saved.when_claude_starts = 'nothing'
-      delete saved.open_youcloned_when_claude_starts
-      return { ...PREFS_DEFAULT, ...saved }
-    }
-    await $.fs.write(file, JSON.stringify(PREFS_DEFAULT, null, 2) + '\n')
-  } catch {}
-  return { ...PREFS_DEFAULT }
-}
-
-async function writePrefs($, change) {
-  const prefs = { ...(await readPrefs($)), ...change }
-  if (project) await $.fs.write(project + '/' + PREFS_NAME, JSON.stringify(prefs, null, 2) + '\n')
-  return prefs
-}
-
 const DASH_PORT = 4600
 const DASH_URL = 'http://127.0.0.1:' + DASH_PORT
 // One-tap jobs: the strip above Claude's message box and the dashboard both start these.
 const JOBS = [
-  { label: 'VSL lead', hint: 'Jon\'s Lead Writer', text: 'Write my VSL lead with Jon\'s VSL Lead Writer skill. Ask me which offer first if I have more than one.' },
-  { label: 'Sales page', hint: 'Your offer, your brand', text: 'Build a sales page for one of my offers with Jon\'s sales page skill. Ask me which offer first if I have more than one.' },
-  { label: 'YouTube video', hint: 'Topic, script, thumbnails', text: 'Help me make my next YouTube video: topic, script in my voice, then the edit and two thumbnails.' },
-  { label: 'Clear my inbox', hint: 'Your inbox helper sorts it', text: '/youcloned crew inbox' },
+  { label: 'VSL lead', text: 'Write my VSL lead with Jon\'s VSL Lead Writer skill. Ask me which offer first if I have more than one.' },
+  { label: 'Sales page', text: 'Build a sales page for one of my offers with Jon\'s sales page skill. Ask me which offer first if I have more than one.' },
+  { label: 'YouTube video', text: 'Help me make my next YouTube video: topic, script in my voice, then the edit and two thumbnails.' },
+  { label: 'Clear my inbox', text: '/youcloned crew inbox' },
 ]
 
 function dataDir() {
@@ -96,7 +68,7 @@ async function runJob($, text) {
   const t = String(text || '').trim()
   if (!t) return
   const m = /^\/youcloned\s*(.*)$/i.exec(t)
-  if (!m) { try { await $.prompt.submit({ text: t, asUser: true }) } catch (err) { $.ui.log('job not sent: ' + String(err)) } return }
+  if (!m) { $.prompt.submit({ text: t, asUser: true }); return }
   const args = m[1].trim()
   const word = args.split(/\s+/)[0].toLowerCase()
   if (word === 'setup') return startSetup($)
@@ -186,10 +158,6 @@ async function turnOn($, cwd) {
   $.clock.every(20000, () => refreshLive($, false))
   $.clock.every(300000, () => refreshLive($, true))
   $.clock.after(2000, () => refreshLive($, true))
-  // YouCloned opens with Claude the way the owner's preferences say: the full dashboard unless they chose otherwise.
-  const start = (await readPrefs($)).when_claude_starts
-  if (start === 'panel') $.clock.after(800, () => openPane($, false))
-  else if (start !== 'nothing') $.clock.after(1500, () => showDashboard($))
   try { codexReady = !!(await findCodex($)) } catch {}
 }
 
@@ -201,29 +169,8 @@ async function togglePane($) {
   await openPane($, true)
 }
 
-// Gets the full dashboard ready in Claude's browser pane with the desktop app's own browser tools: start the
-// dashboard (launch.json "YouCloned") and open the pane on its address. The app keeps that pane out of view
-// until the person presses its globe button, and nothing (add-on or Claude) can slide it open, so this adds
-// nothing to the chat. Without the browser tools (the terminal, an older app) the small panel opens instead.
-async function browserCall($, tool, args) {
-  for (const server of ['Claude_Browser', 'Claude Browser']) {
-    try {
-      const r = await $.mcp.call(server, tool, args)
-      if (r && !r.isError) return (r.content || []).map(c => c.text || '').join('\n') || 'ok'
-    } catch {}
-  }
-  return null
-}
-
-async function showDashboard($) {
-  const started = await browserCall($, 'preview_start', { name: 'YouCloned' })
-  if (started === null) { await openPane($, false); return false }
-  await browserCall($, 'preview_start', { url: DASH_URL + '/' })
-  return true
-}
-
-async function openDashboard($) {
-  try { await $.prompt.submit({ text: 'Open the YouCloned dashboard in the Browser pane: start the "YouCloned" preview from .claude/launch.json (it starts its own server on port ' + DASH_PORT + '), then show it. No other work.' }) } catch (err) { $.ui.log('dashboard request not sent: ' + String(err)) }
+function openDashboard($) {
+  $.prompt.submit({ text: 'Open the YouCloned dashboard in the Browser pane: start the "YouCloned" preview from .claude/launch.json (it starts its own server on port ' + DASH_PORT + '), then show it. No other work.' })
 }
 
 function crewDir(name) {
@@ -604,7 +551,7 @@ export function register(on) {
       await $.command.register({
         name: 'youcloned',
         description: 'Open YouCloned. "setup" sets you up, "codex" checks the last work with Codex, "crew support" or "crew inbox" runs a crew member',
-        argumentHint: '[setup | on | off | start dashboard|panel|off | codex [question] | crew <support|inbox>]',
+        argumentHint: '[setup | on | off | codex [question] | crew <support|inbox>]',
         immediate: true,
       })
     } catch (err) { $.ui.log('/youcloned not registered: ' + String(err)) }
@@ -625,12 +572,8 @@ export function register(on) {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (!cloneHere) return next(e)
     if (!dashOn) $.clock.after(0, () => turnOn($))
-    const { Box, Text, Button, Client } = $.ui.resolve(e)
+    const { Box, Text, Button } = $.ui.resolve(e)
     const theirs = await next(e)
-    // Designed buttons (hooks/tile.js) wherever the surface draws them; Claude's own with number keys elsewhere.
-    const chip = (id, label, kind, hotkey, onPress) => Client
-      ? Client({ key: 'tile-' + id, module: './tile.js', props: { id, label, kind } })
-      : Button({ key: id, label, hotkey, plain: true, onPress })
     const facts = []
     if (live.claudePct != null) facts.push('Claude ' + Math.round(Math.max(0, 100 - live.claudePct)) + '% left')
     if (live.words != null) facts.push(Number(live.words).toLocaleString('en-US') + ' words')
@@ -641,9 +584,9 @@ export function register(on) {
       ] }),
       Box({ flexDirection: 'row', columnGap: 2, children: [
         project
-          ? chip('yc-open', 'YouCloned', 'chip-primary', '1', () => togglePane($))
-          : chip('yc-setup', 'Set up YouCloned', 'chip-primary', '1', () => openDashboard($)),
-        ...JOBS.map((j, i) => chip('yc-job-' + i, j.label, 'chip', String(i + 2), () => runJob($, j.text))),
+          ? Button({ key: 'yc-open', label: 'YouCloned', hotkey: '1', plain: true, onPress: () => togglePane($) })
+          : Button({ key: 'yc-setup', label: 'Set up YouCloned', hotkey: '1', plain: true, onPress: () => openDashboard($) }),
+        ...JOBS.map((j, i) => Button({ key: 'yc-job-' + i, label: j.label, hotkey: String(i + 2), plain: true, onPress: () => runJob($, j.text) })),
       ] }),
     ] })
     return theirs ? Box({ flexDirection: 'column', children: [strip, theirs] }) : strip
@@ -723,17 +666,6 @@ export function register(on) {
       await $.store.set('everywhere', true)
       return { text: 'YouCloned is on in every Claude session from your next one. Type /youcloned off to turn it off.' }
     }
-    if (word === 'start') {
-      if (!project) return { text: 'Set up YouCloned first with /youcloned setup.' }
-      let pick = (args.split(/\s+/)[1] || 'dashboard').toLowerCase()
-      if (/^(off|no|false|none)$/.test(pick)) pick = 'nothing'
-      if (/^(on|yes|true|full)$/.test(pick)) pick = 'dashboard'
-      if (!START_CHOICES.includes(pick)) return { text: 'Say /youcloned start dashboard, /youcloned start panel or /youcloned start off.' }
-      await writePrefs($, { when_claude_starts: pick })
-      return { text: pick === 'dashboard' ? 'From your next session, Claude opens with your full YouCloned dashboard.'
-        : pick === 'panel' ? 'From your next session, Claude opens with the small YouCloned panel.'
-        : 'YouCloned stays closed when Claude starts; press the YouCloned button to open it. Type /youcloned start dashboard to bring it back.' }
-    }
     if (word === 'codex') return { text: await codexCheck($, args.slice(5).trim()) }
     if (word === 'crew') {
       const name = args.split(/\s+/)[1] || ''
@@ -744,19 +676,6 @@ export function register(on) {
       return {}
     }
     return { text: project ? 'YouCloned is set up. Rules file: ' + project + '/' + RULES_NAME : 'YouCloned is not set up yet. Run /youcloned setup.' }
-  })
-
-  // A designed button (hooks/tile.js) was pressed.
-  on('ui.message', async ($, e, next) => {
-    if (!/tile\.js$/.test(String(e.module || ''))) return next(e)
-    const id = e.data && typeof e.data === 'object' ? String(e.data.id || '') : ''
-    const job = /^(?:home|yc)-job-(\d)$/.exec(id)
-    if (job && JOBS[Number(job[1])]) await runJob($, JOBS[Number(job[1])].text)
-    else if (id === 'home-crew') { tab = 'crew'; $.ui.invalidate('ui.render') }
-    else if (id === 'home-codex') await codexButton($)
-    else if (id === 'home-dash' || id === 'yc-setup') openDashboard($)
-    else if (id === 'yc-open') await togglePane($)
-    return {}
   })
 
   // A crew member finished.
@@ -777,11 +696,7 @@ export function register(on) {
 
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     if (e.requestId !== PANE) return next(e)
-    const { Box, Text, Button, Input, Select, Svg, Link, Client } = $.ui.resolve(e)
-    // A designed button (hooks/tile.js) where the surface can draw one, Claude's own Button elsewhere.
-    const tile = (id, label, sub, kind, onPress) => Client
-      ? Client({ key: 'tile-' + id, module: './tile.js', props: { id, label, sub, kind }, flexGrow: 1 })
-      : Button({ key: id, label, plain: true, onPress })
+    const { Box, Text, Button, Input, Select, Svg, Link } = $.ui.resolve(e)
     const redraw = () => $.ui.invalidate('ui.render')
     const width = Math.max(30, (e.props.bodyColumns || 60) - 2)
     const now = await $.clock.now()
@@ -815,25 +730,16 @@ export function register(on) {
         body.push(Text({ bold: true, color: '#3375d7', children: ['YouCloned'] }))
         body.push(Text({ children: ['Claude plan left: ' + (left == null ? '?' : Math.round(left) + '%') + '   BNSN words: ' + (live.words == null ? 'not linked' : Number(live.words).toLocaleString('en-US'))] }))
       }
-      body.push(desk
-        ? Box({ flexDirection: 'column', rowGap: 1, children: [0, 2].map(r => Box({ key: 'jobs-' + r, flexDirection: 'row', columnGap: 1,
-            children: JOBS.slice(r, r + 2).map((j, i) => tile('home-job-' + (r + i), j.label, j.hint, 'primary', () => runJob($, j.text))) })) })
-        : Box({ flexDirection: 'row', flexWrap: 'wrap', columnGap: 1, rowGap: 0, children: JOBS.map((j, i) =>
-            Button({ key: 'home-job-' + i, label: j.label, hotkey: String(i + 2), onPress: () => runJob($, j.text) })) }))
+      body.push(Box({ flexDirection: 'row', flexWrap: 'wrap', columnGap: 1, rowGap: 0, children: JOBS.map((j, i) =>
+        Button({ key: 'home-job-' + i, label: j.label, hotkey: String(i + 2), onPress: () => runJob($, j.text) })) }))
       const rows = CREW.map(c => ({ title: c.title + ' helper', what: c.what, waiting: crew[c.name].drafts.length > 0,
         badge: crew[c.name].running ? 'Working' : crew[c.name].drafts.length ? crew[c.name].drafts.length + ' waiting' : 'Caught up' }))
       if (desk) body.push(pic('Your crew', crewSvg(rows), 54 + rows.length * 46))
-      body.push(desk
-        ? Box({ flexDirection: 'row', columnGap: 1, children: [
-            tile('home-crew', 'Open my crew', '', 'outline'),
-            tile('home-codex', codex.busy ? 'Codex is checking…' : 'Check with Codex', '', 'outline'),
-            tile('home-dash', 'Full dashboard', '', 'outline'),
-          ] })
-        : Box({ flexDirection: 'row', columnGap: 2, children: [
-            Button({ key: 'home-crew', label: 'Open my crew', plain: true, onPress: () => { tab = 'crew'; redraw() } }),
-            Button({ key: 'home-codex', label: codex.busy ? 'Codex is checking…' : 'Check with Codex', plain: true, onPress: () => codexButton($) }),
-            Button({ key: 'home-dash', label: 'Full dashboard', plain: true, onPress: () => openDashboard($) }),
-          ] }))
+      body.push(Box({ flexDirection: 'row', columnGap: 2, children: [
+        Button({ key: 'home-crew', label: 'Open my crew', plain: true, onPress: () => { tab = 'crew'; redraw() } }),
+        Button({ key: 'home-codex', label: codex.busy ? 'Codex is checking…' : 'Check with Codex', plain: true, onPress: () => codexButton($) }),
+        Button({ key: 'home-dash', label: 'Full dashboard', plain: true, onPress: () => openDashboard($) }),
+      ] }))
       if (desk) body.push(pic('Your BNSN apps', appsSvg(), 112))
       body.push(Box({ flexDirection: 'row', flexWrap: 'wrap', columnGap: 2, children: [
         Link({ href: 'https://app.bnsn.ai', label: 'BNSN' }),
