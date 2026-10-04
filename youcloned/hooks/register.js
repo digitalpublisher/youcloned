@@ -38,6 +38,7 @@ let codexReady = false      // Codex is installed on this computer
 let everywhere = false      // after setup, YouCloned shows in every session unless the owner turns it off
 let live = { claudePct: null, claudeLabel: '', words: null } // numbers the strip and dashboard show
 
+const BLUE = '#3375d7'     // YouCloned blue
 const DASH_PORT = 4600
 const DASH_URL = 'http://127.0.0.1:' + DASH_PORT
 // Every skill YouCloned can start. SkillKey adds the ones the owner has bought. The owner pins the
@@ -661,25 +662,28 @@ export function register(on) {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (!cloneHere) return next(e)
     if (!dashOn) $.clock.after(0, () => turnOn($))
-    const { Box, Text, Button, Link } = $.ui.resolve(e)
+    const { Box, Text, Button } = $.ui.resolve(e)
     const theirs = await next(e)
+    // In the desktop app the YouCloned button is Claude's blue main button and each job sits in a blue outline.
+    const desk = e.surface === 'desktop'
+    const job = (j) => {
+      const b = Button({ key: 'yc-job-' + j.key, label: j.label, plain: true, onPress: () => pressJob($, j) })
+      return desk ? Box({ borderStyle: 'round', borderColor: BLUE, paddingX: 1, children: [b] }) : b
+    }
     const facts = []
     if (live.claudePct != null) facts.push('Claude ' + Math.round(Math.max(0, 100 - live.claudePct)) + '% left')
     if (live.words != null) facts.push(Number(live.words).toLocaleString('en-US') + ' words')
     const strip = Box({ flexDirection: 'column', rowGap: 0, children: [
       Box({ flexDirection: 'row', columnGap: 2, children: [
-        Text({ bold: true, color: '#3375d7', children: ['YouCloned'] }),
+        Text({ bold: true, color: BLUE, children: ['YouCloned'] }),
         Text({ dimColor: true, children: [facts.join(' · ') || 'your clone is on'] }),
       ] }),
-      ...(project ? [Box({ flexDirection: 'row', columnGap: 2, children: [
-        Text({ children: ['Open YouCloned: click the globe at the top right'] }),
-        Link({ href: 'http://localhost:' + DASH_PORT + '/', label: 'or here' }),
-      ] })] : []),
+      ...(project ? [Text({ children: ['Open ', Text({ bold: true, color: BLUE, children: ['YouCloned'] }), ': click the globe at the top right'] })] : []),
       Box({ flexDirection: 'row', columnGap: 2, children: [
         project
-          ? Button({ key: 'yc-open', label: 'YouCloned', plain: true, onPress: () => togglePane($) })
+          ? Button({ key: 'yc-open', label: 'YouCloned', ...(desk ? { variant: 'primary' } : { plain: true }), onPress: () => togglePane($) })
           : Button({ key: 'yc-setup', label: 'Set up YouCloned', plain: true, onPress: () => openDashboard($) }),
-        ...pinnedSkills().slice(0, 4).map(j => Button({ key: 'yc-job-' + j.key, label: j.label, plain: true, onPress: () => pressJob($, j) })),
+        ...pinnedSkills().slice(0, 4).map(job),
       ] }),
     ] })
     return theirs ? Box({ flexDirection: 'column', children: [strip, theirs] }) : strip
