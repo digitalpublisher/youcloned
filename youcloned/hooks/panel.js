@@ -64,7 +64,7 @@ export function heroSvg({ name, left, reset, words, codex, lines }) {
 
 // Shared look for the dark cards under the greeting, matching the dashboard's panels.
 const SURFACE = '#161d29', LINE = '#283346', INK = '#e6ebf3', INK2 = '#aab4c5', INK3 = '#808c9f'
-const BLUE = '#5a92ea', BLUE_INK = '#8fb6f4', AMBER = '#e8b25c', VIOLET = '#a598f5'
+const BLUE = '#5a92ea', BLUE_INK = '#8fb6f4'
 const ICONS = {
   money: '<path d="M12 3v18M16 7.5c0-1.9-1.8-3-4-3s-4 1.1-4 3 1.8 2.6 4 3 4 1.2 4 3.2-1.8 3.3-4 3.3-4-1.2-4-3.1"/>',
   crew: '<circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.4"/><path d="M3.5 19c.7-3 2.8-4.5 5.5-4.5s4.8 1.5 5.5 4.5M15 14.3c2.4 0 4.2 1.3 5 3.7"/>',
@@ -100,17 +100,6 @@ function pill(xRight, y, label, color) {
 
 function money(n) {
   return '$' + Math.round(n).toLocaleString('en-US')
-}
-
-// Splits text into lines of about max characters, at spaces.
-function wrap(text, max) {
-  const lines = []
-  let line = ''
-  for (const word of String(text).split(/\s+/)) {
-    if (line && (line + ' ' + word).length > max) { lines.push(line); line = word } else line = line ? line + ' ' + word : word
-  }
-  if (line) lines.push(line)
-  return lines
 }
 
 // The top bar: the YouCloned logo and today's date, like the dashboard's menu bar.
@@ -152,53 +141,47 @@ export function moneySvg({ total, up, parts, sample }) {
     bar + legend + '</svg>'
 }
 
-// The crew card: each helper, its job, and what is waiting for the owner.
-export function crewSvg(rows) {
-  const h = 62 + rows.length * 50
-  const need = rows.filter(r => r.waiting).length
-  const body = rows.map((r, i) => {
-    const y = 60 + i * 50
-    return (i ? '<line x1="20" x2="' + (W - 20) + '" y1="' + (y - 6) + '" y2="' + (y - 6) + '" stroke="' + LINE + '"/>' : '') +
-      '<text x="20" y="' + (y + 17) + '" ' + FONT + ' font-size="14" font-weight="600" fill="' + INK + '">' + esc(r.title) + '</text>' +
-      '<text x="20" y="' + (y + 35) + '" ' + FONT + ' font-size="12" fill="' + INK3 + '">' + esc(r.what) + '</text>' +
-      pill(W - 18, y + 8, r.badge, r.waiting ? AMBER : BLUE_INK)
-  }).join('')
-  return svgOpen(h) + card(h, { icon: 'crew', color: AMBER, title: 'Your crew', meta: need ? need + (need === 1 ? ' needs you' : ' need you') : 'All caught up' }) + body + '</svg>'
+
+
+
+// The header row of an action card (icon, title, optional Sample tag and note), drawn on the card's own
+// navy so it sits inside a Claude box whose background and border match the picture cards.
+export function cardHeadSvg({ icon, color, title, sample, meta }) {
+  const h = 50
+  const titleW = title.length * 8.6
+  const tag = sample ? '<rect x="' + (52 + titleW) + '" y="15" width="56" height="20" rx="5" fill="#1d2635"/>' +
+    '<text x="' + (80 + titleW) + '" y="29" text-anchor="middle" ' + FONT + ' font-size="11" font-weight="600" fill="' + INK3 + '">Sample</text>' : ''
+  return svgOpen(h) + '<rect width="' + W + '" height="' + h + '" fill="' + SURFACE + '"/>' +
+    '<rect x="16" y="13" width="24" height="24" rx="7" fill="' + color + '" fill-opacity=".16"/>' +
+    '<g transform="translate(20 17) scale(.67)" fill="none" stroke="' + color + '" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' + ICONS[icon] + '</g>' +
+    '<text x="50" y="30" ' + FONT + ' font-size="15.5" font-weight="700" fill="' + INK + '">' + esc(title) + '</text>' + tag +
+    (meta ? '<text x="' + (W - 18) + '" y="30" text-anchor="end" ' + FONT + ' font-size="12" fill="' + INK3 + '">' + esc(meta) + '</text>' : '') +
+    '<line x1="0" x2="' + W + '" y1="49.5" y2="49.5" stroke="' + LINE + '"/></svg>'
 }
 
-// The BNSN apps as logo plates, three across.
-export function appsSvg() {
-  const apps = [BNSN, BOOKBUILDER, IMPROVER, COURSEBUILDER, 'offerbuilder', AIC]
-  const cols = W >= 900 ? 6 : 3, gap = 12, pw = (W - 40 - gap * (cols - 1)) / cols, ph = 54
-  const rows = Math.ceil(apps.length / cols)
-  const h = 62 + rows * ph + (rows - 1) * gap + 20
-  const plates = apps.map((a, i) => {
-    const x = 20 + (i % cols) * (pw + gap)
-    const y = 62 + Math.floor(i / cols) * (ph + gap)
-    const plate = '<rect x="' + x.toFixed(1) + '" y="' + y + '" width="' + pw.toFixed(1) + '" height="' + ph + '" rx="10" fill="#22304a"/>'
-    if (a === 'offerbuilder') {
-      const cx = x + pw / 2 - 52
-      return plate + '<rect x="' + cx.toFixed(1) + '" y="' + (y + 16) + '" width="22" height="22" rx="6" fill="#3375d7"/>' +
-        '<g transform="translate(' + (cx + 4).toFixed(1) + ' ' + (y + 20) + ') scale(.58)" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round"><circle cx="7" cy="12" r="3"/><circle cx="17" cy="12" r="3"/><path d="M10 12h4"/></g>' +
-        '<text x="' + (cx + 30).toFixed(1) + '" y="' + (y + 32.5) + '" ' + FONT + ' font-size="15" font-weight="700" fill="#ffffff">OfferBuilder</text>'
-    }
-    const w = Math.min(pw - 36, a.w * 22 / a.h)
-    const ih = w * a.h / a.w
-    return plate + '<image href="' + a.src + '" x="' + (x + (pw - w) / 2).toFixed(1) + '" y="' + (y + (ph - ih) / 2).toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + ih.toFixed(1) + '"/>'
-  }).join('')
-  return svgOpen(h) + card(h, { icon: 'apps', color: BLUE, title: 'Your BNSN apps' }) + plates + '</svg>'
+// One app's logo on its plate, drawn at a set size so its button can sit right under it.
+export const PLATE = { w: 132, h: 52 }
+export function plateSvg(name) {
+  const { w: pw, h: ph } = PLATE
+  const a = { bnsn: BNSN, bookbuilder: BOOKBUILDER, improver: IMPROVER, coursebuilder: COURSEBUILDER, aic: AIC }[name]
+  let inner
+  if (!a) {
+    const cx = pw / 2 - 50
+    inner = '<rect x="' + cx + '" y="15" width="22" height="22" rx="6" fill="#3375d7"/>' +
+      '<g transform="translate(' + (cx + 4) + ' 19) scale(.58)" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round"><circle cx="7" cy="12" r="3"/><circle cx="17" cy="12" r="3"/><path d="M10 12h4"/></g>' +
+      '<text x="' + (cx + 30) + '" y="31.5" ' + FONT + ' font-size="14" font-weight="700" fill="#ffffff">OfferBuilder</text>'
+  } else {
+    const lw = Math.min(pw - 30, a.w * 20 / a.h), lh = lw * a.h / a.w
+    inner = '<image href="' + a.src + '" x="' + ((pw - lw) / 2).toFixed(1) + '" y="' + ((ph - lh) / 2).toFixed(1) + '" width="' + lw.toFixed(1) + '" height="' + lh.toFixed(1) + '"/>'
+  }
+  return '<svg xmlns="http://www.w3.org/2000/svg" width="' + pw + '" height="' + ph + '" viewBox="0 0 ' + pw + ' ' + ph + '">' +
+    '<rect width="' + pw + '" height="' + ph + '" rx="10" fill="#22304a"/>' + inner + '</svg>'
 }
 
-// New from Jon: the latest video's thumbnail, its title and what it unlocks.
-export function videoSvg({ title, note }) {
-  const tw = 208, th = tw * 9 / 16
-  const h = 62 + th + 18
-  const tx = 20 + tw + 18
-  const lines = wrap(title, Math.floor((W - tx - 20) / 8.6)).slice(0, 3)
-  const text = lines.map((l, i) => '<text x="' + tx + '" y="' + (84 + i * 21) + '" ' + FONT + ' font-size="15.5" font-weight="700" fill="' + INK + '">' + esc(l) + '</text>').join('') +
-    '<text x="' + tx + '" y="' + (84 + lines.length * 21 + 6) + '" ' + FONT + ' font-size="12.5" fill="' + INK2 + '">' + esc(note) + '</text>'
-  return svgOpen(h) + card(h, { icon: 'play', color: BLUE, title: 'New from Jon' }) +
-    '<clipPath id="vt"><rect x="20" y="64" width="' + tw + '" height="' + th.toFixed(1) + '" rx="9"/></clipPath>' +
-    '<image clip-path="url(#vt)" href="' + LATEST_VIDEO + '" x="20" y="64" width="' + tw + '" height="' + th.toFixed(1) + '" preserveAspectRatio="xMidYMid slice"/>' +
-    text + '</svg>'
+// The newest video's thumbnail, rounded, at a set size.
+export const THUMB = { w: 208, h: 117 }
+export function thumbSvg() {
+  return '<svg xmlns="http://www.w3.org/2000/svg" width="' + THUMB.w + '" height="' + THUMB.h + '" viewBox="0 0 ' + THUMB.w + ' ' + THUMB.h + '">' +
+    '<clipPath id="t"><rect width="' + THUMB.w + '" height="' + THUMB.h + '" rx="9"/></clipPath>' +
+    '<image clip-path="url(#t)" href="' + LATEST_VIDEO + '" width="' + THUMB.w + '" height="' + THUMB.h + '" preserveAspectRatio="xMidYMid slice"/></svg>'
 }
