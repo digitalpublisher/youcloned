@@ -64,6 +64,7 @@ const MAX_PINS = 6
 let skillKeySkills = []     // { key, label, what, text } for each skill SkillKey says this account owns
 let pins = DEFAULT_PINS.slice()
 let skillQuery = ''
+let pressed = []            // jobs pressed in the panel or the strip, waiting for the job timer
 let lastColumns = null      // the panel width the desktop app last reported, kept for tuning the drawings
 
 function allSkills() {
@@ -123,7 +124,7 @@ async function runJob($, text) {
   const t = String(text || '').trim()
   if (!t) return
   const m = /^\/youcloned\s*(.*)$/i.exec(t)
-  if (!m) { $.prompt.submit({ text: t, asUser: true }); return }
+  if (!m) { await $.prompt.submit({ text: t, asUser: true }); return }
   const args = m[1].trim()
   const word = args.split(/\s+/)[0].toLowerCase()
   if (word === 'setup') return startSetup($)
@@ -131,8 +132,33 @@ async function runJob($, text) {
   if (word === 'crew') { $.ui.toast(await runCrew($, (args.split(/\s+/)[1] || '').toLowerCase())); return }
 }
 
+// A press in the panel or the strip queues its job and says so; the job timer sends it to the chat,
+// the same way the dashboard's jobs go out. Every send and failure lands in ~/.youcloned/press.log.
+function pressJob($, job) {
+  pressed.push(job)
+  try { $.ui.toast('Starting ' + job.label + '…') } catch {}
+  if (!dashOn) $.clock.after(0, () => sendPressed($))
+}
+
+async function sendPressed($) {
+  while (pressed.length) {
+    const job = pressed.shift()
+    try { await runJob($, job.text); await logPress($, 'sent: ' + job.label) }
+    catch (err) { await logPress($, 'failed: ' + job.label + ': ' + String((err && err.message) || err).slice(0, 300)) }
+  }
+}
+
+async function logPress($, line) {
+  try {
+    const file = dataDir() + '/press.log'
+    const old = (await $.fs.exists(file)) ? await $.fs.read(file) : ''
+    await $.fs.write(file, (old + new Date(await $.clock.now()).toISOString() + ' ' + line + '\n').slice(-20000))
+  } catch {}
+}
+
 // Reads jobs the dashboard queued and starts them.
 async function drainJobs($) {
+  await sendPressed($)
   const file = dataDir() + '/jobs.jsonl'
   if (!(await $.fs.exists(file))) return
   const text = await $.fs.read(file)
@@ -628,7 +654,7 @@ export function register(on) {
         project
           ? Button({ key: 'yc-open', label: 'YouCloned', plain: true, onPress: () => togglePane($) })
           : Button({ key: 'yc-setup', label: 'Set up YouCloned', plain: true, onPress: () => openDashboard($) }),
-        ...pinnedSkills().slice(0, 4).map(j => Button({ key: 'yc-job-' + j.key, label: j.label, plain: true, onPress: () => runJob($, j.text) })),
+        ...pinnedSkills().slice(0, 4).map(j => Button({ key: 'yc-job-' + j.key, label: j.label, plain: true, onPress: () => pressJob($, j) })),
       ] }),
     ] })
     return theirs ? Box({ flexDirection: 'column', children: [strip, theirs] }) : strip
@@ -782,7 +808,7 @@ export function register(on) {
         body.push(Text({ children: ['Claude plan left: ' + (left == null ? '?' : Math.round(left) + '%') + '   BNSN words: ' + (live.words == null ? 'not linked' : Number(live.words).toLocaleString('en-US'))] }))
       }
       body.push(Box({ flexDirection: 'row', flexWrap: 'wrap', columnGap: 1, rowGap: 0, children: [
-        ...pinnedSkills().map(j => Button({ key: 'home-job-' + j.key, label: j.label, onPress: () => runJob($, j.text) })),
+        ...pinnedSkills().map(j => Button({ key: 'home-job-' + j.key, label: j.label, onPress: () => pressJob($, j) })),
         Button({ key: 'home-all', label: 'All skills', plain: true, onPress: () => { tab = 'skills'; redraw() } }),
       ] }))
       const rows = CREW.map(c => ({ title: c.title + ' helper', what: c.what, waiting: crew[c.name].drafts.length > 0,
@@ -804,7 +830,7 @@ export function register(on) {
       ] }))
       if (desk) body.push(pic('New from Jon: ' + NEW_FROM_JON.title, videoSvg(NEW_FROM_JON)))
       else body.push(Text({ wrap: 'wrap', children: ['New from Jon: ' + NEW_FROM_JON.title] }))
-      body.push(Button({ key: 'home-new', label: NEW_FROM_JON.button, onPress: () => runJob($, NEW_FROM_JON.text) }))
+      body.push(Button({ key: 'home-new', label: NEW_FROM_JON.button, onPress: () => pressJob($, { label: NEW_FROM_JON.button, text: NEW_FROM_JON.text }) }))
     }
     if (tab === 'crew') {
       body.push(Text({ dimColor: true, wrap: 'wrap', children: ['Your crew reads and drafts. The safety gate stops every post, send, purchase, refund, cancel and delete in code, so nothing goes out without you.'] }))
@@ -827,22 +853,37 @@ export function register(on) {
       }
     }
     if (tab === 'skills') {
-      body.push(Text({ dimColor: true, wrap: 'wrap', children: ['Pin the skills you use most. Pinned skills show on your Dashboard and above the message box.'] }))
       body.push(Input({ key: 'skill-search', label: 'Find a skill', placeholder: 'Type a word and press Enter', value: skillQuery, submitLabel: 'find',
         onSubmit: (value) => { skillQuery = String(value || '').trim(); redraw() } }))
-      const q = skillQuery.toLowerCase()
-      const list = allSkills().filter(s => !q || (s.label + ' ' + s.what).toLowerCase().includes(q))
-      if (q) body.push(Button({ key: 'skill-clear', label: 'Show all ' + allSkills().length + ' skills', plain: true, onPress: () => { skillQuery = ''; redraw() } }))
-      if (!list.length) body.push(Text({ dimColor: true, children: ['No skill matches "' + skillQuery + '".'] }))
-      for (const s of list) {
-        const isPinned = pins.includes(s.key)
-        body.push(Box({ flexDirection: 'column', children: [
+      // Each skill is a card: its name, what it does, Start and Pin. Two cards across when the panel is wide.
+      const cardWidth = width >= 84 ? Math.floor((width - 1) / 2) : width
+      const card = (sk) => {
+        const isPinned = pins.includes(sk.key)
+        return Box({ key: 'card-' + sk.key, flexDirection: 'column', borderStyle: 'round', paddingX: 1, width: cardWidth, children: [
+          Text({ bold: true, children: [sk.label] }),
+          Text({ dimColor: true, wrap: 'wrap', children: [sk.what] }),
           Box({ flexDirection: 'row', columnGap: 2, children: [
-            Button({ key: 'skill-' + s.key, label: s.label, onPress: () => runJob($, s.text) }),
-            Button({ key: 'pin-' + s.key, label: isPinned ? 'Unpin' : 'Pin to Dashboard', plain: true, dimColor: !isPinned, onPress: () => togglePin($, s.key) }),
+            Button({ key: 'skill-' + sk.key, label: 'Start', onPress: () => pressJob($, sk) }),
+            Button({ key: 'pin-' + sk.key, label: isPinned ? 'Unpin' : 'Pin to Dashboard', plain: true, dimColor: true, onPress: () => togglePin($, sk.key) }),
           ] }),
-          Text({ dimColor: true, wrap: 'wrap', children: [s.what] }),
-        ] }))
+        ] })
+      }
+      const group = (title, list) => {
+        if (!list.length) return
+        body.push(Text({ bold: true, children: [title] }))
+        body.push(Box({ flexDirection: 'row', flexWrap: 'wrap', columnGap: 1, rowGap: 1, children: list.map(card) }))
+      }
+      const q = skillQuery.toLowerCase()
+      if (q) {
+        const found = allSkills().filter(sk => (sk.label + ' ' + sk.what).toLowerCase().includes(q))
+        body.push(Button({ key: 'skill-clear', label: 'Show all ' + allSkills().length + ' skills', plain: true, onPress: () => { skillQuery = ''; redraw() } }))
+        if (found.length) group('Skills that match "' + skillQuery + '"', found)
+        else body.push(Text({ dimColor: true, children: ['No skill matches "' + skillQuery + '".'] }))
+      } else {
+        const fromJon = new Set(skillKeySkills.map(sk => sk.key))
+        group('On your Dashboard', pinnedSkills())
+        group('Jon\'s skills', allSkills().filter(sk => fromJon.has(sk.key) && !pins.includes(sk.key)))
+        group('Everyday jobs', allSkills().filter(sk => !fromJon.has(sk.key) && !pins.includes(sk.key)))
       }
       if (!skillKey) body.push(Text({ dimColor: true, wrap: 'wrap', children: ['Jon\'s voice, VSL and conversion skills show up here once SkillKey is connected to your Claude app.'] }))
     }

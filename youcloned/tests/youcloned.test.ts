@@ -362,3 +362,18 @@ test('the drawings follow the panel width so text keeps its size', async ($, on)
   expect(top.props.source).toMatch(/viewBox="0 0 1176 /)
   await ui.unmount()
 })
+
+test('a pressed skill says it is starting and its job reaches the chat on the next tick', async ($, on) => {
+  const toasts: string[] = []
+  const submitted: string[] = []
+  const { clock } = sessionStubs(on, { toasts })
+  on('prompt.submit', ($, e) => { submitted.push(String(e.text)); return { value: undefined } })
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'tab-skills' })
+  await ui.press({ key: 'skill-sales-letter' })
+  expect(toasts).toContain('Starting Sales letter…')
+  await clock.advance(10)
+  expect(submitted.some(t => t.startsWith('Write a sales letter'))).toBe(true)
+  await ui.unmount()
+})
