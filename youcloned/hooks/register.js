@@ -8,7 +8,7 @@
 
 import { judge, denyText } from './gate.js'
 import { RULES_NAME, checkSetup, rulesMarkdown } from './rules.js'
-import { topSvg, heroSvg, moneySvg, crewSvg, appsSvg, videoSvg, setWidth } from './panel.js'
+import { topSvg, heroSvg, moneySvg, cardHeadSvg, plateSvg, thumbSvg, PLATE, THUMB, setWidth } from './panel.js'
 
 const PANE = 'youcloned'
 const TABS = [['home', 'Dashboard'], ['skills', 'Skills'], ['crew', 'Crew'], ['money', 'Money'], ['setup', 'Setup']]
@@ -39,6 +39,20 @@ let everywhere = false      // after setup, YouCloned shows in every session unl
 let live = { claudePct: null, claudeLabel: '', words: null } // numbers the strip and dashboard show
 
 const BLUE = '#3375d7'     // YouCloned blue
+const CARD = '#161d29'     // the dashboard's navy card, its border, and the status colors
+const CARD_LINE = '#283346'
+const AMBER = '#e8b25c'
+const BLUE_INK = '#8fb6f4'
+// The BNSN apps on the Dashboard. Which ones the owner has is not looked up yet, so OWNED_SAMPLE stands in.
+const APPS = [
+  { key: 'bnsn', open: 'https://app.bnsn.ai', get: 'https://bnsn.ai' },
+  { key: 'bookbuilder', open: 'https://bookbuilder.bnsn.ai', get: 'https://bookbuilder.bnsn.ai' },
+  { key: 'improver', open: 'https://improver.bnsn.ai', get: 'https://improver.bnsn.ai' },
+  { key: 'coursebuilder', open: 'https://coursebuilder.bnsn.ai', get: 'https://coursebuilder.bnsn.ai' },
+  { key: 'offerbuilder', soon: 'Opens Oct 14' },
+  { key: 'aic', open: 'https://community.bnsn.ai', get: 'https://collective.bnsn.ai', join: true },
+]
+const OWNED_SAMPLE = ['bnsn', 'bookbuilder', 'improver']
 const DASH_PORT = 4600
 const DASH_URL = 'http://127.0.0.1:' + DASH_PORT
 // Every skill YouCloned can start. SkillKey adds the ones the owner has bought. The owner pins the
@@ -106,6 +120,7 @@ async function togglePin($, key) {
 }
 // Jon's newest video and the job it unlocks, shown on the Home tab.
 const NEW_FROM_JON = {
+  watch: 'https://www.youtube.com/watch?v=j058ugnLtUE',
   title: 'How To Write The Story In A Video Sales Letter (VSL) With AI: Step 2 of 9',
   note: 'The skill that writes your story section is ready.',
   button: 'Write my story section',
@@ -131,6 +146,11 @@ async function runJob($, text) {
   if (word === 'setup') return startSetup($)
   if (word === 'codex') return codexButton($)
   if (word === 'crew') { $.ui.toast(await runCrew($, (args.split(/\s+/)[1] || '').toLowerCase())); return }
+}
+
+// Going through a helper's drafts with the owner, one at a time; nothing goes out without their yes.
+function reviewJob(c) {
+  return { label: 'Review ' + c.title + ' drafts', text: 'Show me the drafts in ' + crewDir(c.name) + '/drafts one at a time, newest first. For each one I will say send, edit or skip. Before anything goes out, show me exactly what goes where and wait for my yes. Move each finished draft into a "done" folder next to drafts.' }
 }
 
 // A press in the panel or the strip queues its job and says so; the job timer sends it to the chat,
@@ -829,37 +849,80 @@ export function register(on) {
       if (!lines.length) lines.push('Your crew is caught up')
       lines.push('New from Jon: VSL Story, step 2 of 9')
       if (desk) {
+        // The Dashboard: display cards are pictures; every action card is a Claude box in the dashboard's
+        // navy with a drawn header, and every button is a Claude button or link inside a blue box.
         let name = ''
         try { const m = ((await readRules($)) || '').match(/^#+\s*Who I am\s*\n+([^\n]+)/m); name = m ? m[1].trim().split(/[ ,]/)[0] : '' } catch {}
+        const ycBox = (child, fill) => Box({ borderStyle: 'round', borderColor: BLUE, ...(fill ? { backgroundColor: BLUE } : {}), paddingX: 1, children: [child] })
+        const ycButton = (key, label, onPress, fill) => ycBox(Button({ key, label, plain: true, onPress }), fill)
+        const ycLink = (href, label, fill) => ycBox(Link({ href, label }), fill)
+        const card = (head, children) => Box({ flexDirection: 'column', backgroundColor: CARD, borderStyle: 'round', borderColor: CARD_LINE, children: [
+          pic(head.title, cardHeadSvg(head)),
+          Box({ flexDirection: 'column', paddingX: 2, paddingY: 1, rowGap: 1, children }),
+        ] })
+        const row = (children) => Box({ flexDirection: 'row', flexWrap: 'wrap', columnGap: 1, rowGap: 1, alignItems: 'center', children })
+
         body.push(pic('Your day: plan left, Codex and BNSN words', heroSvg({ name, left, reset, words: live.words, codex: codexReady, lines })))
+
+        const pinned = pinnedSkills()
+        body.push(card({ icon: 'play', color: '#5a92ea', title: 'Start a job', meta: 'Pinned skills' }, [row([
+          ...pinned.map((j, i) => ycButton('home-job-' + j.key, j.label, () => pressJob($, j), i === 0)),
+          Button({ key: 'home-all', label: 'All skills', plain: true, dimColor: true, onPress: () => { tab = 'skills'; redraw() } }),
+        ])]))
+
+        body.push(pic('Made or saved this week (sample)', moneySvg(MONEY_SAMPLE)))
+
+        const need = CREW.filter(c => crew[c.name].drafts.length).length
+        body.push(card({ icon: 'crew', color: AMBER, title: 'Your crew', meta: need ? need + (need === 1 ? ' needs you' : ' need you') : 'All caught up' },
+          CREW.map(c => {
+            const st = crew[c.name]
+            const n = st.drafts.length
+            const status = st.running ? 'Working…' : n ? n + (n === 1 ? ' draft waiting' : ' drafts waiting') : 'Caught up' + (st.lastRun ? ' · ran ' + ago(st.lastRun, now) : '')
+            return Box({ flexDirection: 'row', columnGap: 1, alignItems: 'center', children: [
+              Box({ flexDirection: 'column', flexGrow: 1, children: [
+                Text({ children: [Text({ bold: true, children: [c.title + ' helper'] }), '  ', Text({ bold: true, color: n ? AMBER : BLUE_INK, children: [status] })] }),
+                Text({ dimColor: true, wrap: 'wrap', children: [c.what] }),
+              ] }),
+              ...(n ? [ycButton('home-review-' + c.name, 'Review ' + n + (n === 1 ? ' draft' : ' drafts'), () => pressJob($, reviewJob(c)), true)] : []),
+              ycButton('home-run-' + c.name, st.running ? 'Working…' : 'Run now', async () => { $.ui.toast(await runCrew($, c.name)) }),
+            ] })
+          })))
+
+        const owned = new Set(OWNED_SAMPLE)
+        body.push(card({ icon: 'apps', color: '#5a92ea', title: 'Your BNSN apps' }, [row(APPS.map(a => Box({ flexDirection: 'column', rowGap: 1, alignItems: 'stretch', children: [
+          Svg({ alt: a.key, source: plateSvg(a.key), width: PLATE.w, height: PLATE.h }),
+          a.soon ? Text({ dimColor: true, children: [a.soon] })
+            : owned.has(a.key) ? ycLink(a.open, 'Open', false) : ycLink(a.get, a.join ? 'Join' : 'Get it', true),
+        ] })))]))
+
+        body.push(card({ icon: 'play', color: '#5a92ea', title: 'New from Jon' }, [Box({ flexDirection: 'row', columnGap: 2, alignItems: 'center', children: [
+          Svg({ alt: 'Video thumbnail', source: thumbSvg(), width: THUMB.w, height: THUMB.h }),
+          Box({ flexDirection: 'column', flexGrow: 1, rowGap: 1, children: [
+            Text({ bold: true, wrap: 'wrap', children: [NEW_FROM_JON.title] }),
+            Text({ dimColor: true, wrap: 'wrap', children: [NEW_FROM_JON.note] }),
+            row([
+              ycButton('home-new', NEW_FROM_JON.button, () => pressJob($, { label: NEW_FROM_JON.button, text: NEW_FROM_JON.text }), true),
+              ycLink(NEW_FROM_JON.watch, 'Watch the video', false),
+            ]),
+          ] }),
+        ] })]))
+
+        body.push(Text({ dimColor: true, children: ['The full ', Text({ bold: true, color: BLUE_INK, children: ['YouCloned'] }), ' dashboard: click the globe at the top right'] }))
       } else {
-        body.push(Text({ bold: true, color: '#3375d7', children: ['YouCloned'] }))
+        body.push(Text({ bold: true, color: BLUE, children: ['YouCloned'] }))
         body.push(Text({ children: ['Claude plan left: ' + (left == null ? '?' : Math.round(left) + '%') + '   BNSN words: ' + (live.words == null ? 'not linked' : Number(live.words).toLocaleString('en-US'))] }))
+        body.push(Box({ flexDirection: 'row', flexWrap: 'wrap', columnGap: 1, rowGap: 0, children: [
+          ...pinnedSkills().map(j => Button({ key: 'home-job-' + j.key, label: j.label, onPress: () => pressJob($, j) })),
+          Button({ key: 'home-all', label: 'All skills', plain: true, onPress: () => { tab = 'skills'; redraw() } }),
+        ] }))
+        body.push(Box({ flexDirection: 'row', columnGap: 2, children: [
+          Button({ key: 'home-crew', label: 'Open my crew', plain: true, onPress: () => { tab = 'crew'; redraw() } }),
+          Button({ key: 'home-codex', label: codex.busy ? 'Codex is checking…' : 'Check with Codex', plain: true, onPress: () => codexButton($) }),
+          Button({ key: 'home-dash', label: 'Full dashboard', plain: true, onPress: () => openDashboard($) }),
+        ] }))
+        body.push(Text({ wrap: 'wrap', children: ['New from Jon: ' + NEW_FROM_JON.title] }))
+        body.push(Button({ key: 'home-new', label: NEW_FROM_JON.button, onPress: () => pressJob($, { label: NEW_FROM_JON.button, text: NEW_FROM_JON.text }) }))
       }
-      body.push(Box({ flexDirection: 'row', flexWrap: 'wrap', columnGap: 1, rowGap: 0, children: [
-        ...pinnedSkills().map(j => Button({ key: 'home-job-' + j.key, label: j.label, onPress: () => pressJob($, j) })),
-        Button({ key: 'home-all', label: 'All skills', plain: true, onPress: () => { tab = 'skills'; redraw() } }),
-      ] }))
-      const rows = CREW.map(c => ({ title: c.title + ' helper', what: c.what, waiting: crew[c.name].drafts.length > 0,
-        badge: crew[c.name].running ? 'Working' : crew[c.name].drafts.length ? crew[c.name].drafts.length + ' waiting' : 'Caught up' }))
-      if (desk) body.push(pic('Made or saved this week (sample)', moneySvg(MONEY_SAMPLE)))
-      if (desk) body.push(pic('Your crew', crewSvg(rows)))
-      body.push(Box({ flexDirection: 'row', columnGap: 2, children: [
-        Button({ key: 'home-crew', label: 'Open my crew', plain: true, onPress: () => { tab = 'crew'; redraw() } }),
-        Button({ key: 'home-codex', label: codex.busy ? 'Codex is checking…' : 'Check with Codex', plain: true, onPress: () => codexButton($) }),
-        Button({ key: 'home-dash', label: 'Full dashboard', plain: true, onPress: () => openDashboard($) }),
-      ] }))
-      if (desk) body.push(pic('Your BNSN apps', appsSvg()))
-      body.push(Box({ flexDirection: 'row', flexWrap: 'wrap', columnGap: 2, children: [
-        Link({ href: 'https://app.bnsn.ai', label: 'BNSN' }),
-        Link({ href: 'https://bookbuilder.bnsn.ai', label: 'BookBuilder' }),
-        Link({ href: 'https://improver.bnsn.ai', label: 'Improver' }),
-        Link({ href: 'https://coursebuilder.bnsn.ai', label: 'CourseBuilder' }),
-        Link({ href: 'https://community.bnsn.ai', label: 'AI Collective' }),
-      ] }))
-      if (desk) body.push(pic('New from Jon: ' + NEW_FROM_JON.title, videoSvg(NEW_FROM_JON)))
-      else body.push(Text({ wrap: 'wrap', children: ['New from Jon: ' + NEW_FROM_JON.title] }))
-      body.push(Button({ key: 'home-new', label: NEW_FROM_JON.button, onPress: () => pressJob($, { label: NEW_FROM_JON.button, text: NEW_FROM_JON.text }) }))
     }
     if (tab === 'crew') {
       body.push(Text({ dimColor: true, wrap: 'wrap', children: ['Your crew reads and drafts. The safety gate stops every post, send, purchase, refund, cancel and delete in code, so nothing goes out without you.'] }))
@@ -872,9 +935,7 @@ export function register(on) {
           Text({ dimColor: true, wrap: 'wrap', children: ['Last run: ' + ago(s.lastRun, now) + (s.note ? ' · ' + s.note : '')] }),
           Box({ flexDirection: 'row', columnGap: 2, children: [
             Button({ key: 'run-' + c.name, label: s.running ? 'Working…' : 'Run now', onPress: async () => { $.ui.toast(await runCrew($, c.name)) } }),
-            ...(s.drafts.length ? [Button({ key: 'review-' + c.name, label: 'Review drafts', onPress: () => {
-              $.prompt.submit({ asUser: true, text: 'Show me the drafts in ' + crewDir(c.name) + '/drafts one at a time, newest first. For each one I will say send, edit or skip. Before anything goes out, show me exactly what goes where and wait for my yes. Move each finished draft into a "done" folder next to drafts.' })
-            } })] : []),
+            ...(s.drafts.length ? [Button({ key: 'review-' + c.name, label: 'Review drafts', onPress: () => pressJob($, reviewJob(c)) })] : []),
           ] }),
           Select({ key: 'every-' + c.name, label: 'Runs', value: String(s.every || 0), options: SCHEDULES,
             onSelect: async (value) => { s.every = Number(value); await saveCrew($); redraw() } }),

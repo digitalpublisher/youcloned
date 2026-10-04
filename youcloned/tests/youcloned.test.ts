@@ -175,7 +175,7 @@ test('the pane draws every tab in the terminal and the desktop app', async ($, o
     await ui.press({ key: 'tab-home' })
     expect(await ui.find({ key: 'home-job-vsl-lead-writer' })).toBeDefined()
     expect(await ui.find({ key: 'home-all' })).toBeDefined()
-    expect(await ui.find({ key: 'home-dash' })).toBeDefined()
+    if (surface === 'terminal') expect(await ui.find({ key: 'home-dash' })).toBeDefined()
     await ui.press({ key: 'tab-skills' })
     expect(await ui.find({ key: 'skill-sales-letter' })).toBeDefined()
     expect(await ui.find({ key: 'pin-sales-letter' })).toBeDefined()
@@ -277,32 +277,36 @@ test('SkillKey is found in the terminal by its usual name too', async ($, on) =>
   expect(out.result).toBe('Instructions for youcloned-setup')
 })
 
-test('the desktop panel pictures fill the panel: no fixed size, drawn wider than any panel', async ($, on) => {
+test('the desktop panel pictures: full-width cards have no fixed size, logos and the thumbnail have theirs', async ($, on) => {
   sessionStubs(on)
   await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await ui.press({ key: 'tab-home' })
   const pics = await ui.findAll({ type: 'Svg' })
-  expect(pics.length).toBe(6)
-  for (const p of pics) {
-    expect(p.props.width).toBeUndefined()
-    expect(p.props.source).toMatch(/^<svg[^>]* width="2400"/)
-  }
+  const sized = pics.filter(p => p.props.width !== undefined)
+  expect(sized.length).toBe(7)
+  for (const p of pics.filter(p => p.props.width === undefined)) expect(p.props.source).toMatch(/^<svg[^>]* width="2400"/)
+  const total = pics.reduce((n, p) => n + String(p.props.source).length, 0)
+  expect(total).toBeLessThan(140000)
   await ui.unmount()
 })
 
-test('the desktop Home tab is the full dashboard: logo bar, greeting, money (marked Sample), crew, apps, newest video', async ($, on) => {
+test('the desktop Dashboard: greeting, job card, money (Sample), crew with its buttons, apps with theirs, newest video', async ($, on) => {
   sessionStubs(on)
   await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await ui.press({ key: 'tab-home' })
   const alts = (await ui.findAll({ type: 'Svg' })).map(p => String(p.props.alt))
   expect(alts[0]).toBe('YouCloned')
-  expect(alts.some(a => /Made or saved this week \(sample\)/.test(a))).toBe(true)
+  for (const a of ['Start a job', 'Your crew', 'Your BNSN apps', 'New from Jon']) expect(alts).toContain(a)
   const money = (await ui.findAll({ type: 'Svg' })).find(p => /Made or saved/.test(String(p.props.alt)))
   expect(money.props.source).toMatch(/>Sample</)
-  expect(alts.some(a => a.startsWith('New from Jon'))).toBe(true)
+  expect(await ui.find({ key: 'home-job-vsl-lead-writer' })).toBeDefined()
+  expect(await ui.find({ key: 'home-run-support' })).toBeDefined()
   expect(await ui.find({ key: 'home-new' })).toBeDefined()
+  const links = (await ui.findAll({ type: 'Link' })).map(l => String(l.props.href))
+  expect(links).toContain('https://app.bnsn.ai')
+  expect(links).toContain('https://www.youtube.com/watch?v=j058ugnLtUE')
   await ui.unmount()
 })
 
