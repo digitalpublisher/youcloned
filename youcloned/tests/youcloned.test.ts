@@ -37,6 +37,7 @@ function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: 
   on('mcp.call', ($, e) => {
     opts.mcpCalls?.push(e)
     if (!sk || (e.server !== sk && e.server !== 'claude.ai SkillKey')) throw new Error('no such server')
+    if (e.tool === 'list_skills') return { value: { content: [{ type: 'text', text: '- AI Revenue Plan (skill: "ai-revenue-plan"): A one-page 12-month plan\n- YouCloned Setup (skill: "youcloned-setup"): Sets up your clone\n\nWords left: 4,200' }], isError: false } }
     if (e.tool === 'word_balance') return { value: { content: [{ type: 'text', text: 'Words left: 4,200' }], isError: false } }
     if (e.tool === 'start_skill') return { value: (opts.owns || (() => true))(String(e.args.skill)) ? fromSk('Instructions for ' + e.args.skill) : { content: [{ type: 'text', text: 'That skill is not on this account. Call list_skills to see the skills this person has.' }], isError: false } }
     return { value: { content: [], isError: true } }
@@ -171,20 +172,20 @@ test('the pane draws every tab in the terminal and the desktop app', async ($, o
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
     await ui.press({ key: 'tab-home' })
-    expect(await ui.find({ key: 'home-job-0' })).toBeDefined()
+    expect(await ui.find({ key: 'home-job-vsl-lead-writer' })).toBeDefined()
+    expect(await ui.find({ key: 'home-all' })).toBeDefined()
     expect(await ui.find({ key: 'home-dash' })).toBeDefined()
-    await ui.press({ key: 'tab-do' })
-    expect(await ui.find({ key: 'setup' })).toBeDefined()
-    expect(await ui.find({ key: 'do-sales-letter' })).toBeDefined()
-    expect(await ui.find({ key: 'codex' })).toBeDefined()
+    await ui.press({ key: 'tab-skills' })
+    expect(await ui.find({ key: 'skill-sales-letter' })).toBeDefined()
+    expect(await ui.find({ key: 'pin-sales-letter' })).toBeDefined()
     await ui.press({ key: 'tab-crew' })
     expect(await ui.find({ key: 'run-support' })).toBeDefined()
     expect(await ui.find({ key: 'every-inbox' })).toBeDefined()
-    await ui.press({ key: 'tab-voice' })
-    expect(await ui.find({ type: 'Text', text: /Voice is not in this version/ })).toBeDefined()
-    await ui.press({ key: 'tab-skills' })
-    expect(await ui.find({ type: 'Text', text: /\/youcloned:setup/ })).toBeDefined()
-    await ui.press({ key: 'tab-do' })
+    await ui.press({ key: 'tab-money' })
+    expect(await ui.find({ type: 'Text', text: /These numbers are a sample/ })).toBeDefined()
+    await ui.press({ key: 'tab-setup' })
+    expect(await ui.find({ key: 'setup' })).toBeDefined()
+    expect(await ui.find({ key: 'codex' })).toBeDefined()
     await ui.unmount()
   }
 })
@@ -320,4 +321,44 @@ test('the YouCloned panel opens itself on the Home tab when a session starts in 
   await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
   await clock.advance(2000)
   expect(opened).toContain('youcloned')
+})
+
+test('no tab, job or skill button carries a keyboard letter or number', async ($, on) => {
+  sessionStubs(on)
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  for (const t of ['home', 'skills', 'crew', 'money', 'setup']) {
+    await ui.press({ key: 'tab-' + t })
+    for (const b of await ui.findAll({ type: 'Button' })) expect(b.props.hotkey).toBeUndefined()
+  }
+  await ui.unmount()
+})
+
+test('Skills lists the SkillKey skills the account owns, finds by word, and pins to the Dashboard', async ($, on) => {
+  const { clock, store } = sessionStubs(on, { skillKey: 'claude_ai_SkillKey' })
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  await clock.advance(2000)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'tab-skills' })
+  expect(await ui.find({ key: 'skill-ai-revenue-plan' })).toBeDefined()
+  expect(await ui.findAll({ key: 'skill-youcloned-setup' })).toHaveLength(0)
+  await ui.press({ key: 'pin-ai-revenue-plan' })
+  expect(store.get('pins')).toContain('ai-revenue-plan')
+  await ui.press({ key: 'tab-home' })
+  expect(await ui.find({ key: 'home-job-ai-revenue-plan' })).toBeDefined()
+  await ui.press({ key: 'tab-skills' })
+  await ui.input({ key: 'skill-search', text: 'revenue', submit: true })
+  expect(await ui.find({ key: 'skill-ai-revenue-plan' })).toBeDefined()
+  expect(await ui.findAll({ key: 'skill-sales-letter' })).toHaveLength(0)
+  await ui.unmount()
+})
+
+test('the drawings follow the panel width so text keeps its size', async ($, on) => {
+  sessionStubs(on)
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop', props: { title: 'YouCloned', bodyColumns: 140 } })
+  await ui.press({ key: 'tab-home' })
+  const top = (await ui.findAll({ type: 'Svg' }))[0]
+  expect(top.props.source).toMatch(/viewBox="0 0 1176 /)
+  await ui.unmount()
 })
