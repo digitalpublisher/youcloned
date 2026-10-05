@@ -1,7 +1,7 @@
 // The YouCloned panel's pictures for the desktop app: the same design as the dashboard,
 // drawn as SVG so it can sit in Claude's own panel. Claude's buttons go under each picture.
 
-import { MARK_WHITE, BNSN, BOOKBUILDER, IMPROVER, COURSEBUILDER, AIC, WORDMARK, LATEST_VIDEO } from './logo.js'
+import { MARK_WHITE, BNSN, BOOKBUILDER, IMPROVER, COURSEBUILDER, AIC, WORDMARK, LATEST_VIDEO, SKILLKEY } from './logo.js'
 
 const FONT = 'font-family="-apple-system,BlinkMacSystemFont,Helvetica Neue,Arial,sans-serif"'
 // The drawing width. The panel sets it from its own width so text stays at its normal size.
@@ -34,7 +34,8 @@ function tile(y, gauge, big, small) {
 }
 
 // The blue greeting card: the mark, the greeting, what needs the owner, and the three gauges.
-export function heroSvg({ name, left, reset, span, words, codex, lines }) {
+// codexPlan: { left, label } from Codex's own usage record, or null when it has none yet.
+export function heroSvg({ name, left, reset, span, words, codex, codexPlan, lines }) {
   const hour = new Date().getHours()
   const hi = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
   const list = (lines || []).slice(0, 3).map((t, i) =>
@@ -42,14 +43,17 @@ export function heroSvg({ name, left, reset, span, words, codex, lines }) {
     '<text x="46" y="' + (137 + i * 26) + '" ' + FONT + ' font-size="13.5" fill="#e6eefb">' + esc(t) + '</text>').join('')
   const claude = tile(26, tank(tilesX() + 32, 53, 18, left, '#e59672', 'g1'),
     left == null ? '…' : Math.round(left) + '<tspan font-size="12" fill="#a9bde0">% left</tspan>', (span || 'Claude plan') + (reset ? ' · resets ' + reset : ''))
-  const cdx = tile(88, tank(tilesX() + 32, 115, 18, codex ? 100 : 0, '#8fb6f4', 'g2'),
-    codex ? 'Ready' : 'Connect', codex ? 'Codex checks your work' : 'Codex, your second opinion')
+  const cdx = codexPlan
+    ? tile(88, tank(tilesX() + 32, 115, 18, codexPlan.left, '#8fb6f4', 'g2'),
+      Math.round(codexPlan.left) + '<tspan font-size="12" fill="#a9bde0">% left</tspan>', codexPlan.label)
+    : tile(88, tank(tilesX() + 32, 115, 18, codex ? 100 : 0, '#8fb6f4', 'g2'),
+      codex ? 'Ready' : 'Connect', codex ? 'Codex checks your work' : 'Codex, your second opinion')
   const tx = tilesX()
   const wordTile = '<rect x="' + tx + '" y="150" width="248" height="54" rx="11" fill="#ffffff" fill-opacity=".09" stroke="#ffffff" stroke-opacity=".16"/>' +
     '<rect x="' + (tx + 14) + '" y="159" width="36" height="36" rx="9" fill="#ffffff" fill-opacity=".14"/>' +
     '<g transform="translate(' + (tx + 18) + ' 163) scale(.29)" fill="none" stroke="#ffffff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"><rect x="12" y="24" width="72" height="54" rx="12"/><path d="M20 24l38-10c4-1 8 2 8 6v4"/><path d="M25 43h26M25 56h18"/></g>' +
-    '<text x="' + (tx + 64) + '" y="175" ' + FONT + ' font-size="19" font-weight="700" fill="#ffffff">' + (words == null ? 'Link' : Number(words).toLocaleString('en-US')) + '</text>' +
-    '<text x="' + (tx + 64) + '" y="193" ' + FONT + ' font-size="11.5" fill="#c8d7f2">' + (words == null ? 'Connect SkillKey' : 'BNSN words') + '</text>'
+    '<text x="' + (tx + 64) + '" y="175" ' + FONT + ' font-size="19" font-weight="700" fill="#ffffff">' + (words == null ? 'Connect' : Number(words).toLocaleString('en-US')) + '</text>' +
+    '<text x="' + (tx + 64) + '" y="193" ' + FONT + ' font-size="11.5" fill="#c8d7f2">' + (words == null ? 'SkillKey shows your words' : 'BNSN words') + '</text>'
   return '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="' + W + '" height="230" viewBox="0 0 ' + W + ' 230">' +
     '<defs><radialGradient id="bg" cx="0" cy="0" r="1.1" gradientUnits="objectBoundingBox"><stop offset="0" stop-color="#4c8ff0"/><stop offset=".45" stop-color="#2f6fd0"/><stop offset="1" stop-color="#1d4fa6"/></radialGradient>' +
     '<radialGradient id="glow" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#ffffff" stop-opacity=".18"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></radialGradient></defs>' +
@@ -70,6 +74,7 @@ const ICONS = {
   crew: '<circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.4"/><path d="M3.5 19c.7-3 2.8-4.5 5.5-4.5s4.8 1.5 5.5 4.5M15 14.3c2.4 0 4.2 1.3 5 3.7"/>',
   apps: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
   play: '<path d="M8 5.5v13l10.5-6.5z"/>',
+  key: '<circle cx="8" cy="12" r="4"/><path d="M12 12h9M18 12v3M21 12v2"/>',
 }
 
 function svgOpen(h) {
@@ -163,7 +168,7 @@ export function cardHeadSvg({ icon, color, title, sample, meta }) {
 export const PLATE = { w: 132, h: 52 }
 export function plateSvg(name) {
   const { w: pw, h: ph } = PLATE
-  const a = { bnsn: BNSN, bookbuilder: BOOKBUILDER, improver: IMPROVER, coursebuilder: COURSEBUILDER, aic: AIC }[name]
+  const a = { skillkey: SKILLKEY, bnsn: BNSN, bookbuilder: BOOKBUILDER, improver: IMPROVER, coursebuilder: COURSEBUILDER, aic: AIC }[name]
   let inner
   if (!a) {
     const cx = pw / 2 - 50
@@ -180,8 +185,10 @@ export function plateSvg(name) {
 
 // The newest video's thumbnail, rounded, at a set size.
 export const THUMB = { w: 208, h: 117 }
-export function thumbSvg() {
+// src: the feed's thumbnail as a data address, or the one that ships with the add-on.
+export function thumbSvg(src) {
+  const img = src || LATEST_VIDEO
   return '<svg xmlns="http://www.w3.org/2000/svg" width="' + THUMB.w + '" height="' + THUMB.h + '" viewBox="0 0 ' + THUMB.w + ' ' + THUMB.h + '">' +
     '<clipPath id="t"><rect width="' + THUMB.w + '" height="' + THUMB.h + '" rx="9"/></clipPath>' +
-    '<image clip-path="url(#t)" href="' + LATEST_VIDEO + '" width="' + THUMB.w + '" height="' + THUMB.h + '" preserveAspectRatio="xMidYMid slice"/></svg>'
+    '<image clip-path="url(#t)" href="' + img + '" width="' + THUMB.w + '" height="' + THUMB.h + '" preserveAspectRatio="xMidYMid slice"/></svg>'
 }

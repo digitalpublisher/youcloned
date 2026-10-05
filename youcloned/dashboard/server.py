@@ -24,6 +24,22 @@ class Handler(SimpleHTTPRequestHandler):
         pass
 
     def do_GET(self):
+        if self.path.split("?")[0] in ("/feed.json", "/feed-thumb.jpg"):
+            # The promo feed and its thumbnail, as the add-on last saved them.
+            try:
+                if self.path.startswith("/feed.json"):
+                    body, kind = open(os.path.join(DATA, "feed.json"), "rb").read(), "application/json"
+                else:
+                    body, kind = open(open(os.path.join(DATA, "feed-thumb.txt")).read().strip(), "rb").read(), "image/jpeg"
+            except Exception:
+                self.send_error(404)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", kind)
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if self.path.split("?")[0] == "/state.json":
             path = os.path.join(DATA, "state.json")
             body = open(path, "rb").read() if os.path.exists(path) else b"{}"

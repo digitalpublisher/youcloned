@@ -20,22 +20,23 @@ const SK = '4a62845f-77ec-431f-8b76-2d42902a60fb'
 const skTools = (server = SK) => ['list_skills', 'start_skill', 'run_skill', 'word_balance'].map(t => ({ name: 'mcp__' + server + '__' + t, description: '', mcp: true }))
 const fromSk = (body: string) => ({ content: [{ type: 'text', text: 'You are short on words.\n\n<<<YOUCLONED>>>\n' + body + '\n<<<END YOUCLONED>>>\n\nWhen you have everything the steps ask for, call run_skill with skill "x".' }], isError: false })
 
-function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[]) => unknown, toasts?: string[], lists?: Record<string, string[]>, cwd?: string, skillKey?: string | null, mcpCalls?: { server: string, tool: string, args: Record<string, unknown> }[], registered?: { name: string, prompt: string }[], owns?: (slug: string) => boolean, opened?: string[], browser?: string[], toolCall?: (e: any) => void } = {}) {
+function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[]) => unknown, toasts?: string[], lists?: Record<string, string[]>, cwd?: string, skillKey?: string | null, mcpCalls?: { server: string, tool: string, args: Record<string, unknown> }[], registered?: { name: string, prompt: string }[], owns?: (slug: string) => boolean, opened?: string[], browser?: string[], toolCall?: (e: any) => void, read?: (path: string) => string | undefined, exists?: (path: string) => boolean | undefined, mcpThrow?: string } = {}) {
   const writes = new Map<string, string>()
   const store = new Map<string, unknown>(opts.project ? [['project', opts.project]] : [])
   const clock = mock.clock(on)
   on('env.get', ($, e) => ({ value: e.name === 'HOME' ? '/Users/pat' : undefined }))
   on('store.get', ($, e) => ({ value: store.get(e.key) }))
   on('store.set', ($, e) => { store.set(e.key, e.value); return { value: undefined } })
-  on('fs.exists', ($, e) => ({ value: e.path in (opts.files || {}) || e.path.endsWith('/skills') }))
+  on('fs.exists', ($, e) => ({ value: opts.exists?.(e.path) ?? (e.path in (opts.files || {}) || e.path.endsWith('/skills')) }))
   on('fs.list', ($, e) => ({ value: e.path.endsWith('/skills') ? [{ name: 'setup', kind: 'dir', size: 0, mtimeMs: 0, isLink: false }, { name: 'notes.txt', kind: 'file', size: 1, mtimeMs: 0, isLink: false }]
     : (opts.lists?.[e.path] || []).map(name => ({ name, kind: 'file', size: 1, mtimeMs: 0, isLink: false })) }))
-  on('fs.read', ($, e) => ({ value: (opts.files || {})[e.path] ?? (e.path.endsWith('SKILL.md') ? 'description: Set up YouCloned. More.' : 'crew prompt') }))
+  on('fs.read', ($, e) => ({ value: opts.read?.(e.path) ?? (opts.files || {})[e.path] ?? (e.path.endsWith('SKILL.md') ? 'description: Set up YouCloned. More.' : 'crew prompt') }))
   on('fs.write', ($, e) => { writes.set(e.path, e.text); return { value: undefined } })
   const sk = opts.skillKey === undefined ? SK : opts.skillKey
   on('tool.list', () => ({ value: sk ? skTools(sk) : [] }))
   on('mcp.call', ($, e) => {
     opts.mcpCalls?.push(e)
+    if (opts.mcpThrow) return { value: { content: [{ type: 'text', text: 'YouCloned MCP call: ' + opts.mcpThrow }], isError: true } }
     if (opts.browser && e.server === 'Claude_Browser') { opts.browser.push(e.tool + ' ' + JSON.stringify(e.args)); return { value: { content: [{ type: 'text', text: 'ok' }], isError: false } } }
     if (!sk || (e.server !== sk && e.server !== 'claude.ai SkillKey')) throw new Error('no such server')
     if (e.tool === 'list_skills') return { value: { content: [{ type: 'text', text: '- AI Revenue Plan (skill: "ai-revenue-plan"): A one-page 12-month plan\n- YouCloned Setup (skill: "youcloned-setup"): Sets up your clone\n\nWords left: 4,200' }], isError: false } }
@@ -259,7 +260,8 @@ test('without SkillKey the crew does not start and says how to connect it', asyn
   await $.session.start({ surface: 'terminal', isInteractive: false, cwd: PROJECT })
   expect(registered.length).toBe(0)
   const out = await $.command.run({ command: 'youcloned', args: 'crew inbox' })
-  expect(out.text).toMatch(/SkillKey is not connected/)
+  expect(out.text).toMatch(/SkillKey isn't connected/)
+  expect(out.text).toMatch(/skills\.bnsn\.ai\/gifts\/install/)
 })
 
 test('load_setup hands Claude the setup interview from SkillKey, markers and SkillKey notes removed', async ($, on) => {
@@ -285,7 +287,7 @@ test('the desktop panel pictures: full-width cards have no fixed size, logos and
   await ui.press({ key: 'tab-home' })
   const pics = await ui.findAll({ type: 'Svg' })
   const sized = pics.filter(p => p.props.width !== undefined)
-  expect(sized.length).toBe(7)
+  expect(sized.length).toBe(8)
   for (const p of pics.filter(p => p.props.width === undefined)) expect(p.props.source).toMatch(/^<svg[^>]* width="2400"/)
   const total = pics.reduce((n, p) => n + String(p.props.source).length, 0)
   expect(total).toBeLessThan(140000)
@@ -414,7 +416,7 @@ test('Talk to Isaac sends the talk message to this session through the voice rel
 test('while Isaac is in a voice conversation the dashboard state says listening, and stops after', async ($, on) => {
   let during: any = null
   const { writes } = sessionStubs(on, { toolCall: () => { during = JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}') } })
-  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/work' })
   await $.tool.call({ tool: 'mcp__plugin_voicemode_voicemode__converse', input: { message: 'hi' } })
   expect(during.listening).toBe(true)
   expect(during.session).toBe('sess-1')
@@ -481,4 +483,68 @@ test('on a Mac the dashboard runs as a background service and launch.json opens 
   expect(argvs.some(a => a[0] === '/bin/launchctl' && a[1] === 'bootstrap' && a[2] === 'gui/501')).toBe(true)
   const launch = JSON.parse(writes.get(PROJECT + '/.claude/launch.json') || '{}')
   expect(launch.configurations).toContainEqual({ name: 'YouCloned', url: 'http://localhost:4600' })
+})
+
+test('only a desktop session names itself for the dashboard talk button; other chats keep its name', async ($, on) => {
+  const { writes } = sessionStubs(on, { read: (path) => writes.get(path) ?? (path.endsWith('state.json') ? JSON.stringify({ session: 'desk-1', listening: false }) : undefined) })
+  await $.session.start({ surface: 'vscode', isInteractive: true, cwd: '/work' })
+  await $.tool.call({ tool: 'mcp__plugin_voicemode_voicemode__converse', input: { message: 'hi' } })
+  expect(JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}').session).toBe('desk-1')
+})
+
+test('words come only from SkillKey\'s "Words left" line, never from another number in the reply', async ($, on) => {
+  const { writes, clock } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' } })
+  on('http.fetch', () => ({ value: { status: 404, ok: false, headers: {}, text: '' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  await clock.advance(3000)
+  expect(JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}').words).toBe(4200)
+})
+
+test('the New from Jon card shows the online feed, and the saved copy when offline', async ($, on) => {
+  const feed = JSON.stringify({ items: [{ id: 'oms-1', title: 'Over My Shoulder: the new crew', note: 'Watch the crew work.', button: 'Show me the crew', job: 'Show me my crew.', watch: 'https://www.youtube.com/watch?v=abc' }] })
+  let online = true
+  const { writes, clock } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' },
+    read: (path) => writes.get(path), exists: (path) => writes.has(path) || undefined })
+  on('http.fetch', ($, e) => e.url.endsWith('/feed.json')
+    ? { value: online ? { status: 200, ok: true, headers: {}, text: feed } : { status: 503, ok: false, headers: {}, text: '' } }
+    : { value: { status: 200, ok: true, headers: {}, text: '{}' } })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  await clock.advance(1000)
+  expect(writes.get('/Users/pat/.youcloned/feed.json')).toBe(feed)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'tab-home' })
+  expect(await ui.find({ type: 'Text', text: /Over My Shoulder: the new crew/ })).toBeDefined()
+  expect((await ui.find({ key: 'home-new' })).props.label).toBe('Show me the crew')
+  await ui.unmount()
+  online = false
+  await clock.advance(1800000)
+  const ui2 = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui2.press({ key: 'tab-home' })
+  expect(await ui2.find({ type: 'Text', text: /Over My Shoulder: the new crew/ })).toBeDefined()
+  await ui2.unmount()
+})
+
+test('a SkillKey connector from another Claude account is forgotten and the Connect SkillKey card shows', async ($, on) => {
+  const { store } = sessionStubs(on, { project: PROJECT, skillKey: null, mcpThrow: 'no connected MCP tool' })
+  store.set('skillKeyServer', 'old-account-id')
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  const out = await $.command.run({ command: 'youcloned', args: 'crew support' })
+  expect(out.text).toMatch(/SkillKey isn't connected/)
+  expect(store.get('skillKeyServer')).toBe('')
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'tab-home' })
+  const links = (await ui.findAll({ type: 'Link' })).map(l => String(l.props.href))
+  expect(links).toContain('https://skills.bnsn.ai/gifts/install')
+  expect((await ui.findAll({ type: 'Svg' })).some(p => p.props.alt === 'Connect SkillKey')).toBe(true)
+  await ui.unmount()
+})
+
+test('SkillKey is the first app, BNSN second', async ($, on) => {
+  sessionStubs(on)
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'tab-home' })
+  const plates = (await ui.findAll({ type: 'Svg' })).filter(p => p.props.width !== undefined && p.props.alt !== 'Thumbnail').map(p => p.props.alt)
+  expect(plates.slice(0, 2)).toEqual(['skillkey', 'bnsn'])
+  await ui.unmount()
 })

@@ -41,12 +41,18 @@ let listening = false       // Isaac's voice conversation is running in this ses
 let stopTalk = null         // ends the converse call that is running, when Talk is pressed again
 
 const BLUE = '#3375d7'     // YouCloned blue
+// SkillKey's install page: its "Copy SkillKey address" button opens Claude's Connectors with the steps.
+const SKILLKEY_INSTALL = 'https://skills.bnsn.ai/gifts/install'
+// The promo feed: Jon's newest item for the "New from Jon" card. It lives on our CDN, so Jon or Isaac
+// change it by uploading one file, with no new add-on version. A copy is kept for offline use.
+const FEED_URL = 'https://cdn.bnsn.ai/pdfs/youcloned/feed.json'
 const CARD = '#161d29'     // the dashboard's navy card, its border, and the status colors
 const CARD_LINE = '#283346'
 const AMBER = '#e8b25c'
 const BLUE_INK = '#8fb6f4'
 // The BNSN apps on the Dashboard. Which ones the owner has is not looked up yet, so OWNED_SAMPLE stands in.
 const APPS = [
+  { key: 'skillkey', open: 'https://skills.bnsn.ai', get: SKILLKEY_INSTALL },
   { key: 'bnsn', open: 'https://app.bnsn.ai', get: 'https://bnsn.ai' },
   { key: 'bookbuilder', open: 'https://bookbuilder.bnsn.ai', get: 'https://bookbuilder.bnsn.ai' },
   { key: 'improver', open: 'https://improver.bnsn.ai', get: 'https://improver.bnsn.ai' },
@@ -129,7 +135,7 @@ async function togglePin($, key) {
   try { await $.store.set('pins', pins) } catch {}
   $.ui.invalidate('ui.render')
 }
-// Jon's newest video and the job it unlocks, shown on the Home tab.
+// Jon's newest video and the job it unlocks, shown on the Home tab until the feed has loaded once.
 const NEW_FROM_JON = {
   watch: 'https://www.youtube.com/watch?v=j058ugnLtUE',
   title: 'How To Write The Story In A Video Sales Letter (VSL) With AI: Step 2 of 9',
@@ -137,6 +143,46 @@ const NEW_FROM_JON = {
   button: 'Write my story section',
   text: 'Write the story section of my VSL with Jon\'s VSL Story Writer skill.',
 }
+let promo = NEW_FROM_JON    // the feed's first item once loaded (or its saved copy)
+let promoThumb = null       // its thumbnail as a data address, kept small for the panel
+let deskSession = false     // this session runs in Claude's desktop app (the one the dashboard belongs to)
+
+// Reads the feed (or, offline, the saved copy) and its thumbnail. Feed format:
+// { "items": [ { "id", "title", "note", "button", "job", "watch", "thumb" } ] }, first item shown.
+async function loadFeed($) {
+  const file = dataDir() + '/feed.json'
+  let text = null
+  try { const r = await $.http.fetch(FEED_URL); if (r && r.ok) text = r.text } catch {}
+  let feed = null
+  try { if (text) { feed = JSON.parse(text); await $.fs.write(file, text) } } catch { feed = null }
+  if (!feed) { try { if (await $.fs.exists(file)) feed = JSON.parse(await $.fs.read(file)) } catch {} }
+  const item = feed && Array.isArray(feed.items) ? feed.items.find(i => i && i.title && i.job) : null
+  if (!item) return
+  const id = String(item.id || 'item').replace(/[^a-z0-9-]/gi, '')
+  promo = { id, title: String(item.title), note: String(item.note || ''), button: String(item.button || 'Start'), text: String(item.job), watch: /^https:\/\//.test(item.watch || '') ? item.watch : null }
+  const thumb = dataDir() + '/feed-' + id + '.jpg'
+  if (/^https:\/\//.test(item.thumb || '') && !(await $.fs.exists(thumb))) await run($, ['/usr/bin/curl', '-sfL', '--max-time', '20', '-o', thumb, item.thumb])
+  const b64 = ((await run($, ['/usr/bin/base64', '-i', thumb])).stdout || '').replace(/\s+/g, '')
+  // The panel's pictures share a size budget; a feed thumbnail over ~24k characters is left out.
+  promoThumb = b64 && b64.length < 24000 ? 'data:image/jpeg;base64,' + b64 : null
+  try { await $.fs.write(dataDir() + '/feed-thumb.txt', thumb) } catch {}
+  $.ui.invalidate('ui.render')
+}
+
+// Codex's own usage record: the last rate-limit line in its newest session log.
+async function readCodexPlan($) {
+  const r = await run($, ['/bin/sh', '-c', 'f=$(ls -t "' + home + '"/.codex/sessions/*/*/*/*.jsonl 2>/dev/null | head -1); [ -n "$f" ] && tail -c 3000000 "$f" | grep \'"rate_limits"\' | tail -1'])
+  const find = (o) => { if (!o || typeof o !== 'object') return null; if (o.rate_limits) return o.rate_limits; for (const v of Object.values(o)) { const x = find(v); if (x) return x } return null }
+  try {
+    const p = (find(JSON.parse(r.stdout)) || {}).primary
+    if (!p || typeof p.used_percent !== 'number') return
+    const d = p.resets_at ? new Date(p.resets_at * 1000) : null
+    const span = p.window_minutes >= 10080 ? 'this week' : p.window_minutes ? 'this ' + Math.round(p.window_minutes / 60) + ' hours' : ''
+    live.codex = { left: Math.max(0, 100 - p.used_percent),
+      label: 'Codex' + (d ? ' · resets ' + d.toLocaleDateString('en-US', { weekday: 'short' }) + ' ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : span ? ' · ' + span : '') }
+  } catch {}
+}
+
 // Made or saved this week. Sample figures, labelled Sample, until the owner's Stripe and job hours are wired.
 const MONEY_SAMPLE = { total: 7514, up: 17, sample: true, parts: [
   { label: 'Sales', value: 4120, color: '#5a92ea' }, { label: 'Time', value: 3180, color: '#a598f5' }, { label: 'Bills', value: 214, color: '#e8b25c' },
@@ -226,9 +272,11 @@ async function refreshLive($, withWords) {
     try {
       const r = await skillKeyCall($, 'word_balance', {})
       const txt = (r.content || []).map(c => c.text || '').join(' ')
-      const m = txt.replace(/,/g, '').match(/(\d+)\s*words/i) || txt.replace(/,/g, '').match(/(\d{3,})/)
-      if (m) live.words = Number(m[1])
-    } catch {}
+      // Only the number SkillKey labels "Words left"; any other number (a top-up address) is not a balance.
+      const m = /words left:\s*([\d,]+)/i.exec(txt)
+      live.words = m ? Number(m[1].replace(/,/g, '')) : null
+    } catch { live.words = null }
+    await readCodexPlan($)
   }
   try {
     const name = project ? ((await readRules($)) || '').match(/^#+\s*Who I am\s*\n+([^\n]+)/m) : null
@@ -241,9 +289,15 @@ async function refreshLive($, withWords) {
 let lastName
 // What the dashboard reads: the numbers, the owner's name, this session (for the talk button) and
 // whether Isaac is in a voice conversation (for the glow).
+// Every YouCloned chat writes the numbers, but only a session in Claude's desktop app names itself as
+// the one the dashboard's talk button reaches (the dashboard lives in that app's browser pane).
 async function writeState($) {
   try {
-    await $.fs.write(dataDir() + '/state.json', JSON.stringify({ ...live, name: lastName, session: await $.session.id(), listening, at: await $.clock.now() }))
+    let mine = { session: await $.session.id(), listening }
+    if (!deskSession) {
+      try { const old = JSON.parse(await $.fs.read(dataDir() + '/state.json')); mine = { session: old.session, listening: !!old.listening } } catch { mine = {} }
+    }
+    await $.fs.write(dataDir() + '/state.json', JSON.stringify({ ...live, name: lastName, ...mine, at: await $.clock.now() }))
   } catch {}
 }
 
@@ -344,6 +398,8 @@ async function turnOn($, cwd) {
   $.clock.every(1500, () => drainJobs($))
   $.clock.every(20000, () => refreshLive($, false))
   $.clock.every(300000, () => refreshLive($, true))
+  $.clock.after(500, () => loadFeed($))
+  $.clock.every(1800000, () => loadFeed($))
   $.clock.after(2000, () => refreshLive($, true))
   // The full dashboard waits in Claude's browser pane, ready for the globe button.
   $.clock.after(1500, () => showDashboard($))
@@ -474,7 +530,15 @@ async function skillKeyCall($, tool, args) {
       last = r
     } catch (err) { last = err }
   }
-  throw new Error('SkillKey did not answer: ' + String(last && (last.message || last)).slice(0, 200))
+  // A connector id saved from another Claude account isn't here: forget it, so YouCloned shows the
+  // Connect SkillKey step instead of an error.
+  const why = last ? String(last.message || (Array.isArray(last.content) ? last.content.map(c => c.text || '').join(' ') : '') || last) : ''
+  if (/not connected|no connected|unknown server|not found/i.test(why)) {
+    skillKeyServer = null; skillKey = false
+    try { await $.store.set('skillKeyServer', '') } catch {}
+    $.ui.invalidate('ui.render')
+  }
+  throw new Error('SkillKey did not answer: ' + why.slice(0, 200))
 }
 
 // Jon's instructions for one YouCloned skill, from SkillKey. Only the part between the markers
@@ -494,7 +558,7 @@ async function fromSkillKey($, slug) {
 }
 
 const PRO_ONLY = (title) => 'The ' + title + ' helper comes with YouCloned Pro. Your SkillKey account has YouCloned Free, so this one stays off.'
-const NEEDS_SKILLKEY = 'YouCloned loads its instructions from SkillKey, and SkillKey is not connected in this Claude app yet. Connect SkillKey (Settings, Connectors), then try again.'
+const NEEDS_SKILLKEY = 'SkillKey isn\'t connected in this Claude account yet, so Jon\'s skills can\'t load. Connecting takes about a minute: open ' + SKILLKEY_INSTALL + ', click Copy SkillKey address, then in Claude click Add, then Add custom connector, and paste it.'
 
 async function readRules($) {
   if (!project) return null
@@ -727,6 +791,7 @@ export function register(on) {
       if (rulesHere) project = cwd
       // The desktop app reports its sessions as not interactive, so it counts by its surface.
       watched = e.isInteractive || e.surface === 'desktop'
+      deskSession = e.surface === 'desktop'
       if (cloneHere && watched) await turnOn($, cwd)
     } catch (err) { $.ui.log('YouCloned clone check failed: ' + String(err)) }
     try {
@@ -950,7 +1015,7 @@ export function register(on) {
       const waiting = CREW.map(c => ({ c, n: crew[c.name].drafts.length }))
       const lines = waiting.filter(x => x.n).map(x => x.c.title + ' helper: ' + x.n + (x.n === 1 ? ' draft' : ' drafts') + ' waiting for you')
       if (!lines.length) lines.push('Your crew is caught up')
-      lines.push('New from Jon: VSL Story, step 2 of 9')
+      lines.push('New from Jon: ' + promo.title)
       if (desk) {
         // The Dashboard: display cards are pictures; every action card is a Claude box in the dashboard's
         // navy with a drawn header, and every button is a Claude button or link inside a blue box.
@@ -965,11 +1030,24 @@ export function register(on) {
         ] })
         const row = (children) => Box({ flexDirection: 'row', flexWrap: 'wrap', columnGap: 1, rowGap: 1, alignItems: 'center', children })
 
-        body.push(pic('Your day: plan left, Codex and BNSN words', heroSvg({ name, left, reset, span: live.claudeSpan, words: live.words, codex: codexReady, lines })))
+        body.push(pic('Your day: plan left, Codex and BNSN words', heroSvg({ name, left, reset, span: live.claudeSpan, words: live.words, codex: codexReady, codexPlan: live.codex || null, lines })))
         body.push(Client
           ? Client({ key: 'talk', module: './talk.js', props: { listening } })
           : ycButton('home-talk', listening ? 'Isaac is listening · press to stop' : 'Talk to Isaac', () => pressTalk($), true))
         body.push(row([ycButton('home-new-project', NEW_PROJECT.label, () => pressJob($, NEW_PROJECT), false)]))
+
+        // Not connected (a new buyer, or a switched Claude account): one plain card with the way in.
+        if (!skillKey) body.push(card({ icon: 'key', color: '#5a92ea', title: 'Connect SkillKey' }, [
+          Text({ wrap: 'wrap', children: ['Jon\'s skills and your word balance run on SkillKey. Connect it once in this Claude account and every skill shows up here. It takes about a minute.'] }),
+          row([
+            ycLink(SKILLKEY_INSTALL, 'Connect SkillKey', true),
+            Button({ key: 'home-skillkey-check', label: 'I\'ve connected it', plain: true, dimColor: true, onPress: async () => {
+              await checkSkillKey($)
+              if (skillKey) { await loadSkillKeySkills($); await refreshLive($, true); $.ui.toast('SkillKey is connected') }
+              else $.ui.toast('SkillKey isn\'t showing yet. Start a new session after connecting it.')
+            } }),
+          ]),
+        ]))
 
         const pinned = pinnedSkills()
         body.push(card({ icon: 'play', color: '#5a92ea', title: 'Start a job', meta: 'Pinned skills' }, [row([
@@ -995,7 +1073,7 @@ export function register(on) {
             ] })
           })))
 
-        const owned = new Set(OWNED_SAMPLE)
+        const owned = new Set([...OWNED_SAMPLE, ...(skillKey ? ['skillkey'] : [])])
         body.push(card({ icon: 'apps', color: '#5a92ea', title: 'Your BNSN apps' }, [row(APPS.map(a => Box({ flexDirection: 'column', rowGap: 1, alignItems: 'stretch', children: [
           Svg({ alt: a.key, source: plateSvg(a.key), width: PLATE.w, height: PLATE.h }),
           a.soon ? Text({ dimColor: true, children: [a.soon] })
@@ -1003,13 +1081,13 @@ export function register(on) {
         ] })))]))
 
         body.push(card({ icon: 'play', color: '#5a92ea', title: 'New from Jon' }, [Box({ flexDirection: 'row', columnGap: 2, alignItems: 'center', children: [
-          Svg({ alt: 'Video thumbnail', source: thumbSvg(), width: THUMB.w, height: THUMB.h }),
+          Svg({ alt: 'Thumbnail', source: thumbSvg(promoThumb), width: THUMB.w, height: THUMB.h }),
           Box({ flexDirection: 'column', flexGrow: 1, rowGap: 1, children: [
-            Text({ bold: true, wrap: 'wrap', children: [NEW_FROM_JON.title] }),
-            Text({ dimColor: true, wrap: 'wrap', children: [NEW_FROM_JON.note] }),
+            Text({ bold: true, wrap: 'wrap', children: [promo.title] }),
+            Text({ dimColor: true, wrap: 'wrap', children: [promo.note] }),
             row([
-              ycButton('home-new', NEW_FROM_JON.button, () => pressJob($, { label: NEW_FROM_JON.button, text: NEW_FROM_JON.text }), true),
-              ycLink(NEW_FROM_JON.watch, 'Watch the video', false),
+              ycButton('home-new', promo.button, () => pressJob($, { label: promo.button, text: promo.text }), true),
+              ...(promo.watch ? [ycLink(promo.watch, 'Watch the video', false)] : []),
             ]),
           ] }),
         ] })]))
@@ -1027,8 +1105,8 @@ export function register(on) {
           Button({ key: 'home-codex', label: codex.busy ? 'Codex is checking…' : 'Check with Codex', plain: true, onPress: () => codexButton($) }),
           Button({ key: 'home-dash', label: 'Full dashboard', plain: true, onPress: () => openDashboard($) }),
         ] }))
-        body.push(Text({ wrap: 'wrap', children: ['New from Jon: ' + NEW_FROM_JON.title] }))
-        body.push(Button({ key: 'home-new', label: NEW_FROM_JON.button, onPress: () => pressJob($, { label: NEW_FROM_JON.button, text: NEW_FROM_JON.text }) }))
+        body.push(Text({ wrap: 'wrap', children: ['New from Jon: ' + promo.title] }))
+        body.push(Button({ key: 'home-new', label: promo.button, onPress: () => pressJob($, { label: promo.button, text: promo.text }) }))
       }
     }
     if (tab === 'crew') {
@@ -1082,7 +1160,10 @@ export function register(on) {
         group('Jon\'s skills', allSkills().filter(sk => fromJon.has(sk.key) && !pins.includes(sk.key)))
         group('Everyday jobs', allSkills().filter(sk => !fromJon.has(sk.key) && !pins.includes(sk.key)))
       }
-      if (!skillKey) body.push(Text({ dimColor: true, wrap: 'wrap', children: ['Jon\'s voice, VSL and conversion skills show up here once SkillKey is connected to your Claude app.'] }))
+      if (!skillKey) body.push(Box({ flexDirection: 'row', columnGap: 2, flexWrap: 'wrap', children: [
+        Text({ dimColor: true, wrap: 'wrap', children: ['Jon\'s voice, VSL and conversion skills show up here once SkillKey is connected.'] }),
+        Link({ href: SKILLKEY_INSTALL, label: 'Connect SkillKey' }),
+      ] }))
     }
     if (tab === 'money') {
       if (e.surface === 'desktop') body.push(pic('Made or saved this week (sample)', moneySvg(MONEY_SAMPLE)))
@@ -1098,6 +1179,7 @@ export function register(on) {
       body.push(Button({ key: 'codex', label: codex.busy ? 'Codex is checking…' : 'Check with Codex', plain: true, onPress: () => codexButton($) }))
       body.push(Text({ bold: true, children: ['SkillKey'] }))
       body.push(Text({ dimColor: true, wrap: 'wrap', children: [skillKey ? 'Connected. Jon\'s skills run from here.' : 'Not connected. Jon\'s skills unlock once SkillKey is connected to your Claude app.'] }))
+      if (!skillKey) body.push(Link({ href: SKILLKEY_INSTALL, label: 'Connect SkillKey (about a minute)' }))
       body.push(Text({ bold: true, children: ['Voice'] }))
       body.push(Text({ dimColor: true, wrap: 'wrap', children: ['Talk to your clone out loud. Coming in a later version.'] }))
       body.push(Button({ key: 'setup-dash', label: 'Open the full dashboard', plain: true, onPress: () => openDashboard($) }))

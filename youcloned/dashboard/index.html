@@ -311,9 +311,9 @@ body{padding:0;background:var(--ground)}
             </div>
           </div>
           <div class="meters">
-            <div class="meter"><svg class="g" viewBox="0 0 100 100" aria-hidden="true"><defs><clipPath id="c1"><circle cx="50" cy="50" r="44"/></clipPath></defs><circle cx="50" cy="50" r="44" fill="rgba(255,255,255,.1)"/><g clip-path="url(#c1)"><g id="claudeFill"><g class="wave"><path d="M0 64 Q15 58 30 64 T60 64 T90 64 T120 64 T150 64 T180 64 T210 64 T240 64 V220 H0 Z" fill="#e59672"/></g></g></g></svg><div><div class="num"><span id="claudePct">66</span><small>% left</small></div><div class="l" id="claudeL">Claude plan · this 5 hours</div></div></div>
-            <div class="meter"><svg class="g" viewBox="0 0 100 100" aria-hidden="true"><defs><clipPath id="c2"><circle cx="50" cy="50" r="44"/></clipPath></defs><circle cx="50" cy="50" r="44" fill="rgba(255,255,255,.1)"/><g clip-path="url(#c2)"><g transform="translate(0,-23)"><g class="wave" style="animation-duration:7.5s"><path d="M0 62 Q15 56 30 62 T60 62 T90 62 T120 62 T150 62 T180 62 T210 62 T240 62 V220 H0 Z" fill="#8fb6f4"/></g></g></g></svg><div><div class="num">62<small>% left</small></div><div class="l">Codex plan · resets Monday</div></div></div>
-            <div class="meter"><span class="wl" aria-hidden="true"><svg viewBox="0 0 96 96"><rect x="12" y="24" width="72" height="54" rx="12" fill="none" stroke="#fff" stroke-width="6"/><path d="M20 24l38-10c4-1 8 2 8 6v4" fill="none" stroke="#fff" stroke-width="6" stroke-linejoin="round"/><g stroke="#fff" stroke-width="6" stroke-linecap="round"><path d="M25 43h26"/><path d="M25 56h18"/></g><rect x="60" y="44" width="24" height="18" rx="6" fill="#fff"/></svg></span><div><div class="num" id="words">82,360</div><div class="l">BNSN words</div></div></div>
+            <div class="meter"><svg class="g" viewBox="0 0 100 100" aria-hidden="true"><defs><clipPath id="c1"><circle cx="50" cy="50" r="44"/></clipPath></defs><circle cx="50" cy="50" r="44" fill="rgba(255,255,255,.1)"/><g clip-path="url(#c1)"><g id="claudeFill"><g class="wave"><path d="M0 64 Q15 58 30 64 T60 64 T90 64 T120 64 T150 64 T180 64 T210 64 T240 64 V220 H0 Z" fill="#e59672"/></g></g></g></svg><div><div class="num"><span id="claudePct">...</span><small>% left</small></div><div class="l" id="claudeL">Claude plan · this 5 hours</div></div></div>
+            <div class="meter"><svg class="g" viewBox="0 0 100 100" aria-hidden="true"><defs><clipPath id="c2"><circle cx="50" cy="50" r="44"/></clipPath></defs><circle cx="50" cy="50" r="44" fill="rgba(255,255,255,.1)"/><g clip-path="url(#c2)"><g id="codexFill" transform="translate(0,-23)"><g class="wave" style="animation-duration:7.5s"><path d="M0 62 Q15 56 30 62 T60 62 T90 62 T120 62 T150 62 T180 62 T210 62 T240 62 V220 H0 Z" fill="#8fb6f4"/></g></g></g></svg><div><div class="num"><span id="codexPct">...</span><small>% left</small></div><div class="l" id="codexL">Codex plan</div></div></div>
+            <div class="meter"><span class="wl" aria-hidden="true"><svg viewBox="0 0 96 96"><rect x="12" y="24" width="72" height="54" rx="12" fill="none" stroke="#fff" stroke-width="6"/><path d="M20 24l38-10c4-1 8 2 8 6v4" fill="none" stroke="#fff" stroke-width="6" stroke-linejoin="round"/><g stroke="#fff" stroke-width="6" stroke-linecap="round"><path d="M25 43h26"/><path d="M25 56h18"/></g><rect x="60" y="44" width="24" height="18" rx="6" fill="#fff"/></svg></span><div><div class="num" id="words">...</div><div class="l" id="wordsL">BNSN words</div></div></div>
           </div>
         </div>
 
@@ -515,11 +515,33 @@ body{padding:0;background:var(--ground)}
         document.getElementById("claudeFill").setAttribute("transform", "translate(0," + (y - 64).toFixed(1) + ")");
       }
       if (s.claudeLabel) document.getElementById("claudeL").textContent = s.claudeLabel;
-      if (s.words != null) document.getElementById("words").textContent = fmt(s.words);
+      document.getElementById("words").textContent = s.words != null ? fmt(s.words) : "Connect";
+      document.getElementById("wordsL").textContent = s.words != null ? "BNSN words" : "Connect SkillKey to see your words";
+      if (s.codex && s.codex.left != null) {
+        document.getElementById("codexPct").textContent = Math.round(s.codex.left);
+        document.getElementById("codexL").textContent = s.codex.label || "Codex plan";
+        document.getElementById("codexFill").setAttribute("transform", "translate(0," + (94 - 88 * s.codex.left / 100 - 62).toFixed(1) + ")");
+      }
       if ("listening" in s && Date.now() - talkAt > 8000) hero.classList.toggle("live", !!s.listening);
     }).catch(function () {});
   }
   load(); setInterval(load, 2000);
+
+  // "New from Jon" follows the promo feed the add-on keeps (online, or its saved copy offline).
+  function feed() {
+    fetch("/feed.json", { cache: "no-store" }).then(function (r) { return r.ok ? r.json() : null; }).then(function (f) {
+      var item = f && f.items && f.items.filter(function (i) { return i && i.title && i.job; })[0];
+      if (!item) return;
+      document.querySelectorAll(".vid").forEach(function (v) {
+        var b = v.querySelector("b"), p = v.querySelector("p"), th = v.querySelector(".th"), old = v.querySelector("button");
+        if (b) b.textContent = item.title;
+        if (p) p.textContent = item.note || "";
+        if (th) th.style.backgroundImage = "url(/feed-thumb.jpg?" + encodeURIComponent(item.id || "") + ")";
+        if (old) { var btn = old.cloneNode(false); btn.textContent = item.button || "Start"; btn.addEventListener("click", function () { send(item.job); }); old.replaceWith(btn); }
+      });
+    }).catch(function () {});
+  }
+  feed(); setInterval(feed, 600000);
 
   // money trend: one series (sample)
   var weeks = ["Aug 16","Aug 23","Aug 30","Sep 6","Sep 13","Sep 20","Sep 27","This week"];
