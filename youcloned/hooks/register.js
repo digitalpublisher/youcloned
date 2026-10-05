@@ -36,8 +36,9 @@ let watched = false         // a person is looking at this session (terminal or 
 let dashOn = false          // the dashboard and its timers are running for this session
 let codexReady = false      // Codex is installed on this computer
 let everywhere = false      // after setup, YouCloned shows in every session unless the owner turns it off
-let live = { claudePct: null, claudeLabel: '', words: null } // numbers the strip and dashboard show
+let live = { claudePct: null, claudeLabel: '', claudeSpan: '', words: null } // numbers the strip and dashboard show
 let listening = false       // Isaac's voice conversation is running in this session
+let stopTalk = null         // ends the converse call that is running, when Talk is pressed again
 
 const BLUE = '#3375d7'     // YouCloned blue
 const CARD = '#161d29'     // the dashboard's navy card, its border, and the status colors
@@ -61,6 +62,10 @@ const SERVICE = 'ai.bnsn.youcloned.dashboard'
 // "[Voice] ..." and Claude starts the voice conversation.
 const RELAY = 'http://127.0.0.1:8771/say'
 const TALK = 'Talk to Isaac was pressed in YouCloned. Start a voice conversation now: call converse with a short hello and listen.'
+const STOPPED = 'The owner pressed Talk again in YouCloned to stop the voice conversation. Do not call converse again until they press Talk. Carry on in text with anything already asked of you.'
+
+// New project: Claude files this session in a sidebar group of its own (the add-on cannot reach the sidebar).
+const NEW_PROJECT = { key: 'new-project', label: 'New project', text: 'Start a new project for this session. Ask me its name in one short question. Then, with the Claude app\'s sidebar tools, make a sidebar group with that name (or use the one that already has it), move this session into it, and set this session\'s title to the project name. Then ask what we\'re building first.' }
 // Every skill YouCloned can start. SkillKey adds the ones the owner has bought. The owner pins the
 // ones they use most; those show on the Dashboard and in the strip above Claude's message box.
 const BUILT_IN = [
@@ -201,15 +206,20 @@ async function drainJobs($) {
 async function refreshLive($, withWords) {
   try {
     const u = await $.session.usage()
-    const w = (u.rateLimits || []).find(r => r.kind === 'five_hour') || (u.rateLimits || [])[0]
+    // The tightest window is the one that stops the owner, so the gauge shows it: the weekly limit
+    // can be nearly spent while the 5-hour one is fresh.
+    const w = (u.rateLimits || []).reduce((a, r) => (!a || r.percentUsed > a.percentUsed ? r : a), null)
     if (w) {
       live.claudePct = w.percentUsed
-      let label = 'Claude plan · this 5 hours'
+      const span = w.kind === 'seven_day' ? 'this week' : w.kind === 'five_hour' ? 'this 5 hours' : 'spend limit'
+      let label = 'Claude plan · ' + span
       if (w.resetsAt) {
         const d = new Date(w.resetsAt)
-        label = 'Claude plan · resets ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+        const day = w.kind === 'seven_day' ? d.toLocaleDateString('en-US', { weekday: 'short' }) + ' ' : ''
+        label = 'Claude plan · ' + span + ' · resets ' + day + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
       }
       live.claudeLabel = label
+      live.claudeSpan = w.kind === 'seven_day' ? 'Weekly plan' : w.kind === 'five_hour' ? '5-hour plan' : 'Claude plan'
     }
   } catch {}
   if (withWords) {
@@ -235,6 +245,12 @@ async function writeState($) {
   try {
     await $.fs.write(dataDir() + '/state.json', JSON.stringify({ ...live, name: lastName, session: await $.session.id(), listening, at: await $.clock.now() }))
   } catch {}
+}
+
+// Talk is a toggle: a press while Isaac listens stops him, otherwise it starts him.
+async function pressTalk($) {
+  if (listening && stopTalk) { stopTalk(); $.ui.toast('Isaac stopped'); return }
+  await startTalk($)
 }
 
 // Asks the voice relay to start Isaac's voice conversation in this session.
@@ -643,15 +659,20 @@ function ago(ms, now) {
 
 export function register(on) {
   // Isaac's voice conversation: the Talk button and the dashboard glow while converse runs.
+  // A second press of Talk ends the running call: returning while next is pending aborts it, and the
+  // deny text tells Isaac the owner stopped him, so he does not start listening again on his own.
   on('tool.call', { tool: 'mcp__plugin_voicemode_voicemode__converse' }, async ($, e, next) => {
     listening = true; await writeState($); $.ui.invalidate('ui.render')
-    try { return await next(e) } finally { listening = false; await writeState($); $.ui.invalidate('ui.render') }
+    const stopped = new Promise(res => { stopTalk = () => res({ deny: STOPPED }) })
+    try { return await Promise.race([next(e), stopped]) } finally {
+      stopTalk = null; listening = false; await writeState($); $.ui.invalidate('ui.render')
+    }
   })
 
   // The Talk to Isaac button (hooks/talk.js) was pressed.
   on('ui.message', async ($, e, next) => {
     if (!/talk\.js$/.test(String(e.module || ''))) return next(e)
-    await startTalk($)
+    await pressTalk($)
     return {}
   })
 
@@ -944,10 +965,11 @@ export function register(on) {
         ] })
         const row = (children) => Box({ flexDirection: 'row', flexWrap: 'wrap', columnGap: 1, rowGap: 1, alignItems: 'center', children })
 
-        body.push(pic('Your day: plan left, Codex and BNSN words', heroSvg({ name, left, reset, words: live.words, codex: codexReady, lines })))
+        body.push(pic('Your day: plan left, Codex and BNSN words', heroSvg({ name, left, reset, span: live.claudeSpan, words: live.words, codex: codexReady, lines })))
         body.push(Client
           ? Client({ key: 'talk', module: './talk.js', props: { listening } })
-          : ycButton('home-talk', listening ? 'Isaac is listening' : 'Talk to Isaac', () => startTalk($), true))
+          : ycButton('home-talk', listening ? 'Isaac is listening · press to stop' : 'Talk to Isaac', () => pressTalk($), true))
+        body.push(row([ycButton('home-new-project', NEW_PROJECT.label, () => pressJob($, NEW_PROJECT), false)]))
 
         const pinned = pinnedSkills()
         body.push(card({ icon: 'play', color: '#5a92ea', title: 'Start a job', meta: 'Pinned skills' }, [row([

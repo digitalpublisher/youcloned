@@ -1,6 +1,6 @@
 // The "Talk to Isaac" button under the greeting card, drawn by the add-on so it can glow.
-// props: { listening } . A press posts { talk: true }; while Isaac is in the conversation the
-// button pulses between two blues on a timer.
+// props: { listening } . A press posts { talk: true }, which starts Isaac or, while he listens, stops
+// him; while Isaac is in the conversation the button pulses between two blues on a timer.
 
 const BLUE = '#3375d7'
 const BLUE_DEEP = '#2659b3'
@@ -41,7 +41,7 @@ export default function Talk(props, surface) {
     children: [
       Text({ key: 'dot', bold: true, color: live && st.bright ? ON_BLUE : ON_BLUE_SUB, children: [live ? '●' : '○'] }),
       Text({ key: 'l', bold: true, color: ON_BLUE, children: [live ? 'Isaac is listening' : 'Talk to Isaac'] }),
-      Text({ key: 's', color: ON_BLUE_SUB, wrap: 'truncate-end', children: [live ? 'Just talk. He answers out loud.' : 'Press, then just talk'] }),
+      Text({ key: 's', color: ON_BLUE_SUB, wrap: 'truncate-end', children: [live ? 'Press again to stop him' : 'Press, then just talk'] }),
     ],
   })
 }

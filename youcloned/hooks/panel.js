@@ -34,14 +34,14 @@ function tile(y, gauge, big, small) {
 }
 
 // The blue greeting card: the mark, the greeting, what needs the owner, and the three gauges.
-export function heroSvg({ name, left, reset, words, codex, lines }) {
+export function heroSvg({ name, left, reset, span, words, codex, lines }) {
   const hour = new Date().getHours()
   const hi = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
   const list = (lines || []).slice(0, 3).map((t, i) =>
     '<circle cx="34" cy="' + (132 + i * 26) + '" r="3" fill="#bcd3f7"/>' +
     '<text x="46" y="' + (137 + i * 26) + '" ' + FONT + ' font-size="13.5" fill="#e6eefb">' + esc(t) + '</text>').join('')
   const claude = tile(26, tank(tilesX() + 32, 53, 18, left, '#e59672', 'g1'),
-    left == null ? '…' : Math.round(left) + '<tspan font-size="12" fill="#a9bde0">% left</tspan>', 'Claude plan' + (reset ? ' · resets ' + reset : ''))
+    left == null ? '…' : Math.round(left) + '<tspan font-size="12" fill="#a9bde0">% left</tspan>', (span || 'Claude plan') + (reset ? ' · resets ' + reset : ''))
   const cdx = tile(88, tank(tilesX() + 32, 115, 18, codex ? 100 : 0, '#8fb6f4', 'g2'),
     codex ? 'Ready' : 'Connect', codex ? 'Codex checks your work' : 'Codex, your second opinion')
   const tx = tilesX()
