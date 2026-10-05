@@ -20,7 +20,7 @@ const SK = '4a62845f-77ec-431f-8b76-2d42902a60fb'
 const skTools = (server = SK) => ['list_skills', 'start_skill', 'run_skill', 'word_balance'].map(t => ({ name: 'mcp__' + server + '__' + t, description: '', mcp: true }))
 const fromSk = (body: string) => ({ content: [{ type: 'text', text: 'You are short on words.\n\n<<<YOUCLONED>>>\n' + body + '\n<<<END YOUCLONED>>>\n\nWhen you have everything the steps ask for, call run_skill with skill "x".' }], isError: false })
 
-function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[]) => unknown, toasts?: string[], lists?: Record<string, string[]>, cwd?: string, skillKey?: string | null, mcpCalls?: { server: string, tool: string, args: Record<string, unknown> }[], registered?: { name: string, prompt: string }[], owns?: (slug: string) => boolean, opened?: string[], browser?: string[] } = {}) {
+function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[]) => unknown, toasts?: string[], lists?: Record<string, string[]>, cwd?: string, skillKey?: string | null, mcpCalls?: { server: string, tool: string, args: Record<string, unknown> }[], registered?: { name: string, prompt: string }[], owns?: (slug: string) => boolean, opened?: string[], browser?: string[], toolCall?: (e: any) => void } = {}) {
   const writes = new Map<string, string>()
   const store = new Map<string, unknown>(opts.project ? [['project', opts.project]] : [])
   const clock = mock.clock(on)
@@ -54,7 +54,8 @@ function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: 
   on('session.cwd', () => ({ value: opts.cwd || '/work' }))
   on('session.messages', () => ({ value: [{ role: 'assistant', text: 'I wrote copy/letter.md', toolUses: [] }] }))
   on('process.run', ($, e) => ({ value: opts.process ? opts.process(e.argv) : { exitCode: 1, stdout: '', stderr: '' } }))
-  on('tool.call', () => ({ result: 'ran' }))
+  on('tool.call', ($, e) => { opts.toolCall?.(e); return { result: 'ran' } })
+  on('session.id', () => ({ value: 'sess-1' }))
   return { writes, store, clock }
 }
 
@@ -391,6 +392,46 @@ test('in the desktop app the full dashboard loads into the browser pane and the 
   await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
   await clock.advance(2000)
   expect(browser[0]).toBe('preview_start {"name":"YouCloned"}')
-  expect(browser[1]).toMatch(/preview_start \{"url":"http:\/\/127\.0\.0\.1:4600\/"\}/)
+  expect(browser[1]).toMatch(/preview_start \{"url":"http:\/\/localhost:4600\/"\}/)
   expect(opened).not.toContain('youcloned')
+})
+
+test('Talk to Isaac sends the talk message to this session through the voice relay', async ($, on) => {
+  const toasts: string[] = []
+  const posts: { url: string, body: string }[] = []
+  sessionStubs(on, { toasts })
+  on('http.fetch', ($, e) => { if (e.init?.method === 'POST') posts.push({ url: e.url, body: String(e.init.body) }); return { value: { status: 200, ok: true, headers: {}, text: '{}' } } })
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'tab-home' })
+  await ui.post({ key: 'talk', data: { talk: true } })
+  await ui.unmount()
+  expect(posts[0].url).toBe('http://127.0.0.1:8771/say')
+  expect(JSON.parse(posts[0].body)).toEqual({ session: 'sess-1', text: expect.stringMatching(/call converse/) })
+  expect(toasts).toContain('Isaac is listening')
+})
+
+test('while Isaac is in a voice conversation the dashboard state says listening, and stops after', async ($, on) => {
+  let during: any = null
+  const { writes } = sessionStubs(on, { toolCall: () => { during = JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}') } })
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  await $.tool.call({ tool: 'mcp__plugin_voicemode_voicemode__converse', input: { message: 'hi' } })
+  expect(during.listening).toBe(true)
+  expect(during.session).toBe('sess-1')
+  expect(JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}').listening).toBe(false)
+})
+
+test('on a Mac the dashboard runs as a background service and launch.json opens its address', async ($, on) => {
+  const argvs: string[][] = []
+  const { writes, clock } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' },
+    process: (argv) => { argvs.push(argv); return { exitCode: 0, stdout: argv[0] === '/usr/bin/id' ? '501\n' : '', stderr: '' } } })
+  on('http.fetch', () => ({ value: { status: 200, ok: true, headers: {}, text: '{}' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  await clock.advance(2000)
+  const plist = writes.get('/Users/pat/Library/LaunchAgents/ai.bnsn.youcloned.dashboard.plist') || ''
+  expect(plist).toMatch(/\/Users\/pat\/\.youcloned\/dashboard\/server\.py/)
+  expect(plist).toMatch(/<key>KeepAlive<\/key><true\/>/)
+  expect(argvs.some(a => a[0] === '/bin/launchctl' && a[1] === 'bootstrap' && a[2] === 'gui/501')).toBe(true)
+  const launch = JSON.parse(writes.get(PROJECT + '/.claude/launch.json') || '{}')
+  expect(launch.configurations).toContainEqual({ name: 'YouCloned', url: 'http://localhost:4600' })
 })

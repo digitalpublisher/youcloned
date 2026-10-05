@@ -37,6 +37,7 @@ let dashOn = false          // the dashboard and its timers are running for this
 let codexReady = false      // Codex is installed on this computer
 let everywhere = false      // after setup, YouCloned shows in every session unless the owner turns it off
 let live = { claudePct: null, claudeLabel: '', words: null } // numbers the strip and dashboard show
+let listening = false       // Isaac's voice conversation is running in this session
 
 const BLUE = '#3375d7'     // YouCloned blue
 const CARD = '#161d29'     // the dashboard's navy card, its border, and the status colors
@@ -54,7 +55,12 @@ const APPS = [
 ]
 const OWNED_SAMPLE = ['bnsn', 'bookbuilder', 'improver']
 const DASH_PORT = 4600
-const DASH_URL = 'http://127.0.0.1:' + DASH_PORT
+const DASH_URL = 'http://localhost:' + DASH_PORT
+const SERVICE = 'ai.bnsn.youcloned.dashboard'
+// Isaac's voice relay on this computer: a message sent to /say for this session is typed into it as
+// "[Voice] ..." and Claude starts the voice conversation.
+const RELAY = 'http://127.0.0.1:8771/say'
+const TALK = 'Talk to Isaac was pressed in YouCloned. Start a voice conversation now: call converse with a short hello and listen.'
 // Every skill YouCloned can start. SkillKey adds the ones the owner has bought. The owner pins the
 // ones they use most; those show on the Dashboard and in the strip above Claude's message box.
 const BUILT_IN = [
@@ -216,9 +222,28 @@ async function refreshLive($, withWords) {
   }
   try {
     const name = project ? ((await readRules($)) || '').match(/^#+\s*Who I am\s*\n+([^\n]+)/m) : null
-    await $.fs.write(dataDir() + '/state.json', JSON.stringify({ ...live, name: name ? name[1].trim().split(/[ ,]/)[0] : undefined, at: await $.clock.now() }))
+    lastName = name ? name[1].trim().split(/[ ,]/)[0] : undefined
+    await writeState($)
   } catch {}
   $.ui.invalidate('ui.render')
+}
+
+let lastName
+// What the dashboard reads: the numbers, the owner's name, this session (for the talk button) and
+// whether Isaac is in a voice conversation (for the glow).
+async function writeState($) {
+  try {
+    await $.fs.write(dataDir() + '/state.json', JSON.stringify({ ...live, name: lastName, session: await $.session.id(), listening, at: await $.clock.now() }))
+  } catch {}
+}
+
+// Asks the voice relay to start Isaac's voice conversation in this session.
+async function startTalk($) {
+  try {
+    const r = await $.http.fetch(RELAY, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ session: await $.session.id(), text: TALK }) })
+    if (!r.ok) throw new Error('relay answered ' + r.status)
+    $.ui.toast('Isaac is listening')
+  } catch { $.ui.toast('Isaac\'s voice isn\'t running on this computer') }
 }
 
 async function dashboardUp($) {
@@ -233,21 +258,65 @@ async function findPython($) {
   return 'python3'
 }
 
-// Tells Claude's Browser pane how to start the dashboard, then starts it if it isn't already running.
-async function startDashboard($, cwd) {
-  const python = await findPython($)
-  const server = $.plugin.root + '/dashboard/server.py'
-  const entry = { name: 'YouCloned', runtimeExecutable: python, runtimeArgs: [server, String(DASH_PORT)], port: DASH_PORT, autoPort: false }
+// On a Mac the dashboard runs as a background service, so it is already up when the person clicks
+// Claude's globe, and launch.json names its address (no play button, nothing to start). Elsewhere
+// Claude starts it from launch.json and the add-on starts it too.
+const onMac = () => home.startsWith('/Users/')
+
+async function run($, argv) {
+  try { return await $.process.run(argv) } catch (err) { return { exitCode: 1, stdout: '', stderr: String(err) } }
+}
+
+function servicePlist(python, server) {
+  const x = (v) => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+  return '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n' +
+    '<plist version="1.0"><dict>\n<key>Label</key><string>' + SERVICE + '</string>\n' +
+    '<key>ProgramArguments</key><array><string>' + x(python) + '</string><string>' + x(server) + '</string><string>' + DASH_PORT + '</string></array>\n' +
+    '<key>RunAtLoad</key><true/>\n<key>KeepAlive</key><true/>\n' +
+    '<key>StandardErrorPath</key><string>' + x(dataDir() + '/dashboard.log') + '</string>\n</dict></plist>\n'
+}
+
+// Copies this version's dashboard to ~/.youcloned/dashboard and (re)loads the background service when
+// either changed. Returns false when the service could not be set up.
+async function ensureService($) {
+  const dst = dataDir() + '/dashboard'
+  const plist = home + '/Library/LaunchAgents/' + SERVICE + '.plist'
+  const want = servicePlist(await findPython($), dst + '/server.py')
+  let from = '', have = ''
+  try { if (await $.fs.exists(dst + '/.from')) from = (await $.fs.read(dst + '/.from')).trim() } catch {}
+  try { if (await $.fs.exists(plist)) have = await $.fs.read(plist) } catch {}
+  if (from === $.plugin.root && have === want && (await dashboardUp($))) return true
+  await run($, ['/bin/rm', '-rf', dst])
+  await run($, ['/bin/mkdir', '-p', dataDir(), home + '/Library/LaunchAgents'])
+  if ((await run($, ['/bin/cp', '-R', $.plugin.root + '/dashboard', dst])).exitCode !== 0) return false
+  try { await $.fs.write(dst + '/.from', $.plugin.root + '\n'); await $.fs.write(plist, want) } catch { return false }
+  const uid = ((await run($, ['/usr/bin/id', '-u'])).stdout || '').trim()
+  if (!uid) return false
+  await run($, ['/bin/launchctl', 'bootout', 'gui/' + uid + '/' + SERVICE])
+  return (await run($, ['/bin/launchctl', 'bootstrap', 'gui/' + uid, plist])).exitCode === 0
+}
+
+// Names the dashboard in the clone folder's .claude/launch.json, the list Claude's browser shows.
+async function writeLaunch($, cwd, entry) {
   const launch = cwd + '/.claude/launch.json'
   let conf = { version: '0.0.1', configurations: [] }
   try { if (await $.fs.exists(launch)) conf = JSON.parse(await $.fs.read(launch)) } catch { conf = null }
-  if (conf) {
-    conf.configurations = (conf.configurations || []).filter(c => c.name !== 'YouCloned')
-    conf.configurations.push(entry)
-    try { await $.fs.write(launch, JSON.stringify(conf, null, 2) + '\n') } catch {}
+  if (!conf) return
+  conf.configurations = (conf.configurations || []).filter(c => c.name !== 'YouCloned')
+  conf.configurations.push(entry)
+  try { await $.fs.write(launch, JSON.stringify(conf, null, 2) + '\n') } catch {}
+}
+
+async function startDashboard($, cwd) {
+  if (onMac() && (await ensureService($))) {
+    await writeLaunch($, cwd, { name: 'YouCloned', url: DASH_URL })
+    return
   }
+  const python = await findPython($)
+  const server = $.plugin.root + '/dashboard/server.py'
+  await writeLaunch($, cwd, { name: 'YouCloned', runtimeExecutable: python, runtimeArgs: [server, String(DASH_PORT)], port: DASH_PORT, autoPort: false })
   if (!(await dashboardUp($))) {
-    try { const run = $.process.spawn([python, server, String(DASH_PORT)]); if (run && typeof run.catch === 'function') run.catch(() => {}) } catch (err) { $.ui.log('dashboard did not start: ' + String(err)) }
+    try { const r = $.process.spawn([python, server, String(DASH_PORT)]); if (r && typeof r.catch === 'function') r.catch(() => {}) } catch (err) { $.ui.log('dashboard did not start: ' + String(err)) }
   }
 }
 
@@ -573,6 +642,19 @@ function ago(ms, now) {
 }
 
 export function register(on) {
+  // Isaac's voice conversation: the Talk button and the dashboard glow while converse runs.
+  on('tool.call', { tool: 'mcp__plugin_voicemode_voicemode__converse' }, async ($, e, next) => {
+    listening = true; await writeState($); $.ui.invalidate('ui.render')
+    try { return await next(e) } finally { listening = false; await writeState($); $.ui.invalidate('ui.render') }
+  })
+
+  // The Talk to Isaac button (hooks/talk.js) was pressed.
+  on('ui.message', async ($, e, next) => {
+    if (!/talk\.js$/.test(String(e.module || ''))) return next(e)
+    await startTalk($)
+    return {}
+  })
+
   // The safety gate runs first, so no crew call reaches a tool without it. It fails closed.
   on('tool.call', async ($, e, next) => {
     const name = await isCrew($, e)
@@ -813,7 +895,7 @@ export function register(on) {
 
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     if (e.requestId !== PANE) return next(e)
-    const { Box, Text, Button, Input, Select, Svg, Link } = $.ui.resolve(e)
+    const { Box, Text, Button, Input, Select, Svg, Link, Client } = $.ui.resolve(e)
     const redraw = () => $.ui.invalidate('ui.render')
     const width = Math.max(30, (e.props.bodyColumns || 60) - 2)
     // The drawings follow the panel's width so text stays at its normal size instead of growing with it.
@@ -863,6 +945,9 @@ export function register(on) {
         const row = (children) => Box({ flexDirection: 'row', flexWrap: 'wrap', columnGap: 1, rowGap: 1, alignItems: 'center', children })
 
         body.push(pic('Your day: plan left, Codex and BNSN words', heroSvg({ name, left, reset, words: live.words, codex: codexReady, lines })))
+        body.push(Client
+          ? Client({ key: 'talk', module: './talk.js', props: { listening } })
+          : ycButton('home-talk', listening ? 'Isaac is listening' : 'Talk to Isaac', () => startTalk($), true))
 
         const pinned = pinnedSkills()
         body.push(card({ icon: 'play', color: '#5a92ea', title: 'Start a job', meta: 'Pinned skills' }, [row([
