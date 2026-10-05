@@ -421,6 +421,53 @@ test('while Isaac is in a voice conversation the dashboard state says listening,
   expect(JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}').listening).toBe(false)
 })
 
+test('pressing Talk again while Isaac listens stops the voice conversation and tells Isaac why', async ($, on) => {
+  const toasts: string[] = []
+  const posts: string[] = []
+  on('tool.call', { tool: 'mcp__plugin_voicemode_voicemode__converse' }, () => new Promise(() => {}))
+  const { clock } = sessionStubs(on, { toasts })
+  on('http.fetch', ($, e) => { if (e.init?.method === 'POST') posts.push(e.url); return { value: { status: 200, ok: true, headers: {}, text: '{}' } } })
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'tab-home' })
+  const call = $.tool.call({ tool: 'mcp__plugin_voicemode_voicemode__converse', input: { message: 'hi' } })
+  await clock.advance(1)
+  await ui.post({ key: 'talk', data: { talk: true } })
+  const r: any = await call
+  await ui.unmount()
+  expect(String(r.deny || r.text)).toMatch(/pressed Talk again/)
+  expect(toasts).toContain('Isaac stopped')
+  expect(posts).toEqual([])
+})
+
+test('New project asks Claude to file this session in a sidebar group of its own', async ($, on) => {
+  const submitted: string[] = []
+  const { clock } = sessionStubs(on)
+  on('prompt.submit', ($, e) => { submitted.push(String(e.text)); return { value: undefined } })
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'tab-home' })
+  await ui.press({ key: 'home-new-project' })
+  await clock.advance(10)
+  await ui.unmount()
+  expect(submitted.some(t => /sidebar group/.test(t) && /move this session/.test(t))).toBe(true)
+})
+
+test('the plan gauge shows the tightest limit: a nearly spent week beats a fresh 5 hours', async ($, on) => {
+  const { writes, clock } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' } })
+  on('http.fetch', () => ({ value: { status: 200, ok: true, headers: {}, text: '{}' } }))
+  on('session.usage', () => ({ value: { rateLimits: [
+    { kind: 'five_hour', percentUsed: 10, resetsAt: '2026-10-05T18:50:00Z' },
+    { kind: 'seven_day', percentUsed: 86, resetsAt: '2026-10-06T12:00:00Z' },
+  ] } }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  await clock.advance(2000)
+  const st = JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}')
+  expect(st.claudePct).toBe(86)
+  expect(st.claudeSpan).toBe('Weekly plan')
+  expect(st.claudeLabel).toMatch(/this week · resets/)
+})
+
 test('on a Mac the dashboard runs as a background service and launch.json opens its address', async ($, on) => {
   const argvs: string[][] = []
   const { writes, clock } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' },
