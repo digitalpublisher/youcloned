@@ -1,0 +1,10 @@
+# Case-insensitive literals that must never ship to buyers.
+jonbenson
+team.bnsn.ai
+fly.dev
+isaac.secrets
+isaac-voice
+.claude-slack-bridge
+supabase.co
+BNSN_SFTP
+Obsidian Vault
