@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { DATABASE_URL_RULE, KEY_SHAPE_RULES, isPlaceholder, mask } from '../../guards/lib/secret-rules.mjs';
 
 const BINARY_EXTENSIONS = new Set([
@@ -10,7 +11,7 @@ const BINARY_EXTENSIONS = new Set([
   '.png', '.tar', '.ttf', '.wasm', '.webm', '.woff', '.woff2', '.zip',
 ]);
 
-const SCRIPT_DIR = path.resolve(path.dirname(new URL(import.meta.url).pathname));
+const SCRIPT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)));
 const REPO_DENYLIST = path.join(SCRIPT_DIR, 'denylist.txt');
 const EMAIL_ALLOWLIST = path.join(SCRIPT_DIR, 'allow-emails.txt');
 
