@@ -2,7 +2,7 @@ YouCloned release builder
 
 Run from the worktree root.
 node tools/release/release.mjs --version X.Y.Z --out dist
-Optional installer files are copied under install/.
+The old Cursor one-click installer is retired and never goes in the zip.
 Optional guards files are copied under guards/.
 The ship gate runs before an archive is created.
 Use --dry-run to stage, gate, and print the manifest file list.

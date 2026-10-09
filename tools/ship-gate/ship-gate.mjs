@@ -105,6 +105,17 @@ const PATH_RULES = [
 const EMAIL = /\b[A-Z0-9._%+-]+@([A-Z0-9.-]+\.[A-Z]{2,})\b/gi;
 const GENERIC_ASSIGNMENT = /\b(?:KEY|SECRET|TOKEN|PASSWORD|[A-Z][A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD))\s*[:=]\s*([^\s]+)/gi;
 
+// A secret value is one token of key characters with a digit and a letter, or a long mixed-case token.
+// Names such as key: 'home-skillkey-check' or skillKey = !!skillKeyServer are code, not secrets.
+function looksLikeSecretValue(raw) {
+  const value = raw.replace(/[,;)\]}]+$/, '').replace(/^(['"`])(.*)\1$/, '$2');
+  if (value.length < 16 || isPlaceholder(value) || !/^[A-Za-z0-9_\-+/=.]+$/.test(value)) return false;
+  const hasDigit = /[0-9]/.test(value);
+  const hasLetter = /[A-Za-z]/.test(value);
+  const mixedCase = /[a-z]/.test(value) && /[A-Z]/.test(value);
+  return (hasDigit && hasLetter) || (value.length >= 32 && mixedCase);
+}
+
 function findInFile(file, root, literals, emailAllowlist) {
   let content;
   try {
@@ -133,7 +144,7 @@ function findInFile(file, root, literals, emailAllowlist) {
   }
   GENERIC_ASSIGNMENT.lastIndex = 0;
   for (const match of content.matchAll(GENERIC_ASSIGNMENT)) {
-    if (match[1].length >= 16 && !isPlaceholder(match[1])) add(match.index, 'generic-secret-assignment', match[0]);
+    if (looksLikeSecretValue(match[1])) add(match.index, 'generic-secret-assignment', match[0]);
   }
   EMAIL.lastIndex = 0;
   for (const match of content.matchAll(EMAIL)) {
