@@ -882,6 +882,17 @@ export function register(on) {
     return next(e)
   })
 
+  // YouCloned's own SkillKey look-ups (the skill list, a skill's steps, the word balance) read and
+  // change nothing, so they never wait on a permission question or Auto mode's classifier, which
+  // refuses a plugin's call it has no conversation to judge. run_skill keeps the normal check.
+  on('tool.check', { tool: /^mcp__.+__(list_skills|start_skill|word_balance)$/ }, async ($, e, next) => {
+    const m = /^mcp__(.+)__(list_skills|start_skill|word_balance)$/.exec(e.tool || '')
+    if (m && skillKeyServer && (m[1] === skillKeyServer || m[1] === skillKeyServer.replace(/[^A-Za-z0-9_-]/g, '_'))) {
+      return { decision: 'allow', reason: 'a SkillKey look-up by YouCloned' }
+    }
+    return next(e)
+  })
+
   // A crew call the gate allowed runs without a permission question, since the crew works
   // while nobody watches. A rule of the customer's that denies the call still wins.
   on('tool.check', async ($, e, next) => {
