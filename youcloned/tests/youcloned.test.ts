@@ -315,13 +315,13 @@ test('the desktop Dashboard: greeting, job card, money (Sample), crew with its b
   await ui.unmount()
 })
 
-test('a helper the SkillKey account does not own stays off and says it comes with Pro', async ($, on) => {
+test('a helper the SkillKey account does not own stays off and says so', async ($, on) => {
   const registered: { name: string, prompt: string }[] = []
   sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' }, registered, owns: (slug) => slug !== 'youcloned-crew-inbox' })
   await $.session.start({ surface: 'terminal', isInteractive: false, cwd: PROJECT })
   expect(registered.map(r => r.name)).toEqual(['support'])
   const out = await $.command.run({ command: 'youcloned', args: 'crew inbox' })
-  expect(out.text).toMatch(/comes with YouCloned Pro/)
+  expect(out.text).toMatch(/isn't on your SkillKey account yet/)
 })
 
 test('the YouCloned panel opens itself on the Home tab when a session starts in the clone folder', async ($, on) => {
@@ -669,4 +669,31 @@ test('in the first minute a SkillKey that is still connecting is not forgotten, 
   await clock.advance(16000)
   expect(registered.map(r => r.name).sort()).toEqual(['inbox', 'support'])
   expect(store.get('skillKeyServer')).toBe(SK)
+})
+
+test('the helper tool runs a crew helper inside the model\'s request', async ($, on) => {
+  sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' } })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  const out = await $.tool.call({ tool: 'mcp__youcloned__helper', name: 'support' })
+  expect(String(out.result)).not.toMatch(/SkillKey isn't connected/)
+})
+
+test('Run now on a helper that is not set up yet asks Claude to run it with the helper tool', async ($, on) => {
+  const submitted: string[] = []
+  let connected = false
+  const { clock } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' }, connected: () => connected })
+  on('prompt.submit', ($, e) => { submitted.push(String(e.text)); return { text: String(e.text) } })
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: PROJECT })
+  const out = await $.command.run({ command: 'youcloned', args: 'crew support' })
+  expect(out.text).toBe('Starting your Support helper…')
+  await clock.advance(10)
+  expect(submitted).toContain('Run my Support helper.')
+})
+
+test('the words gauge updates from any SkillKey answer that names the balance', async ($, on) => {
+  const { writes } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' },
+    toolCall: (e) => e.tool === 'mcp__' + SK + '__list_skills' ? { result: 'ok', text: '- A skill\n\nWords left: 1,234' } : undefined })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  await $.tool.call({ tool: 'mcp__' + SK + '__list_skills' })
+  expect(JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}').words).toBe(1234)
 })
