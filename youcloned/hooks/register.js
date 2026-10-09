@@ -31,6 +31,7 @@ const gatePassed = new Set() // tool_use_ids of crew calls the gate allowed
 let skillKey = false        // the SkillKey connector is on in this session
 let skillKeyServer = null   // its name for $.mcp.call: "claude.ai SkillKey" in the terminal, an id in the desktop app
 const crewReady = new Set() // crew members registered with their instructions from SkillKey
+let sessionStartedAt = 0     // when this session began; connectors can take a minute to connect after it
 const notOwned = new Set()  // YouCloned skills SkillKey says this account does not have (their plan decides)
 let cloneHere = false       // this session runs in the customer's clone folder
 let watched = false         // a person is looking at this session (terminal or desktop app)
@@ -629,9 +630,9 @@ async function skillKeyCall($, tool, args) {
     if (server !== 'claude.ai SkillKey') {
       try {
         listed = (await $.tool.list()).some(t => (typeof t === 'string' ? t : t.name) === 'mcp__' + server + '__' + tool)
-        if (!listed) continue
         const r = await $.tool.call({ tool: 'mcp__' + server + '__' + tool, ...(args || {}) })
-        if (r && !r.deny && !r.isError) return { content: [{ type: 'text', text: String(r.text ?? '') }], isError: false }
+        // SkillKey always answers with text; an empty answer counts as no answer.
+        if (r && !r.deny && !r.isError && String(r.text ?? '').trim()) return { content: [{ type: 'text', text: String(r.text) }], isError: false }
         reasons.push('as the model: ' + (r && r.deny ? r.deny : String(r?.text ?? 'no answer')))
       } catch (err) { reasons.push('as the model: ' + text(err)) }
     }
@@ -639,9 +640,13 @@ async function skillKeyCall($, tool, args) {
   // A connector id saved from another Claude account isn't here: forget it, so YouCloned shows the
   // Connect SkillKey step instead of an error.
   const why = reasons.join(' | ')
+  // In the first minute of a session the app may still be connecting SkillKey: show Connect for now,
+  // keep the saved id, and look again later.
   if (!listed && /not connected|no connected|unknown server|not found/i.test(why)) {
+    let settled = true
+    try { settled = (await $.clock.now()) - sessionStartedAt > 60000 } catch {}
     skillKeyServer = null; skillKey = false
-    try { await $.store.set('skillKeyServer', '') } catch {}
+    if (settled) { try { await $.store.set('skillKeyServer', '') } catch {} }
     $.ui.invalidate('ui.render')
   }
   throw new Error('SkillKey did not answer: ' + why.slice(0, 600))
@@ -649,7 +654,7 @@ async function skillKeyCall($, tool, args) {
 
 // Jon's instructions for one YouCloned skill, from SkillKey. Only the part between the markers
 // is used, so SkillKey's own notes (word balance, run_skill) never reach the crew.
-async function fromSkillKey($, slug) {
+async function fromSkillKey($, slug, quiet = false) {
   try {
     const r = await skillKeyCall($, 'start_skill', { skill: slug })
     const text = (r.content || []).map(c => c.text || '').join('\n')
@@ -658,7 +663,7 @@ async function fromSkillKey($, slug) {
     if (/not on this account/i.test(text)) notOwned.add(slug)
     return null
   } catch (err) {
-    $.ui.log('SkillKey ' + slug + ': ' + String(err).slice(0, 200))
+    if (!quiet) $.ui.log('SkillKey ' + slug + ': ' + String(err).slice(0, 700))
     return null
   }
 }
@@ -756,10 +761,10 @@ async function isCrew($, e) {
   return null
 }
 
-async function registerCrew($) {
+async function registerCrew($, quiet = false) {
   for (const c of CREW) {
     if (crewReady.has(c.name)) continue
-    const prompt = await fromSkillKey($, 'youcloned-crew-' + c.name)
+    const prompt = await fromSkillKey($, 'youcloned-crew-' + c.name, quiet)
     if (!prompt) continue
     await $.agent.register({
       name: c.name,
@@ -912,6 +917,7 @@ export function register(on) {
   on('agent.offer', { agent: /^youcloned:/ }, async () => ({ isOffered: false }))
 
   on('session.start', async ($, e, next) => {
+    try { sessionStartedAt = await $.clock.now() } catch {}
     interactive = e.isInteractive
     await loadState($)
     try { await refreshDrafts($) } catch {}
@@ -959,7 +965,20 @@ export function register(on) {
         inputSchema: { type: 'object', properties: { question: { type: 'string', description: 'What Codex should check; leave out to check the last piece of work' } } },
       })
     } catch (err) { $.ui.log('codex_check not registered: ' + String(err)) }
-    if (cloneHere) { try { await registerCrew($) } catch (err) { $.ui.log('crew not registered: ' + String(err)) } }
+    if (cloneHere) {
+      // SkillKey may still be connecting when a session starts, so the crew is set up after a short wait
+      // and again later if a member is still missing.
+      const setUpCrew = async () => {
+        if (CREW.every(c => crewReady.has(c.name))) return
+        await checkSkillKey($)
+        if (!skillKeyServer) return
+        try { await registerCrew($, true) } catch {}
+        $.ui.invalidate('ui.render')
+      }
+      await setUpCrew()
+      $.clock.after(15000, setUpCrew)
+      $.clock.after(60000, setUpCrew)
+    }
     try {
       await $.command.register({
         name: 'youcloned',
