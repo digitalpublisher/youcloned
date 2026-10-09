@@ -302,7 +302,7 @@ body{padding:0;background:var(--ground)}
           <div>
             <div class="who">
               <button class="mark" type="button" id="talk" aria-label="Talk to your clone"><span class="ring"></span><span class="ring"></span><span class="ring"></span><img src="assets/youcloned-mark-white.png" alt=""></button>
-              <div><h2>Good morning, <span id="who">Jon</span></h2><div class="sub" id="talkhint">Type in Claude, or tap a job</div></div>
+              <div><h2><span id="hello">Hello</span>, <span id="who">Jon</span></h2><div class="sub" id="talkhint">Type in Claude, or tap a job</div></div>
             </div>
             <div class="today">
               <div><i></i>Three emails need you</div>
@@ -506,6 +506,7 @@ body{padding:0;background:var(--ground)}
   function load() {
     fetch("/state.json", { cache: "no-store" }).then(function (r) { return r.ok ? r.json() : null; }).then(function (s) {
       if (!s) return;
+      (function(){ var h = new Date().getHours(); document.getElementById("hello").textContent = h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening"; })();
       if (s.name) document.getElementById("who").textContent = s.name;
       if (s.claudePct != null) {
         var left = Math.max(0, Math.min(100, 100 - s.claudePct));
