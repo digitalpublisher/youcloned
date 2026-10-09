@@ -663,7 +663,9 @@ async function fromSkillKey($, slug, quiet = false) {
     if (/not on this account/i.test(text)) notOwned.add(slug)
     return null
   } catch (err) {
-    if (!quiet) $.ui.log('SkillKey ' + slug + ': ' + String(err).slice(0, 700))
+    // SkillKey not connected is a setup step, not an error: say the one step, never the raw message.
+    if (/no connected|not connected|unknown server|not found/i.test(String(err))) { if (!quiet) $.ui.log('SkillKey isn\'t connected in this Claude account yet. Open ' + SKILLKEY_INSTALL + ' and follow the Connect SkillKey step.') }
+    else if (!quiet) $.ui.log('SkillKey ' + slug + ': ' + String(err).slice(0, 700))
     return null
   }
 }
