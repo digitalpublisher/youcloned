@@ -176,4 +176,4 @@ export function main(args = process.argv.slice(2)) {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) process.exitCode = main();
+if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(new URL(import.meta.url))) process.exitCode = main();
