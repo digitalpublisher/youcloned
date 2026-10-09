@@ -116,3 +116,16 @@ test('scanning this worktree root does not crash', () => {
   assert.notEqual(result.status, 2, result.stderr);
   assert.doesNotThrow(() => JSON.parse(result.stdout));
 });
+
+test('the gate still runs from a folder with a space reached through a symlink', () => {
+  const parent = tempDirectory();
+  const spaced = path.join(parent, 'My Folder');
+  fs.mkdirSync(spaced);
+  for (const name of fs.readdirSync(here)) fs.copyFileSync(path.join(here, name), path.join(spaced, name));
+  const linked = path.join(parent, 'linked');
+  fs.symlinkSync(spaced, linked);
+  const root = tempDirectory();
+  write(root, 'xoxb-' + 'M'.repeat(20));
+  const result = spawnSync(process.execPath, [path.join(linked, 'ship-gate.mjs'), root], { encoding: 'utf8' });
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+});
