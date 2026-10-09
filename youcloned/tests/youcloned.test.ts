@@ -619,12 +619,11 @@ test('the owner\'s banned words from ~/.youcloned/bans.json keep a write out', a
   expect((await $.tool.call({ tool: 'Write', file_path: PROJECT + '/post.md', content: 'Simple words.' })).result).toBe('ran')
 })
 
-test('in the desktop app SkillKey is found from its described tools when they wait behind ToolSearch', async ($, on) => {
+test('in the desktop app SkillKey is found from the context breakdown when its tools wait behind ToolSearch', async ($, on) => {
   const mcpCalls: { server: string, tool: string, args: Record<string, unknown> }[] = []
   sessionStubs(on, { listed: false, mcpCalls })
-  on('tool.describe', () => ({ description: 'A SkillKey tool', isDeferred: true }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { breakdown: { mcpTools: skTools().map(t => ({ name: t.name, serverName: SK, tokens: 100, isLoaded: false })) } } } }))
   await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/work' })
-  for (const t of skTools()) await $.tool.describe({ tool: t.name, description: '', isDeferred: true })
   const out = await $.tool.call({ tool: 'mcp__youcloned__load_setup' })
   expect(mcpCalls[0].server).toBe(SK)
   expect(out.result).toBe('Instructions for youcloned-setup')

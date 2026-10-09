@@ -589,16 +589,22 @@ function skillKeyFrom(names) {
   return null
 }
 
-// MCP tools the engine has described this session. In the desktop app a connector's tools sit
-// behind ToolSearch, and $.tool.list() leaves those out, so SkillKey is also found from here.
-const describedTools = new Set()
-
 async function checkSkillKey($) {
   try {
-    const names = (await $.tool.list()).map(t => typeof t === 'string' ? t : t.name || '').concat([...describedTools])
+    const names = (await $.tool.list()).map(t => typeof t === 'string' ? t : t.name || '')
     const found = skillKeyFrom(names)
     if (found) { skillKeyServer = found; await $.store.set('skillKeyServer', found) }
   } catch {}
+  // In the desktop app a connector's tools wait behind ToolSearch and $.tool.list() leaves them
+  // out; the context breakdown lists every connector tool, loaded or not, with its server.
+  if (!skillKeyServer) {
+    try {
+      const rows = (await $.session.usage({ breakdown: 'summary' }))?.context?.breakdown?.mcpTools || []
+      const found = skillKeyFrom(rows.map(t => t.name))
+      const row = found && rows.find(t => t.name === 'mcp__' + found + '__start_skill')
+      if (row) { skillKeyServer = row.serverName || found; await $.store.set('skillKeyServer', skillKeyServer) }
+    } catch {}
+  }
   if (!skillKeyServer) { const saved = await $.store.get('skillKeyServer'); if (typeof saved === 'string' && saved) skillKeyServer = saved }
   skillKey = !!skillKeyServer
 }
@@ -1025,19 +1031,6 @@ export function register(on) {
   })
 
   // Learns SkillKey's name the moment Claude itself uses it, for apps whose tool list leaves it out.
-  // SkillKey's tools are described to the model even when they wait behind ToolSearch.
-  on('tool.describe', { tool: /^mcp__.+__(start_skill|word_balance)$/ }, async ($, e, next) => {
-    if (!/youcloned/.test(e.tool)) {
-      describedTools.add(e.tool)
-      const found = skillKeyFrom([...describedTools])
-      if (found && found !== skillKeyServer) {
-        skillKeyServer = found; skillKey = true
-        try { await $.store.set('skillKeyServer', found) } catch {}
-      }
-    }
-    return next(e)
-  })
-
   on('tool.call', { tool: /^mcp__.+__(list_skills|start_skill|run_skill|word_balance)$/ }, async ($, e, next) => {
     const m = /^mcp__(.+)__(list_skills|start_skill|run_skill|word_balance)$/.exec(e.tool || '')
     if (m && m[1] !== skillKeyServer && !/youcloned/.test(m[1])) {
