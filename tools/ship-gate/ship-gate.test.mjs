@@ -52,8 +52,8 @@ test('each key shape is caught and output is masked', () => {
     ['database-url-password', 'postgresql' + '://user:madeuppassword@db.test/data'],
     ['database-url-password', 'mysql' + '://user:madeuppassword@db.test/data'],
     ['database-url-password', 'mongodb' + '://user:madeuppassword@db.test/data'],
-    ['generic-secret-assignment', 'API_' + 'TOKEN=' + 'U'.repeat(20)],
-    ['generic-secret-assignment', 'SECRET=' + 'V'.repeat(20)],
+    ['generic-secret-assignment', 'API_' + 'TOKEN=' + 'U7'.repeat(10)],
+    ['generic-secret-assignment', 'SECRET=' + 'V8'.repeat(10)],
   ];
   write(root, fixtures.map(([, value]) => value).join('\n'));
   const result = run(root);
@@ -132,4 +132,22 @@ test('the gate still runs from a folder with a space reached through a symlink',
   write(listed, 'see team.bnsn.ai for details\n');
   const denied = spawnSync(process.execPath, [path.join(linked, 'ship-gate.mjs'), listed], { encoding: 'utf8', env: { ...process.env, HOME: tempDirectory() } });
   assert.equal(denied.status, 1, denied.stdout + denied.stderr);
+});
+
+test('generic secret rule catches camelCase secrets and leaves code names alone', () => {
+  const caught = tempDirectory();
+  write(caught, "const apiKey = '" + 'a1B2'.repeat(5) + "';\n" + 'PASSWORD=' + 'Zq'.repeat(17) + '\n');
+  const hit = run(caught);
+  assert.equal(hit.status, 1);
+  assert.equal(hit.stdout.match(/generic-secret-assignment/g).length, 2);
+  const code = tempDirectory();
+  write(code, [
+    "  { key: 'coursebuilder', open: 'https://app.example.com' },",
+    "  { key: 'vsl-lead-writer', label: 'VSL lead' },",
+    '  skillKey = !!skillKeyServer',
+    "  Button({ key: 'home-skillkey-check', label: 'Done' })",
+    'It becomes your Obsidian vault, where your notes live.',
+  ].join('\n'));
+  const clean = run(code);
+  assert.equal(clean.status, 0, clean.stdout);
 });
