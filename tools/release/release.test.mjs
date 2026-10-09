@@ -95,8 +95,10 @@ test('manifest list is sorted and stable between runs on the same input', () => 
 test('release still runs when started through a symlink to a folder with a space', () => {
   const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'release-spaced-'));
   const linked = path.join(parent, 'My Folder');
-  fs.mkdirSync(path.join(parent, 'Real Copy', 'tools'), { recursive: true });
-  fs.cpSync(path.resolve(here, '..'), path.join(parent, 'Real Copy', 'tools'), { recursive: true });
+  for (const folder of ['tools', 'guards']) {
+    const source = path.resolve(here, '../..', folder);
+    if (fs.existsSync(source)) fs.cpSync(source, path.join(parent, 'Real Copy', folder), { recursive: true });
+  }
   fs.symlinkSync(path.join(parent, 'Real Copy'), linked);
   const root = fixture();
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'release-output-'));
