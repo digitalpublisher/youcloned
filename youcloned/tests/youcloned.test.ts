@@ -20,7 +20,7 @@ const SK = '4a62845f-77ec-431f-8b76-2d42902a60fb'
 const skTools = (server = SK) => ['list_skills', 'start_skill', 'run_skill', 'word_balance'].map(t => ({ name: 'mcp__' + server + '__' + t, description: '', mcp: true }))
 const fromSk = (body: string) => ({ content: [{ type: 'text', text: 'You are short on words.\n\n<<<YOUCLONED>>>\n' + body + '\n<<<END YOUCLONED>>>\n\nWhen you have everything the steps ask for, call run_skill with skill "x".' }], isError: false })
 
-function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[]) => unknown, toasts?: string[], lists?: Record<string, string[]>, cwd?: string, skillKey?: string | null, mcpCalls?: { server: string, tool: string, args: Record<string, unknown> }[], registered?: { name: string, prompt: string }[], owns?: (slug: string) => boolean, opened?: string[], browser?: string[], toolCall?: (e: any) => void, read?: (path: string) => string | undefined, exists?: (path: string) => boolean | undefined, mcpThrow?: string, listed?: boolean } = {}) {
+function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[]) => unknown, toasts?: string[], lists?: Record<string, string[]>, cwd?: string, skillKey?: string | null, mcpCalls?: { server: string, tool: string, args: Record<string, unknown> }[], registered?: { name: string, prompt: string }[], owns?: (slug: string) => boolean, opened?: string[], browser?: string[], toolCall?: (e: any) => unknown, read?: (path: string) => string | undefined, exists?: (path: string) => boolean | undefined, mcpThrow?: string, listed?: boolean, appOwned?: boolean } = {}) {
   const writes = new Map<string, string>()
   const store = new Map<string, unknown>(opts.project ? [['project', opts.project]] : [])
   const clock = mock.clock(on)
@@ -39,6 +39,7 @@ function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: 
     if (opts.mcpThrow) return { value: { content: [{ type: 'text', text: 'YouCloned MCP call: ' + opts.mcpThrow }], isError: true } }
     if (opts.browser && e.server === 'Claude_Browser') { opts.browser.push(e.tool + ' ' + JSON.stringify(e.args)); return { value: { content: [{ type: 'text', text: 'ok' }], isError: false } } }
     if (!sk || (e.server !== sk && e.server !== 'claude.ai SkillKey')) throw new Error('no such server')
+    if (opts.appOwned) throw new Error('no connected MCP tool "' + e.tool + '" on a server named "' + e.server + '"')
     if (e.tool === 'list_skills') return { value: { content: [{ type: 'text', text: '- AI Revenue Plan (skill: "ai-revenue-plan"): A one-page 12-month plan\n- YouCloned Setup (skill: "youcloned-setup"): Sets up your clone\n\nWords left: 4,200' }], isError: false } }
     if (e.tool === 'word_balance') return { value: { content: [{ type: 'text', text: 'Words left: 4,200' }], isError: false } }
     if (e.tool === 'start_skill') return { value: (opts.owns || (() => true))(String(e.args.skill)) ? fromSk('Instructions for ' + e.args.skill) : { content: [{ type: 'text', text: 'That skill is not on this account. Call list_skills to see the skills this person has.' }], isError: false } }
@@ -55,7 +56,7 @@ function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: 
   on('session.cwd', () => ({ value: opts.cwd || '/work' }))
   on('session.messages', () => ({ value: [{ role: 'assistant', text: 'I wrote copy/letter.md', toolUses: [] }] }))
   on('process.run', ($, e) => ({ value: opts.process ? opts.process(e.argv) : { exitCode: 1, stdout: '', stderr: '' } }))
-  on('tool.call', ($, e) => { opts.toolCall?.(e); return { result: 'ran' } })
+  on('tool.call', ($, e) => (opts.toolCall?.(e) as any) ?? { result: 'ran' })
   on('session.id', () => ({ value: 'sess-1' }))
   return { writes, store, clock }
 }
@@ -626,5 +627,18 @@ test('in the desktop app SkillKey is found from the context breakdown when its t
   await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/work' })
   const out = await $.tool.call({ tool: 'mcp__youcloned__load_setup' })
   expect(mcpCalls[0].server).toBe(SK)
+  expect(out.result).toBe('Instructions for youcloned-setup')
+})
+
+test('in the desktop app SkillKey answers through the model\'s own tool call when the app keeps the connector', async ($, on) => {
+  const calls: string[] = []
+  sessionStubs(on, { appOwned: true, toolCall: (e) => {
+    if (e.tool !== 'mcp__' + SK + '__start_skill') return undefined
+    calls.push(String(e.skill))
+    return { result: 'ok', text: fromSk('Instructions for ' + e.skill).content[0].text }
+  } })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/work' })
+  const out = await $.tool.call({ tool: 'mcp__youcloned__load_setup' })
+  expect(calls).toEqual(['youcloned-setup'])
   expect(out.result).toBe('Instructions for youcloned-setup')
 })
