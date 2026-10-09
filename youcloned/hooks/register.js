@@ -7,6 +7,7 @@
 // - Jon's instructions (setup interview, crew) live on SkillKey and load when needed, never as files here.
 
 import { judge, denyText } from './gate.js'
+import { firstKey, writtenText, isEnvFile, commandReason, parseBans, bannedIn } from './guards.js'
 import { RULES_NAME, checkSetup, rulesMarkdown } from './rules.js'
 import { topSvg, heroSvg, moneySvg, cardHeadSvg, plateSvg, thumbSvg, PLATE, THUMB, setWidth } from './panel.js'
 
@@ -379,6 +380,28 @@ async function fetchOwnPython($, uv) {
   } finally {
     await run($, ['/bin/rm', '-rf', work])
   }
+}
+
+// Git counts only when it is installed: on a Mac with no developer tools /usr/bin/git is a
+// stand-in that pops an install box.
+async function gitPath($) {
+  for (const p of ['/opt/homebrew/bin/git', '/usr/local/bin/git']) if (await $.fs.exists(p)) return p
+  if (onMac() && (await run($, ['/usr/bin/xcode-select', '-p'])).exitCode !== 0) return null
+  return (await $.fs.exists('/usr/bin/git')) ? '/usr/bin/git' : 'git'
+}
+
+// A key may go in an env file only when git ignores it (or there is no repository to leak it from).
+async function envFileAllowed($, file) {
+  const git = await gitPath($)
+  if (!git) return true
+  const dir = file.replace(/[\\/][^\\/]*$/, '') || '/'
+  const r = await runWith($, [git, 'check-ignore', '-q', '--', file], { cwd: dir })
+  return r.exitCode === 0 || r.exitCode === 128
+}
+
+async function loadBans($) {
+  const file = dataDir() + '/bans.json'
+  try { return (await $.fs.exists(file)) ? parseBans(await $.fs.read(file)) : null } catch { return null }
 }
 
 // On a Mac the dashboard runs as a background service, so it is already up when the person clicks
@@ -798,6 +821,24 @@ export function register(on) {
     if (!/talk\.js$/.test(String(e.module || ''))) return next(e)
     await pressTalk($)
     return {}
+  })
+
+  // The key guards: no key goes into a file or a command, nothing prints a secret, and the owner's
+  // own banned words stay out of what gets written. They run for every chat, crew or not.
+  on('tool.call', { tool: /^(Write|Edit|MultiEdit|NotebookEdit|Bash)$/ }, async ($, e, next) => {
+    if (e.tool === 'Bash') {
+      const why = commandReason(e.command)
+      return why ? { deny: 'YouCloned blocked this command: ' + why + '. Keep keys in a git-ignored .env file or your host\'s secret store, and never print them.' } : next(e)
+    }
+    const text = writtenText(e)
+    const key = firstKey(text)
+    if (key && !(isEnvFile(e.file_path) && (await envFileAllowed($, e.file_path)))) {
+      return { deny: 'YouCloned blocked this write: it holds a ' + key + '. Put the key in a git-ignored .env file or your host\'s secret store.' }
+    }
+    const bans = await loadBans($)
+    const found = bans ? bannedIn(text, bans) : []
+    if (found.length) return { deny: 'YouCloned blocked this write: ' + bans.message + ' Banned: ' + found.join(', ') + '.' }
+    return next(e)
   })
 
   // The safety gate runs first, so no crew call reaches a tool without it. It fails closed.
