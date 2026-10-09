@@ -204,7 +204,7 @@ async function runJob($, text) {
   const word = args.split(/\s+/)[0].toLowerCase()
   if (word === 'setup') return startSetup($)
   if (word === 'codex') return codexButton($)
-  if (word === 'crew') { $.ui.toast(await runCrew($, (args.split(/\s+/)[1] || '').toLowerCase())); return }
+  if (word === 'crew') { $.ui.toast(await crewNow($, (args.split(/\s+/)[1] || '').toLowerCase())); return }
 }
 
 // Going through a helper's drafts with the owner, one at a time; nothing goes out without their yes.
@@ -277,7 +277,7 @@ async function refreshLive($, withWords) {
       // Only the number SkillKey labels "Words left"; any other number (a top-up address) is not a balance.
       const m = /words left:\s*([\d,]+)/i.exec(txt)
       live.words = m ? Number(m[1].replace(/,/g, '')) : null
-    } catch { live.words = null }
+    } catch {} // In Auto mode SkillKey answers only inside a request; the last balance stands.
     await readCodexPlan($)
   }
   try {
@@ -668,7 +668,7 @@ async function fromSkillKey($, slug, quiet = false) {
   }
 }
 
-const PRO_ONLY = (title) => 'The ' + title + ' helper comes with YouCloned Pro. Your SkillKey account has YouCloned Free, so this one stays off.'
+const PRO_ONLY = (title) => 'The ' + title + ' helper isn\'t on your SkillKey account yet, so this one stays off.'
 const NEEDS_SKILLKEY = 'SkillKey isn\'t connected in this Claude account yet, so Jon\'s skills can\'t load. Connecting takes about a minute: open ' + SKILLKEY_INSTALL + ', click Copy SkillKey address, then in Claude click Add, then Add custom connector, and paste it.'
 
 async function readRules($) {
@@ -776,6 +776,21 @@ async function registerCrew($, quiet = false) {
     })
     crewReady.add(c.name)
   }
+}
+
+// Run now: a helper set up already starts at once. One that isn't yet needs its steps from SkillKey,
+// which Auto mode allows only inside a request, so Claude is asked to run it with the helper tool.
+async function crewNow($, name) {
+  const c = CREW.find(x => x.name === name)
+  if (!c || !project || crew[name].running) return runCrew($, name)
+  if (!crewReady.has(name)) { await checkSkillKey($); try { await registerCrew($, true) } catch {} }
+  if (crewReady.has(name) || !skillKeyServer || notOwned.has('youcloned-crew-' + name)) return runCrew($, name)
+  // Sent a moment later: a command or a button can't start a turn while it is still running.
+  $.clock.after(0, async () => {
+    try { await $.prompt.submit({ text: 'Run my ' + c.title + ' helper.' }) }
+    catch (err) { $.ui.log('could not ask Claude to run the ' + c.title + ' helper: ' + String(err).slice(0, 200)) }
+  })
+  return 'Starting your ' + c.title + ' helper…'
 }
 
 async function runCrew($, name) {
@@ -960,6 +975,13 @@ export function register(on) {
     } catch (err) { $.ui.log('load_setup not registered: ' + String(err)) }
     try {
       await $.tool.register({
+        name: 'helper',
+        description: 'Runs one of the owner\'s YouCloned crew helpers (support or inbox) and says what it started. Call it when the person presses Run now or asks a helper to run.',
+        inputSchema: { type: 'object', properties: { name: { type: 'string', enum: CREW.map(c => c.name), description: 'Which helper to run' } }, required: ['name'] },
+      })
+    } catch (err) { $.ui.log('helper tool not registered: ' + String(err)) }
+    try {
+      await $.tool.register({
         name: 'codex_check',
         description: 'Ask the customer\'s own Codex (OpenAI) to check work, read-only. With no question it reviews the uncommitted changes, or your last answer and the files it names. Use it when the customer asks for a second opinion or a Codex check.',
         inputSchema: { type: 'object', properties: { question: { type: 'string', description: 'What Codex should check; leave out to check the last piece of work' } } },
@@ -1080,7 +1102,20 @@ export function register(on) {
       skillKeyServer = m[1]; skillKey = true
       try { await $.store.set('skillKeyServer', m[1]) } catch {}
     }
-    return next(e)
+    const r = await next(e)
+    // Every SkillKey answer that names the balance updates the words gauge.
+    const w = /words left:\s*([\d,]+)/i.exec(String(r?.text ?? ''))
+    if (w) {
+      live.words = Number(w[1].replace(/,/g, ''))
+      try { await writeState($) } catch {}
+      $.ui.invalidate('ui.render')
+    }
+    return r
+  })
+
+  // The helper tool runs inside the model's request, where Auto mode lets YouCloned reach SkillKey.
+  on('tool.call', { tool: 'mcp__youcloned__helper' }, async ($, e) => {
+    return { result: await runCrew($, String(e.name || '').toLowerCase()) }
   })
 
   on('tool.call', { tool: 'mcp__youcloned__codex_check' }, async ($, e) => {
@@ -1108,7 +1143,7 @@ export function register(on) {
     if (word === 'codex') return { text: await codexCheck($, args.slice(5).trim()) }
     if (word === 'crew') {
       const name = args.split(/\s+/)[1] || ''
-      return { text: await runCrew($, name.toLowerCase()) }
+      return { text: await crewNow($, name.toLowerCase()) }
     }
     if (interactive) {
       await openPane($, true)
@@ -1223,7 +1258,7 @@ export function register(on) {
                 Text({ dimColor: true, wrap: 'wrap', children: [c.what] }),
               ] }),
               ...(n ? [ycButton('home-review-' + c.name, 'Review ' + n + (n === 1 ? ' draft' : ' drafts'), () => pressJob($, reviewJob(c)), true)] : []),
-              ycButton('home-run-' + c.name, st.running ? 'Working…' : 'Run now', async () => { $.ui.toast(await runCrew($, c.name)) }),
+              ycButton('home-run-' + c.name, st.running ? 'Working…' : 'Run now', async () => { $.ui.toast(await crewNow($, c.name)) }),
             ] })
           })))
 
@@ -1273,7 +1308,7 @@ export function register(on) {
           Text({ wrap: 'wrap', children: [c.what] }),
           Text({ dimColor: true, wrap: 'wrap', children: ['Last run: ' + ago(s.lastRun, now) + (s.note ? ' · ' + s.note : '')] }),
           Box({ flexDirection: 'row', columnGap: 2, children: [
-            Button({ key: 'run-' + c.name, label: s.running ? 'Working…' : 'Run now', onPress: async () => { $.ui.toast(await runCrew($, c.name)) } }),
+            Button({ key: 'run-' + c.name, label: s.running ? 'Working…' : 'Run now', onPress: async () => { $.ui.toast(await crewNow($, c.name)) } }),
             ...(s.drafts.length ? [Button({ key: 'review-' + c.name, label: 'Review drafts', onPress: () => pressJob($, reviewJob(c)) })] : []),
           ] }),
           Select({ key: 'every-' + c.name, label: 'Runs', value: String(s.every || 0), options: SCHEDULES,
