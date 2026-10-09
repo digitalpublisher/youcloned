@@ -88,3 +88,29 @@ test('pre-commit blocks staged secrets and allows a clean commit', () => {
   assert.equal(clean.status, 0, clean.stderr);
   assert.equal(fs.existsSync(preCommit), true);
 });
+
+test('installed hooks find Node with no node on PATH', () => {
+  const home = temporary();
+  const globalConfig = path.join(home, 'gitconfig');
+  const environment = { HOME: home, USERPROFILE: home, GIT_CONFIG_GLOBAL: globalConfig, PATH: '/usr/bin:/bin' };
+  const installed = run(installGitHooks, ['--install'], { env: environment });
+  assert.equal(installed.status, 0, installed.stderr);
+  assert.equal(fs.readFileSync(path.join(home, '.youcloned', 'lib', 'node-path'), 'utf8').trim(), process.execPath);
+  const repository = temporary();
+  for (const args of [['init', '-q'], ['config', 'user.email', 'test@example.com'], ['config', 'user.name', 'Test User']]) {
+    spawnSync('git', args, { cwd: repository, env: environment });
+  }
+  fs.writeFileSync(path.join(repository, 'fixture.txt'), 'xoxb-' + 'M'.repeat(20));
+  spawnSync('git', ['add', 'fixture.txt'], { cwd: repository, env: environment });
+  const blocked = spawnSync('git', ['commit', '-m', 'blocked'], { cwd: repository, env: environment, encoding: 'utf8' });
+  assert.notEqual(blocked.status, 0);
+  assert.match(blocked.stderr, /secret-shaped value/);
+  assert.doesNotMatch(blocked.stderr, /could not find Node|not found/);
+  fs.writeFileSync(path.join(repository, 'fixture.txt'), 'clean staged content\n');
+  spawnSync('git', ['add', 'fixture.txt'], { cwd: repository, env: environment });
+  const clean = spawnSync('git', ['commit', '-m', 'clean'], { cwd: repository, env: environment, encoding: 'utf8' });
+  assert.equal(clean.status, 0, clean.stderr);
+  const removed = run(installGitHooks, ['--uninstall'], { env: environment });
+  assert.equal(removed.status, 0, removed.stderr);
+  assert.equal(fs.existsSync(path.join(home, '.youcloned', 'lib', 'node-path')), false);
+});

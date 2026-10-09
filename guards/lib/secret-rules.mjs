@@ -88,4 +88,4 @@ function main(args) {
   return findings.length ? 1 : 0;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) process.exitCode = main(process.argv.slice(2));
+if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(new URL(import.meta.url))) process.exitCode = main(process.argv.slice(2));
