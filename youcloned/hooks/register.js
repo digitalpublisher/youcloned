@@ -1094,6 +1094,10 @@ export function register(on) {
     await $.store.set('project', folder)
     everywhere = true
     await $.store.set('everywhere', true)
+    // Switch on in this same chat: the bar, the dashboard and the crew, so the buyer needs no new chat.
+    cloneHere = true
+    if (watched) { try { await turnOn($, await $.session.cwd()) } catch {} }
+    try { await checkSkillKey($); if (skillKeyServer) await registerCrew($, true) } catch {}
     await refreshDrafts($)
     $.ui.invalidate('ui.render')
     return { result: 'Saved. Rules file: ' + folder + '/' + RULES_NAME + '. Crew folders: ' + folder + '/crew/support and ' + folder + '/crew/inbox. Every new conversation reads the rules file.' }
