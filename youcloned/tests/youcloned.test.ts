@@ -20,7 +20,7 @@ const SK = '4a62845f-77ec-431f-8b76-2d42902a60fb'
 const skTools = (server = SK) => ['list_skills', 'start_skill', 'run_skill', 'word_balance'].map(t => ({ name: 'mcp__' + server + '__' + t, description: '', mcp: true }))
 const fromSk = (body: string) => ({ content: [{ type: 'text', text: 'You are short on words.\n\n<<<YOUCLONED>>>\n' + body + '\n<<<END YOUCLONED>>>\n\nWhen you have everything the steps ask for, call run_skill with skill "x".' }], isError: false })
 
-function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[]) => unknown, toasts?: string[], lists?: Record<string, string[]>, cwd?: string, skillKey?: string | null, mcpCalls?: { server: string, tool: string, args: Record<string, unknown> }[], registered?: { name: string, prompt: string }[], owns?: (slug: string) => boolean, opened?: string[], browser?: string[], toolCall?: (e: any) => unknown, read?: (path: string) => string | undefined, exists?: (path: string) => boolean | undefined, mcpThrow?: string, listed?: boolean, appOwned?: boolean, connected?: () => boolean } = {}) {
+function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[]) => unknown, toasts?: string[], lists?: Record<string, string[]>, cwd?: string, skillKey?: string | null, mcpCalls?: { server: string, tool: string, args: Record<string, unknown> }[], registered?: { name: string, prompt: string }[], owns?: (slug: string) => boolean, opened?: string[], browser?: string[], toolCall?: (e: any) => unknown, read?: (path: string) => string | undefined, exists?: (path: string) => boolean | undefined, mcpThrow?: string, logs?: string[], listed?: boolean, appOwned?: boolean, connected?: () => boolean } = {}) {
   const writes = new Map<string, string>()
   const store = new Map<string, unknown>(opts.project ? [['project', opts.project]] : [])
   const clock = mock.clock(on)
@@ -51,7 +51,7 @@ function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: 
   on('agent.list', () => ({ value: opts.agents || [] }))
   on('command.register', () => ({ value: undefined }))
   on('ui.open', ($, e) => { opts.opened?.push(e.id); return { value: { isPlaced: true } } })
-  on('ui.log', () => ({ value: undefined }))
+  on('ui.log', ($, e) => { opts.logs?.push(String(e.text ?? e.message ?? JSON.stringify(e))); return { value: undefined } })
   on('ui.toast', ($, e) => { opts.toasts?.push(e.text); return { value: undefined } })
   on('session.start', () => ({ cwd: opts.cwd || '/work' }))
   on('session.cwd', () => ({ value: opts.cwd || '/work' }))
@@ -542,6 +542,16 @@ test('a SkillKey connector from another Claude account is forgotten and the Conn
   expect(links).toContain('https://skills.bnsn.ai/gifts/install')
   expect((await ui.findAll({ type: 'Svg' })).some(p => p.props.alt === 'Connect SkillKey')).toBe(true)
   await ui.unmount()
+})
+
+test('a SkillKey that is not connected logs the one Connect step, never the raw error', async ($, on) => {
+  const logs: string[] = []
+  const { clock } = sessionStubs(on, { project: PROJECT, skillKey: null, logs, mcpThrow: 'no connected MCP tool "start_skill" on a server named "claude.ai SkillKey"' })
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  await clock.advance(61000)
+  await $.tool.call({ tool: 'mcp__youcloned__load_setup' })
+  expect(logs.some(l => /SkillKey isn't connected in this Claude account yet/.test(l))).toBe(true)
+  expect(logs.some(l => /did not answer|no connected MCP tool/.test(l))).toBe(false)
 })
 
 test('SkillKey is the first app, BNSN second', async ($, on) => {
