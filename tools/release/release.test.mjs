@@ -44,6 +44,21 @@ test('a clean fixture builds a zip whose manifest hashes match', () => {
   }
 });
 
+test('the plugin zip has the plugin at its top level, for the Claude app Upload plugin', () => {
+  const root = fixture();
+  fs.mkdirSync(path.join(root, 'youcloned', '.claude-plugin'));
+  fs.writeFileSync(path.join(root, 'youcloned', '.claude-plugin', 'plugin.json'), '{"name":"fixture","version":"1.2.3"}\n');
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'release-output-'));
+  const result = run(root, out);
+  assert.equal(result.status, 0, result.stderr);
+  const names = entries(path.join(out, 'youcloned-plugin-1.2.3.zip'));
+  assert.ok(names.includes('.claude-plugin/plugin.json'), names.join(', '));
+  assert.ok(names.includes('nested/note.txt'));
+  assert.ok(!names.some((n) => n.startsWith('youcloned/') || n === 'manifest.json'));
+  const sum = fs.readFileSync(path.join(out, 'youcloned-plugin-1.2.3.zip.sha256'), 'utf8');
+  assert.match(sum, /^[0-9a-f]{64}  youcloned-plugin-1\.2\.3\.zip\n$/);
+});
+
 test('a planted fake key fails the gate and writes no zip', () => {
   const root = fixture();
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'release-output-'));

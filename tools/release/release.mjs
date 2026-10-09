@@ -125,6 +125,16 @@ function main(args = process.argv.slice(2), sourceRoot = process.cwd()) {
     const hash = crypto.createHash('sha256').update(fs.readFileSync(archive)).digest('hex');
     fs.writeFileSync(`${archive}.sha256`, `${hash}  ${archiveName}\n`);
     process.stdout.write(`Built ${archive}\n`);
+    // The Claude app's Upload plugin wants .claude-plugin/plugin.json at the top of the zip, so the
+    // plugin also ships as its own zip made from inside the plugin folder.
+    const pluginName = `youcloned-plugin-${options.version}.zip`;
+    const pluginArchive = path.join(output, pluginName);
+    const pzip = spawnSync('zip', ['-r', '-X', pluginArchive, '.'], { cwd: path.join(stage, 'youcloned'), encoding: 'utf8' });
+    if (pzip.error) throw pzip.error;
+    if (pzip.status !== 0) throw new Error(pzip.stderr || 'plugin zip failed');
+    const phash = crypto.createHash('sha256').update(fs.readFileSync(pluginArchive)).digest('hex');
+    fs.writeFileSync(`${pluginArchive}.sha256`, `${phash}  ${pluginName}\n`);
+    process.stdout.write(`Built ${pluginArchive}\n`);
     return 0;
   } catch (error) {
     process.stderr.write(`${error.message}\n${usage()}\n`);
