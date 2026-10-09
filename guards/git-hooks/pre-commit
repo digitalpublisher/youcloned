@@ -12,7 +12,24 @@ git diff --cached --name-only --diff-filter=ACMR | while IFS= read -r file; do
   printf '\n' >> "$temporary"
 done
 
-if ! node "$rules" --stdin --label staged < "$temporary"; then
+find_node() {
+  if [ -f "$script_dir/../lib/node-path" ]; then
+    saved=$(cat "$script_dir/../lib/node-path")
+    if [ -x "$saved" ]; then printf '%s\n' "$saved"; return 0; fi
+  fi
+  if command -v node >/dev/null 2>&1; then command -v node; return 0; fi
+  for candidate in /opt/homebrew/bin/node /usr/local/bin/node "$HOME"/.nvm/versions/node/*/bin/node "$HOME"/.volta/bin/node; do
+    if [ -x "$candidate" ]; then printf '%s\n' "$candidate"; return 0; fi
+  done
+  return 1
+}
+
+if ! node_bin=$(find_node); then
+  echo "Blocked: YouCloned's key check could not find Node. Run the YouCloned setup again to fix it." >&2
+  exit 1
+fi
+
+if ! "$node_bin" "$rules" --stdin --label staged < "$temporary"; then
   echo "Blocked: staged content includes a secret-shaped value." >&2
   exit 1
 fi

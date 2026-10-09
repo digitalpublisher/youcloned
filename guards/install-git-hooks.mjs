@@ -12,6 +12,7 @@ const guardDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 const home = process.env.HOME || process.env.USERPROFILE || os.homedir();
 const targetDirectory = path.join(home, '.youcloned', 'git-hooks');
 const installedLibrary = path.join(home, '.youcloned', 'lib', 'secret-rules.mjs');
+const installedNodePath = path.join(home, '.youcloned', 'lib', 'node-path');
 const stateFile = path.join(targetDirectory, '.youcloned-install-state.json');
 
 function runGit(args) {
@@ -27,6 +28,7 @@ function copyHooks() {
   fs.mkdirSync(targetDirectory, { recursive: true });
   fs.mkdirSync(path.dirname(installedLibrary), { recursive: true });
   fs.copyFileSync(path.join(guardDirectory, 'lib', 'secret-rules.mjs'), installedLibrary);
+  fs.writeFileSync(installedNodePath, `${process.execPath}\n`);
   for (const name of hookNames) {
     const source = path.join(guardDirectory, 'git-hooks', name);
     const destination = path.join(targetDirectory, name);
@@ -104,6 +106,7 @@ function uninstall() {
     if (fs.existsSync(file)) fs.unlinkSync(file);
   }
   if (fs.existsSync(installedLibrary)) fs.unlinkSync(installedLibrary);
+  if (fs.existsSync(installedNodePath)) fs.unlinkSync(installedNodePath);
   fs.unlinkSync(stateFile);
 }
 
