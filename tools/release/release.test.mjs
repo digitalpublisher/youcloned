@@ -91,3 +91,15 @@ test('manifest list is sorted and stable between runs on the same input', () => 
   assert.deepEqual(first, [...first].sort((a, b) => a.path.localeCompare(b.path)));
   assert.deepEqual(first, second);
 });
+
+test('release still runs when started through a symlink to a folder with a space', () => {
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'release-spaced-'));
+  const linked = path.join(parent, 'My Folder');
+  fs.symlinkSync(path.resolve(here, '../..'), linked);
+  const root = fixture();
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'release-output-'));
+  fs.writeFileSync(path.join(root, 'youcloned', 'bad.txt'), 'sk-' + 'Q'.repeat(24));
+  const result = spawnSync(process.execPath, [path.join(linked, 'tools', 'release', 'release.mjs'), '--version', '1.2.3', '--out', out], { cwd: root, encoding: 'utf8' });
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stdout, /openai-key/);
+});
