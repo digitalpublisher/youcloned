@@ -10,17 +10,16 @@ const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const shipGate = path.resolve(scriptDirectory, '../ship-gate/ship-gate.mjs');
 
 function usage() {
-  return 'Usage: node tools/release/release.mjs --version X.Y.Z --out <dir> [--installer-dir <dir>] [--guards-dir <dir>] [--dry-run]';
+  return 'Usage: node tools/release/release.mjs --version X.Y.Z --out <dir> [--guards-dir <dir>] [--dry-run]';
 }
 
 function parseArgs(args) {
-  const options = { version: null, out: null, installerDir: null, guardsDir: null, dryRun: false };
+  const options = { version: null, out: null, guardsDir: null, dryRun: false };
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === '--dry-run') options.dryRun = true;
     else if (arg === '--version') options.version = args[++index];
     else if (arg === '--out') options.out = args[++index];
-    else if (arg === '--installer-dir') options.installerDir = args[++index];
     else if (arg === '--guards-dir') options.guardsDir = args[++index];
     else throw new Error(`Unexpected argument: ${arg}`);
   }
@@ -28,9 +27,7 @@ function parseArgs(args) {
   if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(options.version)) {
     throw new Error('--version must be a version such as X.Y.Z');
   }
-  for (const key of ['installerDir', 'guardsDir']) {
-    if (options[key] && !fs.statSync(options[key]).isDirectory()) throw new Error(`--${key === 'installerDir' ? 'installer-dir' : 'guards-dir'} must name a directory`);
-  }
+  if (options.guardsDir && !fs.statSync(options.guardsDir).isDirectory()) throw new Error('--guards-dir must name a directory');
   return options;
 }
 
@@ -63,7 +60,6 @@ function stageSource(sourceRoot, options) {
   const plugin = path.join(sourceRoot, 'youcloned');
   if (!fs.statSync(plugin).isDirectory()) throw new Error(`Missing plugin directory: ${plugin}`);
   copyTree(plugin, path.join(stage, 'youcloned'));
-  if (options.installerDir) copyTree(path.resolve(options.installerDir), path.join(stage, 'install'));
   if (options.guardsDir) copyTree(path.resolve(options.guardsDir), path.join(stage, 'guards'));
   return stage;
 }
