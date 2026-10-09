@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { DATABASE_URL_RULE, KEY_SHAPE_RULES, isPlaceholder, mask } from '../../guards/lib/secret-rules.mjs';
 
 const BINARY_EXTENSIONS = new Set([
   '.7z', '.bmp', '.class', '.dll', '.doc', '.docx', '.eot', '.exe', '.gif',
@@ -97,32 +98,6 @@ function filesUnder(root) {
   return files;
 }
 
-function mask(value) {
-  const compact = String(value).replace(/[\r\n]/g, ' ');
-  return compact.length <= 4 ? `${compact}*` : `${compact.slice(0, 4)}${'*'.repeat(Math.max(4, compact.length - 4))}`;
-}
-
-function placeholder(value) {
-  const trimmed = value.trim().replace(/^['"]|['"]$/g, '');
-  return !trimmed || /^x+$/i.test(trimmed) || /^your[-_ ]?(key|secret|token|password)([-_ ]?here)?$/i.test(trimmed)
-    || /^<[^>]+>$/.test(trimmed) || /^\$\{[^}]+\}$/.test(trimmed) || /^process\.env(?:\.|\[)/i.test(trimmed);
-}
-
-const KEY_RULES = [
-  ['anthropic-key', /\bsk-ant-[A-Za-z0-9_-]{8,}\b/g],
-  ['stripe-secret-key', /\b(?:sk_live_|rk_live_)[A-Za-z0-9]{16,}\b/g],
-  ['stripe-webhook-secret', /\bwhsec_[A-Za-z0-9]{16,}\b/g],
-  ['openai-key', /\bsk-(?!ant-)[A-Za-z0-9_-]{16,}\b/g],
-  ['github-token', /\b(?:gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{16,})\b/g],
-  ['slack-token', /\bxox(?:b|p|a|s|app)-[A-Za-z0-9-]{10,}\b/g],
-  ['aws-access-key-id', /\bAKIA[A-Z0-9]{12,}\b/g],
-  ['google-api-key', /\bAIza[A-Za-z0-9_-]{20,}\b/g],
-  ['sendgrid-key', /\bSG\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g],
-  ['jwt', /\beyJ[A-Za-z0-9_-]*\.eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\b/g],
-  ['pem-private-key', /-----BEGIN (?:[A-Z0-9 ]+ )?PRIVATE KEY-----/g],
-  ['database-url-password', /\b(?:postgres(?:ql)?|mysql|mongodb):\/\/[^\s/@:]+:[^\s/@]+@[^\s/]+/gi],
-];
-
 const PATH_RULES = [
   /\/Users\/([^/\s]+)\//g,
   /[A-Za-z]:\\Users\\([^\\\s]+)\\/g,
@@ -144,10 +119,12 @@ function findInFile(file, root, literals, emailAllowlist) {
     findings.push({ file: relative, line, rule, masked: privateMatch ? '[private]' : mask(matched) });
   };
 
-  for (const [rule, expression] of KEY_RULES) {
+  for (const [rule, expression] of KEY_SHAPE_RULES) {
     expression.lastIndex = 0;
     for (const match of content.matchAll(expression)) add(match.index, rule, match[0]);
   }
+  DATABASE_URL_RULE.lastIndex = 0;
+  for (const match of content.matchAll(DATABASE_URL_RULE)) add(match.index, 'database-url-password', match[0]);
   for (const expression of PATH_RULES) {
     expression.lastIndex = 0;
     for (const match of content.matchAll(expression)) {
@@ -156,7 +133,7 @@ function findInFile(file, root, literals, emailAllowlist) {
   }
   GENERIC_ASSIGNMENT.lastIndex = 0;
   for (const match of content.matchAll(GENERIC_ASSIGNMENT)) {
-    if (match[1].length >= 16 && !placeholder(match[1])) add(match.index, 'generic-secret-assignment', match[0]);
+    if (match[1].length >= 16 && !isPlaceholder(match[1])) add(match.index, 'generic-secret-assignment', match[0]);
   }
   EMAIL.lastIndex = 0;
   for (const match of content.matchAll(EMAIL)) {
