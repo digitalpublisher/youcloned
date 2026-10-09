@@ -642,3 +642,14 @@ test('in the desktop app SkillKey answers through the model\'s own tool call whe
   expect(calls).toEqual(['youcloned-setup'])
   expect(out.result).toBe('Instructions for youcloned-setup')
 })
+
+test('YouCloned\'s own SkillKey look-ups are allowed without a permission question; running a skill keeps the normal check', async ($, on) => {
+  sessionStubs(on)
+  on('tool.check', () => ({ decision: 'ask' }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/work' })
+  await $.tool.call({ tool: 'mcp__youcloned__load_setup' })
+  expect((await $.tool.check({ tool: 'mcp__' + SK + '__start_skill', input: { skill: 'x' } })).decision).toBe('allow')
+  expect((await $.tool.check({ tool: 'mcp__' + SK + '__word_balance', input: {} })).decision).toBe('allow')
+  expect((await $.tool.check({ tool: 'mcp__' + SK + '__run_skill', input: {} })).decision).toBe('ask')
+  expect((await $.tool.check({ tool: 'mcp__someone_else__start_skill', input: {} })).decision).toBe('ask')
+})
