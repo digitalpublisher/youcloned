@@ -110,3 +110,14 @@ test('banned words guard allows without a bans file and blocks whole-word matche
   const wholeWord = runGuard('banned-words-guard.mjs', { tool_name: 'Write', tool_input: { content: 'unforbidden is allowed' } }, { env: { HOME: home, USERPROFILE: home } });
   assert.equal(wholeWord.status, 0, wholeWord.stderr);
 });
+
+test('the plugin copy of the key rules matches this pack', () => {
+  const rules = (file) => {
+    const text = fs.readFileSync(file, 'utf8');
+    const from = text.indexOf('KEY_SHAPE_RULES');
+    return text.slice(from, text.indexOf('\n]', from)).split('\n').filter((line) => line.trim().startsWith("['")).map((line) => line.trim().replace(/,$/, ''));
+  };
+  const pack = rules(path.join(guards, 'lib', 'secret-rules.mjs'));
+  assert.ok(pack.length >= 11);
+  assert.deepEqual(rules(path.join(guards, '..', 'youcloned', 'hooks', 'guards.js')), pack);
+});

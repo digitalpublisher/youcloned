@@ -1,6 +1,6 @@
 {
   "name": "youcloned",
-  "version": "0.12.1",
+  "version": "0.13.0",
   "description": "YouCloned: your AI clone inside the Claude app. Sets up your rules file, draws the YouCloned pane, runs your crew behind a safety gate, and checks Claude's work with your own Codex.",
   "author": {
     "name": "BNSN LLC"
