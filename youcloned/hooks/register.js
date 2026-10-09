@@ -622,6 +622,17 @@ async function skillKeyCall($, tool, args) {
       }
       last = r
     } catch (err) { last = err }
+    // The desktop app keeps its connectors to itself, so $.mcp.call can't reach them; the same
+    // call made as the model makes it can.
+    if (server !== 'claude.ai SkillKey') {
+      try {
+        const listed = (await $.tool.list()).some(t => (typeof t === 'string' ? t : t.name) === 'mcp__' + server + '__' + tool)
+        if (!listed) continue
+        const r = await $.tool.call({ tool: 'mcp__' + server + '__' + tool, ...(args || {}) })
+        if (r && !r.deny && !r.isError) return { content: [{ type: 'text', text: String(r.text ?? '') }], isError: false }
+        last = r && r.deny ? new Error(r.deny) : { content: [{ type: 'text', text: String(r?.text ?? '') }], isError: true }
+      } catch (err) { last = err }
+    }
   }
   // A connector id saved from another Claude account isn't here: forget it, so YouCloned shows the
   // Connect SkillKey step instead of an error.
