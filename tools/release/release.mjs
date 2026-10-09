@@ -4,8 +4,9 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const scriptDirectory = path.dirname(new URL(import.meta.url).pathname);
+const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const shipGate = path.resolve(scriptDirectory, '../ship-gate/ship-gate.mjs');
 
 function usage() {
