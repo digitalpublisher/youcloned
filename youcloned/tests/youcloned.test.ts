@@ -375,7 +375,7 @@ test('a pressed skill says it is starting and its job reaches the chat on the ne
   const toasts: string[] = []
   const submitted: string[] = []
   const { clock } = sessionStubs(on, { toasts })
-  on('prompt.submit', ($, e) => { submitted.push(String(e.text)); return { value: undefined } })
+  on('prompt.submit', ($, e) => { submitted.push(String(e.text)); return { text: String(e.text) } })
   await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await ui.press({ key: 'tab-skills' })
@@ -445,7 +445,7 @@ test('pressing Talk again while Isaac listens stops the voice conversation and t
 test('New project asks Claude to file this session in a sidebar group of its own', async ($, on) => {
   const submitted: string[] = []
   const { clock } = sessionStubs(on)
-  on('prompt.submit', ($, e) => { submitted.push(String(e.text)); return { value: undefined } })
+  on('prompt.submit', ($, e) => { submitted.push(String(e.text)); return { text: String(e.text) } })
   await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await ui.press({ key: 'tab-home' })
@@ -473,6 +473,7 @@ test('the plan gauge shows the tightest limit: a nearly spent week beats a fresh
 test('on a Mac the dashboard runs as a background service and launch.json opens its address', async ($, on) => {
   const argvs: string[][] = []
   const { writes, clock } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' },
+    exists: (path) => path === '/usr/bin/python3' || undefined,
     process: (argv) => { argvs.push(argv); return { exitCode: 0, stdout: argv[0] === '/usr/bin/id' ? '501\n' : '', stderr: '' } } })
   on('http.fetch', () => ({ value: { status: 200, ok: true, headers: {}, text: '{}' } }))
   await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
@@ -480,6 +481,7 @@ test('on a Mac the dashboard runs as a background service and launch.json opens 
   const plist = writes.get('/Users/pat/Library/LaunchAgents/ai.bnsn.youcloned.dashboard.plist') || ''
   expect(plist).toMatch(/\/Users\/pat\/\.youcloned\/dashboard\/server\.py/)
   expect(plist).toMatch(/<key>KeepAlive<\/key><true\/>/)
+  expect(plist).toContain('<string>/usr/bin/python3</string>')
   expect(argvs.some(a => a[0] === '/bin/launchctl' && a[1] === 'bootstrap' && a[2] === 'gui/501')).toBe(true)
   const launch = JSON.parse(writes.get(PROJECT + '/.claude/launch.json') || '{}')
   expect(launch.configurations).toContainEqual({ name: 'YouCloned', url: 'http://localhost:4600' })
@@ -547,4 +549,45 @@ test('SkillKey is the first app, BNSN second', async ($, on) => {
   const plates = (await ui.findAll({ type: 'Svg' })).filter(p => p.props.width !== undefined && p.props.alt !== 'Thumbnail').map(p => p.props.alt)
   expect(plates.slice(0, 2)).toEqual(['skillkey', 'bnsn'])
   await ui.unmount()
+})
+
+// A fresh Mac: no developer tools, so /usr/bin/python3 is only Apple's stand-in.
+function freshMac(on, sum: string) {
+  const argvs: string[][] = []
+  let uvInstalled = false
+  const ownPython = '/Users/pat/.youcloned/python/cpython-3.12-macos-aarch64-none/bin/python3.12'
+  const stubs = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' },
+    exists: (path) => path === '/usr/bin/python3' || (path === '/Users/pat/.youcloned/bin/uv' ? uvInstalled : undefined),
+    process: (argv) => {
+      argvs.push(argv)
+      if (argv[0] === '/usr/bin/xcode-select') return { exitCode: 2, stdout: '', stderr: 'no developer tools' }
+      if (argv[0] === '/usr/bin/uname') return { exitCode: 0, stdout: 'arm64\n', stderr: '' }
+      if (argv[0] === '/usr/bin/shasum') return { exitCode: 0, stdout: sum + '  /Users/pat/.youcloned/uv-download/uv.tar.gz\n', stderr: '' }
+      if (argv[0] === '/bin/cp' && argv[2] === '/Users/pat/.youcloned/bin/uv') uvInstalled = true
+      if (argv[0] === '/Users/pat/.youcloned/bin/uv' && argv[2] === 'find') return { exitCode: uvInstalled ? 0 : 2, stdout: uvInstalled ? ownPython + '\n' : '', stderr: '' }
+      return { exitCode: 0, stdout: argv[0] === '/usr/bin/id' ? '501\n' : '', stderr: '' }
+    } })
+  on('http.fetch', () => ({ value: { status: 200, ok: true, headers: {}, text: '{}' } }))
+  return { ...stubs, argvs, ownPython }
+}
+
+test('on a Mac with no developer tools the dashboard gets its own Python and never runs Apple\'s stand-in', async ($, on) => {
+  const { writes, clock, argvs, ownPython } = freshMac(on, 'dc304b9ed1b24174572290fba60ac3f6fe63c73a671f0439e62a91375841964d')
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  await clock.advance(2000)
+  expect(argvs.some(a => a[0] === '/usr/bin/curl' && a.at(-1) === 'https://github.com/astral-sh/uv/releases/download/0.12.15/uv-aarch64-apple-darwin.tar.gz')).toBe(true)
+  expect(argvs.some(a => a[0] === '/Users/pat/.youcloned/bin/uv' && a[1] === 'python' && a[2] === 'install')).toBe(true)
+  const plist = writes.get('/Users/pat/Library/LaunchAgents/ai.bnsn.youcloned.dashboard.plist') || ''
+  expect(plist).toContain(ownPython)
+  expect(plist).not.toContain('/usr/bin/python3')
+  expect(argvs.some(a => a[0] === '/usr/bin/python3')).toBe(false)
+})
+
+test('a uv download that fails its checksum is never used and no dashboard service is made', async ($, on) => {
+  const { writes, clock, argvs } = freshMac(on, '0'.repeat(64))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  await clock.advance(2000)
+  expect(argvs.some(a => a[0] === '/bin/cp' && a[2] === '/Users/pat/.youcloned/bin/uv')).toBe(false)
+  expect(writes.has('/Users/pat/Library/LaunchAgents/ai.bnsn.youcloned.dashboard.plist')).toBe(false)
+  expect(argvs.some(a => a[0] === '/usr/bin/python3')).toBe(false)
 })
