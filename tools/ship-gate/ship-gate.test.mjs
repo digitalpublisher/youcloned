@@ -128,4 +128,8 @@ test('the gate still runs from a folder with a space reached through a symlink',
   write(root, 'xoxb-' + 'M'.repeat(20));
   const result = spawnSync(process.execPath, [path.join(linked, 'ship-gate.mjs'), root], { encoding: 'utf8' });
   assert.equal(result.status, 1, result.stdout + result.stderr);
+  const listed = tempDirectory();
+  write(listed, 'see team.bnsn.ai for details\n');
+  const denied = spawnSync(process.execPath, [path.join(linked, 'ship-gate.mjs'), listed], { encoding: 'utf8', env: { ...process.env, HOME: tempDirectory() } });
+  assert.equal(denied.status, 1, denied.stdout + denied.stderr);
 });
