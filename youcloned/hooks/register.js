@@ -527,6 +527,14 @@ function crewDir(name) {
   return project ? project + '/crew/' + name : null
 }
 
+// Setup's default folder: the one this conversation is open in, so YouCloned is on where the buyer
+// already works. A session in the home folder itself, or with no folder, falls back to ~/YouCloned.
+async function defaultFolder($) {
+  let cwd = ''
+  try { cwd = String((await $.session.cwd()) || '').replace(/[\\/]+$/, '') } catch {}
+  return cwd && cwd !== home && /^([A-Za-z]:)?[\\/]./.test(cwd) ? cwd : home + '/YouCloned'
+}
+
 function expandHome(p) {
   const s = String(p || '').trim()
   if (s === '~') return home
@@ -959,7 +967,7 @@ export function register(on) {
         inputSchema: {
           type: 'object',
           properties: {
-            folder: { type: 'string', description: 'Where their YouCloned work goes; leave out for the default YouCloned folder in their home folder' },
+            folder: { type: 'string', description: 'Where their YouCloned work goes; leave out for the default, the folder this conversation is open in' },
             name: { type: 'string' }, business: { type: 'string' }, offers: { type: 'string' }, audience: { type: 'string' },
             voice: { type: 'string' }, brand: { type: 'string' }, accounts: { type: 'string' },
             voice_samples: { type: 'array', items: { type: 'string' }, description: 'At least two pieces the customer wrote, each a few paragraphs' },
@@ -1075,7 +1083,7 @@ export function register(on) {
   on('tool.call', { tool: 'mcp__youcloned__save_setup' }, async ($, e) => {
     const problems = checkSetup(e)
     if (problems.length) return { result: 'Not saved. Fix these and call save_setup again:\n- ' + problems.join('\n- ') }
-    const folder = expandHome(e.folder) || home + '/YouCloned'
+    const folder = expandHome(e.folder) || await defaultFolder($)
     if (!/^([A-Za-z]:)?[\\/]/.test(folder)) return { result: 'Not saved: the folder must be a full path, such as ' + home + '/YouCloned.' }
     await $.fs.write(folder + '/' + RULES_NAME, rulesMarkdown(e))
     for (const c of CREW) {
@@ -1094,7 +1102,8 @@ export function register(on) {
   on('tool.call', { tool: 'mcp__youcloned__load_setup' }, async ($) => {
     if (!skillKeyServer) await checkSkillKey($)
     const text = await fromSkillKey($, 'youcloned-setup')
-    return { result: text || NEEDS_SKILLKEY + ' Tell the person exactly that, and stop.' }
+    if (!text) return { result: NEEDS_SKILLKEY + ' Tell the person exactly that, and stop.' }
+    return { result: text + '\n\nFolder: the default is ' + (await defaultFolder($)) + ' (the folder this conversation is open in, or YouCloned in their home folder). Offer that as the default, and leave folder out of save_setup when they take it.' }
   })
 
   // Learns SkillKey's name the moment Claude itself uses it, for apps whose tool list leaves it out.
