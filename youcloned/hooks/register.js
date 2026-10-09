@@ -612,7 +612,9 @@ async function checkSkillKey($) {
 async function skillKeyCall($, tool, args) {
   const names = skillKeyServer ? [skillKeyServer] : ['claude.ai SkillKey']
   if (skillKeyServer && skillKeyServer !== 'claude.ai SkillKey') names.push('claude.ai SkillKey')
-  let last
+  const text = (x) => x ? String(x.message || (Array.isArray(x.content) ? x.content.map(c => c.text || '').join(' ') : '') || x) : ''
+  const reasons = []
+  let listed = false
   for (const server of names) {
     try {
       const r = await $.mcp.call(server, tool, args)
@@ -620,29 +622,29 @@ async function skillKeyCall($, tool, args) {
         if (server !== skillKeyServer) { skillKeyServer = server; skillKey = true; await $.store.set('skillKeyServer', server) }
         return r
       }
-      last = r
-    } catch (err) { last = err }
+      reasons.push(server + ': ' + text(r))
+    } catch (err) { reasons.push(server + ': ' + text(err)) }
     // The desktop app keeps its connectors to itself, so $.mcp.call can't reach them; the same
     // call made as the model makes it can.
     if (server !== 'claude.ai SkillKey') {
       try {
-        const listed = (await $.tool.list()).some(t => (typeof t === 'string' ? t : t.name) === 'mcp__' + server + '__' + tool)
+        listed = (await $.tool.list()).some(t => (typeof t === 'string' ? t : t.name) === 'mcp__' + server + '__' + tool)
         if (!listed) continue
         const r = await $.tool.call({ tool: 'mcp__' + server + '__' + tool, ...(args || {}) })
         if (r && !r.deny && !r.isError) return { content: [{ type: 'text', text: String(r.text ?? '') }], isError: false }
-        last = r && r.deny ? new Error(r.deny) : { content: [{ type: 'text', text: String(r?.text ?? '') }], isError: true }
-      } catch (err) { last = err }
+        reasons.push('as the model: ' + (r && r.deny ? r.deny : String(r?.text ?? 'no answer')))
+      } catch (err) { reasons.push('as the model: ' + text(err)) }
     }
   }
   // A connector id saved from another Claude account isn't here: forget it, so YouCloned shows the
   // Connect SkillKey step instead of an error.
-  const why = last ? String(last.message || (Array.isArray(last.content) ? last.content.map(c => c.text || '').join(' ') : '') || last) : ''
-  if (/not connected|no connected|unknown server|not found/i.test(why)) {
+  const why = reasons.join(' | ')
+  if (!listed && /not connected|no connected|unknown server|not found/i.test(why)) {
     skillKeyServer = null; skillKey = false
     try { await $.store.set('skillKeyServer', '') } catch {}
     $.ui.invalidate('ui.render')
   }
-  throw new Error('SkillKey did not answer: ' + why.slice(0, 200))
+  throw new Error('SkillKey did not answer: ' + why.slice(0, 600))
 }
 
 // Jon's instructions for one YouCloned skill, from SkillKey. Only the part between the markers
