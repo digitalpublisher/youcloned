@@ -7,4 +7,4 @@ isaac-voice
 .claude-slack-bridge
 supabase.co
 BNSN_SFTP
-Obsidian Vault
+Documents/Obsidian Vault
