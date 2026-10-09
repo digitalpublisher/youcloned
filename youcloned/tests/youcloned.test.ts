@@ -124,6 +124,21 @@ test('setup defaults to the folder the conversation is open in, and says so in t
   expect(store.get('project')).toBe(here)
 })
 
+test('after setup is saved YouCloned switches on in the same chat: bar, dashboard and crew', async ($, on) => {
+  const here = '/Users/pat/Documents/Garden'
+  const registered: { name: string, prompt: string }[] = []
+  const { writes, clock } = sessionStubs(on, { cwd: here, registered, exists: (path) => path === '/usr/bin/python3' || undefined,
+    process: (argv) => ({ exitCode: 0, stdout: argv[0] === '/usr/bin/id' ? '501\n' : '', stderr: '' }) })
+  on('http.fetch', () => ({ value: { status: 200, ok: true, headers: {}, text: '{}' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: here })
+  await clock.advance(2000)
+  expect(writes.has(here + '/.claude/launch.json')).toBe(false)
+  await $.tool.call({ tool: 'mcp__youcloned__save_setup', ...SETUP })
+  await clock.advance(2000)
+  expect(JSON.parse(writes.get(here + '/.claude/launch.json') || '{}').configurations).toContainEqual({ name: 'YouCloned', url: 'http://localhost:4600' })
+  expect(registered.map(r => r.name)).toContain('support')
+})
+
 test('a conversation open in the home folder itself still sets up in ~/YouCloned', async ($, on) => {
   const { writes } = sessionStubs(on, { cwd: '/Users/pat/' })
   await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/Users/pat/' })
