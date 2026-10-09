@@ -98,7 +98,7 @@ test('setup: refuses empty sections and made-up or missing samples', () => {
 })
 
 test('save_setup writes the rules file and crew folders, and refuses a bad setup', async ($, on) => {
-  const { writes, store } = sessionStubs(on)
+  const { writes, store } = sessionStubs(on, { cwd: '/Users/pat' })
   await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
   const bad = await $.tool.call({ tool: 'mcp__youcloned__save_setup', ...SETUP, voice_samples: [SAMPLE] })
   expect(bad.result).toMatch(/^Not saved/)
@@ -109,6 +109,28 @@ test('save_setup writes the rules file and crew folders, and refuses a bad setup
   expect(writes.has(PROJECT + '/crew/support/inbox/.keep')).toBe(true)
   expect(writes.has(PROJECT + '/crew/inbox/drafts/.keep')).toBe(true)
   expect(store.get('project')).toBe(PROJECT)
+})
+
+test('setup defaults to the folder the conversation is open in, and says so in the interview', async ($, on) => {
+  const here = '/Users/pat/Documents/Garden'
+  const { writes, store } = sessionStubs(on, { cwd: here })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: here })
+  const steps = await $.tool.call({ tool: 'mcp__youcloned__load_setup' })
+  expect(steps.result).toMatch(/Folder: the default is \/Users\/pat\/Documents\/Garden /)
+  const ok = await $.tool.call({ tool: 'mcp__youcloned__save_setup', ...SETUP })
+  expect(ok.result).toMatch(/^Saved/)
+  expect(writes.has(here + '/YOUCLONED.md')).toBe(true)
+  expect(writes.has(PROJECT + '/YOUCLONED.md')).toBe(false)
+  expect(store.get('project')).toBe(here)
+})
+
+test('a conversation open in the home folder itself still sets up in ~/YouCloned', async ($, on) => {
+  const { writes } = sessionStubs(on, { cwd: '/Users/pat/' })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/Users/pat/' })
+  const steps = await $.tool.call({ tool: 'mcp__youcloned__load_setup' })
+  expect(steps.result).toMatch(/Folder: the default is \/Users\/pat\/YouCloned /)
+  await $.tool.call({ tool: 'mcp__youcloned__save_setup', ...SETUP })
+  expect(writes.has(PROJECT + '/YOUCLONED.md')).toBe(true)
 })
 
 test('the gate refuses a crew member writing outside its folder, and lets everyone else through', async ($, on) => {
@@ -270,7 +292,7 @@ test('load_setup hands Claude the setup interview from SkillKey, markers and Ski
   sessionStubs(on)
   await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
   const out = await $.tool.call({ tool: 'mcp__youcloned__load_setup' })
-  expect(out.result).toBe('Instructions for youcloned-setup')
+  expect(out.result).toMatch(/^Instructions for youcloned-setup\n\nFolder: the default is /)
 })
 
 test('SkillKey is found in the terminal by its usual name too', async ($, on) => {
@@ -279,7 +301,7 @@ test('SkillKey is found in the terminal by its usual name too', async ($, on) =>
   await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
   const out = await $.tool.call({ tool: 'mcp__youcloned__load_setup' })
   expect(mcpCalls[0].server).toBe('claude_ai_SkillKey')
-  expect(out.result).toBe('Instructions for youcloned-setup')
+  expect(out.result).toMatch(/^Instructions for youcloned-setup\n\nFolder: the default is /)
 })
 
 test('the desktop panel pictures: full-width cards have no fixed size, logos and the thumbnail have theirs', async ($, on) => {
@@ -639,7 +661,7 @@ test('in the desktop app SkillKey is found from the context breakdown when its t
   await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/work' })
   const out = await $.tool.call({ tool: 'mcp__youcloned__load_setup' })
   expect(mcpCalls[0].server).toBe(SK)
-  expect(out.result).toBe('Instructions for youcloned-setup')
+  expect(out.result).toMatch(/^Instructions for youcloned-setup\n\nFolder: the default is /)
 })
 
 test('in the desktop app SkillKey answers through the model\'s own tool call when the app keeps the connector', async ($, on) => {
@@ -652,7 +674,7 @@ test('in the desktop app SkillKey answers through the model\'s own tool call whe
   await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/work' })
   const out = await $.tool.call({ tool: 'mcp__youcloned__load_setup' })
   expect(calls).toEqual(['youcloned-setup'])
-  expect(out.result).toBe('Instructions for youcloned-setup')
+  expect(out.result).toMatch(/^Instructions for youcloned-setup\n\nFolder: the default is /)
 })
 
 test('YouCloned\'s own SkillKey look-ups are allowed without a permission question; running a skill keeps the normal check', async ($, on) => {
