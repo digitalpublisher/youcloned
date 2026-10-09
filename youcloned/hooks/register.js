@@ -321,11 +321,64 @@ async function dashboardUp($) {
 }
 
 // Finds Python: the desktop app gives add-ons a short program path, so known places are checked first.
+// Apple's /usr/bin/python3 is only a stand-in that asks to install the developer tools, so it counts
+// only when they are installed. A Mac with none of these gets YouCloned's own Python (ownPython).
 async function findPython($) {
-  for (const p of ['/opt/homebrew/bin/python3', '/usr/local/bin/python3', '/Library/Frameworks/Python.framework/Versions/Current/bin/python3', '/usr/bin/python3']) {
+  for (const p of ['/opt/homebrew/bin/python3', '/usr/local/bin/python3', '/Library/Frameworks/Python.framework/Versions/Current/bin/python3']) {
     if (await $.fs.exists(p)) return p
   }
-  return 'python3'
+  if (!onMac()) return 'python3'
+  if ((await $.fs.exists('/usr/bin/python3')) && (await run($, ['/usr/bin/xcode-select', '-p'])).exitCode === 0) return '/usr/bin/python3'
+  return ownPython($)
+}
+
+// YouCloned's own Python on a fresh Mac: a pinned uv, checked against its published checksum, fetches
+// a standalone Python into ~/.youcloned/python. Nothing else on the Mac changes and no password is asked.
+const UV_VERSION = '0.12.15'
+const UV_SHA256 = {
+  'aarch64-apple-darwin': 'dc304b9ed1b24174572290fba60ac3f6fe63c73a671f0439e62a91375841964d',
+  'x86_64-apple-darwin': 'e9ca61775532368fe518ab03e7a354c7ecab8ccb3c7d941c775fcc4a362b801b',
+}
+const OWN_PYTHON = '3.12'
+let fetchingPython = null
+
+function uvEnv() {
+  return { HOME: home, PATH: '/usr/bin:/bin', UV_PYTHON_INSTALL_DIR: dataDir() + '/python', UV_NO_MODIFY_PATH: '1' }
+}
+
+async function ownPython($) {
+  const uv = dataDir() + '/bin/uv'
+  const find = async () => {
+    if (!(await $.fs.exists(uv))) return null
+    const r = await runWith($, [uv, 'python', 'find', '--no-project', OWN_PYTHON], { env: uvEnv() })
+    return r.exitCode === 0 && r.stdout.trim() ? r.stdout.trim() : null
+  }
+  const found = await find()
+  if (found) return found
+  if (!fetchingPython) fetchingPython = fetchOwnPython($, uv).finally(() => { fetchingPython = null })
+  return (await fetchingPython) ? find() : null
+}
+
+async function fetchOwnPython($, uv) {
+  const machine = ((await run($, ['/usr/bin/uname', '-m'])).stdout || '').trim()
+  const target = machine === 'arm64' ? 'aarch64-apple-darwin' : 'x86_64-apple-darwin'
+  const work = dataDir() + '/uv-download'
+  const archive = work + '/uv.tar.gz'
+  await run($, ['/bin/rm', '-rf', work])
+  await run($, ['/bin/mkdir', '-p', work, dataDir() + '/bin'])
+  try {
+    const url = 'https://github.com/astral-sh/uv/releases/download/' + UV_VERSION + '/uv-' + target + '.tar.gz'
+    if ((await runWith($, ['/usr/bin/curl', '-fsSL', '-o', archive, url], { timeoutMs: 180000 })).exitCode !== 0) return false
+    const sum = ((await run($, ['/usr/bin/shasum', '-a', '256', archive])).stdout || '').split(/\s+/)[0]
+    if (sum !== UV_SHA256[target]) { $.ui.log('uv download did not match its checksum'); return false }
+    if ((await run($, ['/usr/bin/tar', '-xzf', archive, '-C', work])).exitCode !== 0) return false
+    if ((await run($, ['/bin/cp', work + '/uv-' + target + '/uv', uv])).exitCode !== 0) return false
+    const r = await runWith($, [uv, 'python', 'install', '--no-bin', OWN_PYTHON], { env: uvEnv(), timeoutMs: 600000 })
+    if (r.exitCode !== 0) $.ui.log('Python install did not finish: ' + r.stderr.slice(0, 300))
+    return r.exitCode === 0
+  } finally {
+    await run($, ['/bin/rm', '-rf', work])
+  }
 }
 
 // On a Mac the dashboard runs as a background service, so it is already up when the person clicks
@@ -335,6 +388,10 @@ const onMac = () => home.startsWith('/Users/')
 
 async function run($, argv) {
   try { return await $.process.run(argv) } catch (err) { return { exitCode: 1, stdout: '', stderr: String(err) } }
+}
+
+async function runWith($, argv, init) {
+  try { return await $.process.run(argv, init) } catch (err) { return { exitCode: 1, stdout: '', stderr: String(err) } }
 }
 
 function servicePlist(python, server) {
@@ -351,7 +408,9 @@ function servicePlist(python, server) {
 async function ensureService($) {
   const dst = dataDir() + '/dashboard'
   const plist = home + '/Library/LaunchAgents/' + SERVICE + '.plist'
-  const want = servicePlist(await findPython($), dst + '/server.py')
+  const python = await findPython($)
+  if (!python) return false
+  const want = servicePlist(python, dst + '/server.py')
   let from = '', have = ''
   try { if (await $.fs.exists(dst + '/.from')) from = (await $.fs.read(dst + '/.from')).trim() } catch {}
   try { if (await $.fs.exists(plist)) have = await $.fs.read(plist) } catch {}
@@ -383,6 +442,7 @@ async function startDashboard($, cwd) {
     return
   }
   const python = await findPython($)
+  if (!python) { $.ui.log('dashboard did not start: no Python on this computer'); return }
   const server = $.plugin.root + '/dashboard/server.py'
   await writeLaunch($, cwd, { name: 'YouCloned', runtimeExecutable: python, runtimeArgs: [server, String(DASH_PORT)], port: DASH_PORT, autoPort: false })
   if (!(await dashboardUp($))) {
