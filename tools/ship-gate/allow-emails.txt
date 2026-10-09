@@ -1,0 +1,2 @@
+# Exact email addresses allowed outside example.com and example.org.
+security@localhost
