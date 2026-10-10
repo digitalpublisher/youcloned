@@ -8,12 +8,13 @@
 #   3. Run: ~/youcloned/feed/publish.sh
 set -euo pipefail
 HERE=${0:A:h}
-VAULT="/Users/jonbenson/Documents/Obsidian Vault"
+VAULT=${YOUCLONED_VAULT:-"$HOME/Documents/Obsidian Vault"}
 export PATH=$HOME/.nvm/versions/node/v24.14.1/bin:$PATH
 python3 -c "import json,sys; f=json.load(open('$HERE/feed.json')); assert f['items'] and f['items'][0]['title'] and f['items'][0]['job']" \
   || { echo "feed.json is not valid: it needs items with a title and a job"; exit 1; }
 set -a; . "$VAULT/.env" >/dev/null 2>&1; set +a   # Cloudflare key lives in the vault's git-ignored .env
-export CLOUDFLARE_EMAIL=${CLOUDFLARE_EMAIL:-jb@jonbenson.com} CLOUDFLARE_API_KEY=${CLOUDFLARE_GLOBAL_API_KEY:-${CLOUDFLARE_API_KEY:-}}
+[ -n "${CLOUDFLARE_EMAIL:-}" ] || { echo "Set CLOUDFLARE_EMAIL in the vault .env"; exit 1; }
+export CLOUDFLARE_EMAIL CLOUDFLARE_API_KEY=${CLOUDFLARE_GLOBAL_API_KEY:-${CLOUDFLARE_API_KEY:-}}
 cd "$VAULT/.youcloned-cdn-stage"
 for t in "$HERE"/thumbs/*.jpg; do
   [ "$(stat -f %z "$t")" -le 17500 ] || { echo "$t is over 17 KB; the panel would leave it out"; exit 1; }
