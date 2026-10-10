@@ -15,8 +15,9 @@
     {
       "name": "impeccable",
       "source": {
-        "source": "url",
-        "url": "https://github.com/pbakaus/impeccable.git"
+        "source": "git-subdir",
+        "url": "https://github.com/pbakaus/impeccable.git",
+        "path": "plugin"
       },
       "description": "Design skills by Paul Bakaus (Apache 2.0): polish, typeset, layout, colorize, audit and more. Installed from the author's own project.",
       "category": "design",
@@ -34,9 +35,34 @@
     {
       "name": "hyperframes",
       "source": {
-        "source": "url",
-        "url": "https://github.com/heygen-com/hyperframes.git"
+        "source": "git-subdir",
+        "url": "https://github.com/heygen-com/hyperframes.git",
+        "path": "skills"
       },
+      "strict": false,
+      "skills": [
+        "./embedded-captions",
+        "./faceless-explainer",
+        "./figma",
+        "./general-video",
+        "./hyperframes",
+        "./hyperframes-animation",
+        "./hyperframes-audio",
+        "./hyperframes-cli",
+        "./hyperframes-core",
+        "./hyperframes-creative",
+        "./hyperframes-keyframes",
+        "./hyperframes-registry",
+        "./hyperframes-studio",
+        "./media-use",
+        "./motion-graphics",
+        "./music-to-video",
+        "./pr-to-video",
+        "./product-launch-video",
+        "./remotion-to-hyperframes",
+        "./slideshow",
+        "./talking-head-recut"
+      ],
       "description": "HyperFrames by HeyGen (Apache 2.0): make and render videos from HTML. Installed from the author's own project.",
       "category": "video",
       "homepage": "https://hyperframes.heygen.com"
