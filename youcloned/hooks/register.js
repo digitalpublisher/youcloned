@@ -40,6 +40,7 @@ let codexReady = false      // Codex is installed on this computer
 let everywhere = false      // after setup, YouCloned shows in every session unless the owner turns it off
 let live = { claudePct: null, claudeLabel: '', claudeSpan: '', words: null } // numbers the strip and dashboard show
 let listening = false       // Isaac's voice conversation is running in this session
+let version = ''            // this plugin's version, from its plugin.json, shown in the strip and told to Claude
 let stopTalk = null         // ends the converse call that is running, when Talk is pressed again
 
 const BLUE = '#3375d7'     // YouCloned blue
@@ -945,6 +946,7 @@ export function register(on) {
     try { sessionStartedAt = await $.clock.now() } catch {}
     interactive = e.isInteractive
     await loadState($)
+    try { version = JSON.parse(await $.fs.read($.plugin.root + '/.claude-plugin/plugin.json')).version || '' } catch {}
     try { await refreshDrafts($) } catch {}
     await checkSkillKey($)
     try { const saved = await $.store.get('pins'); if (Array.isArray(saved)) pins = saved.filter(k => typeof k === 'string') } catch {}
@@ -1050,6 +1052,7 @@ export function register(on) {
     const strip = Box({ flexDirection: 'column', rowGap: 0, children: [
       Box({ flexDirection: 'row', columnGap: 2, children: [
         Text({ bold: true, color: BLUE, children: ['YouCloned'] }),
+        ...(version ? [Text({ dimColor: true, children: [version] })] : []),
         Text({ dimColor: true, children: [facts.join(' · ') || 'your clone is on'] }),
       ] }),
       ...(project ? [Text({ children: ['Open ', Text({ bold: true, color: BLUE, children: ['YouCloned'] }), ': click the globe at the top right'] })] : []),
@@ -1075,7 +1078,8 @@ export function register(on) {
     if (!cloneHere) return result
     const rules = await readRules($)
     if (!rules) return result
-    const block = { name: 'youcloned', text: 'The owner\'s YouCloned rules, from ' + project + '/' + RULES_NAME +
+    const running = version ? 'YouCloned version ' + version + ' is running in this conversation (tell the person this number if they ask which version they have).\n\n' : ''
+    const block = { name: 'youcloned', text: running + 'The owner\'s YouCloned rules, from ' + project + '/' + RULES_NAME +
       '. Follow them in everything you write for this person.\n\n' + rules }
     return { ...result, blocks: [...result.blocks, block] }
   })

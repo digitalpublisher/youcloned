@@ -172,6 +172,16 @@ test('every conversation in the clone folder gets the rules file', async ($, on)
   expect(out.blocks[1].text).toMatch(/My YouCloned rules\nPat/)
 })
 
+test('the clone folder conversation is told which YouCloned version is running', async ($, on) => {
+  sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# My YouCloned rules\nPat' },
+    read: (path) => path.endsWith('/.claude-plugin/plugin.json') ? JSON.stringify({ name: 'youcloned', version: '9.8.7' }) : undefined })
+  on('prompt.context', ($, e) => ({ blocks: e.blocks }))
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  const out = await $.prompt.context({ blocks: [{ name: 'currentDate', text: 'today' }] })
+  expect(out.blocks[1].text).toMatch(/^YouCloned version 9\.8\.7 is running/)
+  expect(out.blocks[1].text).toMatch(/My YouCloned rules\nPat/)
+})
+
 test('a conversation outside the clone folder gets no rules and no YouCloned strip', async ($, on) => {
   sessionStubs(on, { project: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# My YouCloned rules\nPat' } })
   on('prompt.context', ($, e) => ({ blocks: e.blocks }))
