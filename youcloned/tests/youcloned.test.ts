@@ -164,6 +164,17 @@ test('when Apple\'s developer tools box is waiting behind the window, the deskto
   expect(toasts.some(t => /developer tools box is waiting behind this window/.test(t) && /Dock/.test(t))).toBe(true)
 })
 
+test('on a Mac without Apple\'s developer tools, setup has Claude point at the hidden box in the Dock; with them, it does not', async ($, on) => {
+  let tools = 1
+  sessionStubs(on, { cwd: '/Users/pat/Documents/Garden', process: (argv) => ({ exitCode: argv[0] === '/usr/bin/xcode-select' ? tools : 1, stdout: '', stderr: '' }) })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/Users/pat/Documents/Garden' })
+  const without = await $.tool.call({ tool: 'mcp__youcloned__load_setup' })
+  expect(without.result).toMatch(/blue box with a down arrow/)
+  tools = 0
+  const withTools = await $.tool.call({ tool: 'mcp__youcloned__load_setup' })
+  expect(withTools.result).not.toMatch(/developer tools box/)
+})
+
 test('with no developer tools box open, or in the terminal, there is no developer tools note', async ($, on) => {
   const toasts: string[] = []
   const { clock } = sessionStubs(on, { toasts, process: () => ({ exitCode: 1, stdout: '', stderr: '' }) })
