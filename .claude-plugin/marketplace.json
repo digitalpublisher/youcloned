@@ -68,6 +68,23 @@
       "homepage": "https://hyperframes.heygen.com"
     },
     {
+      "name": "hyperframes-gsap",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/heygen-com/hyperframes.git",
+        "path": "skills",
+        "sha": "a241f2591e7786a4586afb623c1242ccfc1a6510"
+      },
+      "strict": false,
+      "skills": [
+        "./gsap",
+        "./website-to-hyperframes"
+      ],
+      "description": "GSAP animation reference and Website to HyperFrames by HeyGen (Apache 2.0), from the last HeyGen release that had them (a241f25). Installed from the author's own project.",
+      "category": "video",
+      "homepage": "https://hyperframes.heygen.com"
+    },
+    {
       "name": "video-shotcraft",
       "source": {
         "source": "url",

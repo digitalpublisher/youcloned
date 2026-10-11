@@ -70,6 +70,7 @@ const SERVICE = 'ai.bnsn.youcloned.dashboard'
 // Isaac's voice relay on this computer: a message sent to /say for this session is typed into it as
 // "[Voice] ..." and Claude starts the voice conversation.
 const RELAY = 'http://127.0.0.1:8771/say'
+const SYNC_NOTE = 'Tell them one more thing in a short sentence or two: to get YouCloned updates on their own, open Customize, then Plugins, then + Add, then Manage marketplaces, click the three dots next to youcloned and switch on Sync automatically. The app can show it on when the marketplace is added and still leave it off.'
 const DEVTOOLS_NOTE = 'Apple\'s developer tools box is waiting behind this window. Click its icon in the Dock (a blue box with a down arrow), then Install. It takes a few minutes and is free.'
 const TALK = 'Talk to Isaac was pressed in YouCloned. Start a voice conversation now: call converse with a short hello and listen.'
 const STOPPED = 'The owner pressed Talk again in YouCloned to stop the voice conversation. Do not call converse again until they press Talk. Carry on in text with anything already asked of you.'
@@ -282,6 +283,7 @@ async function refreshLive($, withWords) {
     } catch {} // In Auto mode SkillKey answers only inside a request; the last balance stands.
     await readCodexPlan($)
   }
+  if (withWords || !live.setup) { try { await checkSetupSteps($) } catch {} }
   try {
     const name = project ? ((await readRules($)) || '').match(/^#+\s*Who I am\s*\n+([^\n]+)/m) : null
     lastName = name ? name[1].trim().split(/[ ,]/)[0] : undefined
@@ -291,6 +293,25 @@ async function refreshLive($, withWords) {
 }
 
 let lastName
+// The dashboard's "Set up your clone" steps 1 to 3, from what is on this computer, never assumed:
+// home = the rules file is saved; tools = git (Apple's developer tools or Homebrew), Obsidian, Node,
+// ffmpeg and Wispr Flow are all there; backup = the clone folder is a git repo with a GitHub remote.
+async function checkSetupSteps($) {
+  const has = async (paths) => { for (const p of paths) { if (await $.fs.exists(p)) return true } return false }
+  const homeDone = !!project && (await $.fs.exists(project + '/' + RULES_NAME))
+  let tools = false
+  if (onMac()) {
+    const git = (await run($, ['/usr/bin/xcode-select', '-p'])).exitCode === 0 || (await has(['/opt/homebrew/bin/git', '/usr/local/bin/git']))
+    tools = git && (await has(['/Applications/Obsidian.app', home + '/Applications/Obsidian.app']))
+      && (await has(['/opt/homebrew/bin/node', '/usr/local/bin/node', home + '/.nvm/versions/node']))
+      && (await has(['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg']))
+      && (await has(['/Applications/Wispr Flow.app', home + '/Applications/Wispr Flow.app']))
+  }
+  let backup = false
+  if (project) { try { backup = /\[remote "[^"]+"\][^[]*url\s*=\s*\S*github\.com/i.test(await $.fs.read(project + '/.git/config')) } catch {} }
+  live.setup = { home: homeDone, tools, backup }
+}
+
 // What the dashboard reads: the numbers, the owner's name, this session (for the talk button) and
 // whether Isaac is in a voice conversation (for the glow).
 // Every YouCloned chat writes the numbers, but only a session in Claude's desktop app names itself as
@@ -1125,7 +1146,7 @@ export function register(on) {
     try { await checkSkillKey($); if (skillKeyServer) await registerCrew($, true) } catch {}
     await refreshDrafts($)
     $.ui.invalidate('ui.render')
-    return { result: 'Saved. Rules file: ' + folder + '/' + RULES_NAME + '. Crew folders: ' + folder + '/crew/support and ' + folder + '/crew/inbox. Every new conversation reads the rules file.' }
+    return { result: 'Saved. Rules file: ' + folder + '/' + RULES_NAME + '. Crew folders: ' + folder + '/crew/support and ' + folder + '/crew/inbox. Every new conversation reads the rules file. ' + SYNC_NOTE }
   })
 
   on('tool.call', { tool: 'mcp__youcloned__load_setup' }, async ($) => {

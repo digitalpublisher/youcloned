@@ -172,6 +172,27 @@ test('with no developer tools box open, or in the terminal, there is no develope
   expect(toasts.some(t => /developer tools/.test(t))).toBe(false)
 })
 
+test('after setup the result tells Claude to have the buyer switch on Sync automatically', async ($, on) => {
+  sessionStubs(on, { cwd: '/Users/pat/Documents/Garden' })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/Users/pat/Documents/Garden' })
+  const ok = await $.tool.call({ tool: 'mcp__youcloned__save_setup', ...SETUP })
+  expect(ok.result).toMatch(/Manage marketplaces/)
+  expect(ok.result).toMatch(/Sync automatically/)
+})
+
+test('dashboard setup steps 1 to 3 are Done only when this computer has them', async ($, on) => {
+  const here = '/Users/pat/Documents/Garden'
+  const files: Record<string, string> = {}
+  const { writes, clock } = sessionStubs(on, { project: here, cwd: here, files: { [here + '/YOUCLONED.md']: '# rules' },
+    read: (path) => files[path], exists: (path) => path === '/usr/bin/python3' || path === here + '/YOUCLONED.md' || undefined,
+    process: (argv) => ({ exitCode: argv[0] === '/usr/bin/xcode-select' ? 0 : argv[0] === '/usr/bin/id' ? 0 : 1, stdout: argv[0] === '/usr/bin/id' ? '501\n' : '', stderr: '' }) })
+  on('http.fetch', () => ({ value: { status: 200, ok: true, headers: {}, text: '{}' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: here })
+  await clock.advance(25000)
+  const state = JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}')
+  expect(state.setup).toEqual({ home: true, tools: false, backup: false })
+})
+
 test('a conversation open in the home folder itself still sets up in ~/YouCloned', async ($, on) => {
   const { writes } = sessionStubs(on, { cwd: '/Users/pat/' })
   await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/Users/pat/' })
