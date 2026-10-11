@@ -1153,7 +1153,9 @@ export function register(on) {
     if (!skillKeyServer) await checkSkillKey($)
     const text = await fromSkillKey($, 'youcloned-setup')
     if (!text) return { result: NEEDS_SKILLKEY + ' Tell the person exactly that, and stop.' }
-    return { result: text + '\n\nFolder: the default is ' + (await defaultFolder($)) + ' (the folder this conversation is open in, or YouCloned in their home folder). Offer that as the default, and leave folder out of save_setup when they take it.' }
+    let devtools = ''
+    try { if (onMac() && (await run($, ['/usr/bin/xcode-select', '-p'])).exitCode !== 0) devtools = '\n\nBefore the first question, tell them in one or two short sentences: ' + DEVTOOLS_NOTE + ' They can keep going here while it installs.' } catch {}
+    return { result: text + '\n\nFolder: the default is ' + (await defaultFolder($)) + ' (the folder this conversation is open in, or YouCloned in their home folder). Offer that as the default, and leave folder out of save_setup when they take it.' + devtools }
   })
 
   // Learns SkillKey's name the moment Claude itself uses it, for apps whose tool list leaves it out.
