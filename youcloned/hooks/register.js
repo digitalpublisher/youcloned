@@ -70,6 +70,7 @@ const SERVICE = 'ai.bnsn.youcloned.dashboard'
 // Isaac's voice relay on this computer: a message sent to /say for this session is typed into it as
 // "[Voice] ..." and Claude starts the voice conversation.
 const RELAY = 'http://127.0.0.1:8771/say'
+const DEVTOOLS_NOTE = 'Apple\'s developer tools box is waiting behind this window. Click its icon in the Dock (a blue box with a down arrow), then Install. It takes a few minutes and is free.'
 const TALK = 'Talk to Isaac was pressed in YouCloned. Start a voice conversation now: call converse with a short hello and listen.'
 const STOPPED = 'The owner pressed Talk again in YouCloned to stop the voice conversation. Do not call converse again until they press Talk. Carry on in text with anything already asked of you.'
 
@@ -479,7 +480,7 @@ async function startDashboard($, cwd) {
 async function turnOn($, cwd) {
   if (dashOn) return
   dashOn = true
-  await startDashboard($, cwd || (await $.session.cwd()))
+  await startDashboard($, cwd || (await openedFolder($)))
   $.clock.every(1500, () => drainJobs($))
   $.clock.every(20000, () => refreshLive($, false))
   $.clock.every(300000, () => refreshLive($, true))
@@ -528,12 +529,31 @@ function crewDir(name) {
   return project ? project + '/crew/' + name : null
 }
 
+// Apple's "install the developer tools" box (Claude Code runs git, which asks for them on a new Mac) opens
+// behind the Claude window and shows only as a Dock icon, so a buyer can wait on it without knowing.
+// While that installer is open, say where it is, once per session.
+async function nudgeDevTools($) {
+  try {
+    const r = await run($, ['/usr/bin/pgrep', '-f', 'Install Command Line Developer Tools'])
+    if (r.exitCode !== 0) return
+    $.ui.toast(DEVTOOLS_NOTE)
+    $.ui.log(DEVTOOLS_NOTE)
+  } catch {}
+}
+
 // Setup's default folder: the one this conversation is open in, so YouCloned is on where the buyer
 // already works. A session in the home folder itself, or with no folder, falls back to ~/YouCloned.
 async function defaultFolder($) {
-  let cwd = ''
-  try { cwd = String((await $.session.cwd()) || '').replace(/[\\/]+$/, '') } catch {}
+  const cwd = (await openedFolder($)).replace(/[\\/]+$/, '')
   return cwd && cwd !== home && /^([A-Za-z]:)?[\\/]./.test(cwd) ? cwd : home + '/YouCloned'
+}
+
+// The folder the buyer opened this conversation in. A shell cd inside the chat (Claude reading writing
+// samples in a subfolder, say) moves $.session.cwd() but not the session's root, so setup's default
+// folder and the dashboard's launch.json follow the root. Engines without root fall back to cwd.
+async function openedFolder($) {
+  try { const r = await $.session.root(); if (r) return String(r) } catch {}
+  try { return String((await $.session.cwd()) || '') } catch { return '' }
 }
 
 function expandHome(p) {
@@ -953,7 +973,7 @@ export function register(on) {
     if (skillKey) $.clock.after(1500, () => loadSkillKeySkills($))
     // YouCloned shows itself only in the clone folder: a folder with the rules file, or the one setup saved.
     try {
-      const cwd = await $.session.cwd()
+      const cwd = await openedFolder($)
       const rulesHere = await $.fs.exists(cwd + '/' + RULES_NAME)
       cloneHere = rulesHere || !!(project && (cwd === project || cwd.startsWith(project + '/'))) || !!(everywhere && project)
       if (rulesHere) project = cwd
@@ -962,6 +982,7 @@ export function register(on) {
       deskSession = e.surface === 'desktop'
       if (cloneHere && watched) await turnOn($, cwd)
     } catch (err) { $.ui.log('YouCloned clone check failed: ' + String(err)) }
+    if (deskSession && onMac()) $.clock.after(3000, () => nudgeDevTools($))
     try {
       await $.tool.register({
         name: 'save_setup',
@@ -1100,7 +1121,7 @@ export function register(on) {
     await $.store.set('everywhere', true)
     // Switch on in this same chat: the bar, the dashboard and the crew, so the buyer needs no new chat.
     cloneHere = true
-    if (watched) { try { await turnOn($, await $.session.cwd()) } catch {} }
+    if (watched) { try { await turnOn($, await openedFolder($)) } catch {} }
     try { await checkSkillKey($); if (skillKeyServer) await registerCrew($, true) } catch {}
     await refreshDrafts($)
     $.ui.invalidate('ui.render')
