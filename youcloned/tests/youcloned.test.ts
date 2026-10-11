@@ -20,7 +20,7 @@ const SK = '4a62845f-77ec-431f-8b76-2d42902a60fb'
 const skTools = (server = SK) => ['list_skills', 'start_skill', 'run_skill', 'word_balance'].map(t => ({ name: 'mcp__' + server + '__' + t, description: '', mcp: true }))
 const fromSk = (body: string) => ({ content: [{ type: 'text', text: 'You are short on words.\n\n<<<YOUCLONED>>>\n' + body + '\n<<<END YOUCLONED>>>\n\nWhen you have everything the steps ask for, call run_skill with skill "x".' }], isError: false })
 
-function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[]) => unknown, toasts?: string[], lists?: Record<string, string[]>, cwd?: string, skillKey?: string | null, mcpCalls?: { server: string, tool: string, args: Record<string, unknown> }[], registered?: { name: string, prompt: string }[], owns?: (slug: string) => boolean, opened?: string[], browser?: string[], toolCall?: (e: any) => unknown, read?: (path: string) => string | undefined, exists?: (path: string) => boolean | undefined, mcpThrow?: string, logs?: string[], listed?: boolean, appOwned?: boolean, connected?: () => boolean } = {}) {
+function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[]) => unknown, toasts?: string[], lists?: Record<string, string[]>, cwd?: string, root?: string, skillKey?: string | null, mcpCalls?: { server: string, tool: string, args: Record<string, unknown> }[], registered?: { name: string, prompt: string }[], owns?: (slug: string) => boolean, opened?: string[], browser?: string[], toolCall?: (e: any) => unknown, read?: (path: string) => string | undefined, exists?: (path: string) => boolean | undefined, mcpThrow?: string, logs?: string[], listed?: boolean, appOwned?: boolean, connected?: () => boolean } = {}) {
   const writes = new Map<string, string>()
   const store = new Map<string, unknown>(opts.project ? [['project', opts.project]] : [])
   const clock = mock.clock(on)
@@ -55,6 +55,7 @@ function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: 
   on('ui.toast', ($, e) => { opts.toasts?.push(e.text); return { value: undefined } })
   on('session.start', () => ({ cwd: opts.cwd || '/work' }))
   on('session.cwd', () => ({ value: opts.cwd || '/work' }))
+  on('session.root', () => ({ value: opts.root || opts.cwd || '/work' }))
   on('session.messages', () => ({ value: [{ role: 'assistant', text: 'I wrote copy/letter.md', toolUses: [] }] }))
   on('process.run', ($, e) => ({ value: opts.process ? opts.process(e.argv) : { exitCode: 1, stdout: '', stderr: '' } }))
   on('tool.call', ($, e) => (opts.toolCall?.(e) as any) ?? { result: 'ran' })
@@ -137,6 +138,38 @@ test('after setup is saved YouCloned switches on in the same chat: bar, dashboar
   await clock.advance(2000)
   expect(JSON.parse(writes.get(here + '/.claude/launch.json') || '{}').configurations).toContainEqual({ name: 'YouCloned', url: 'http://localhost:4600' })
   expect(registered.map(r => r.name)).toContain('support')
+})
+
+test('a shell cd during setup does not move the setup folder or the dashboard address', async ($, on) => {
+  const here = '/Users/pat/Documents/Bakery'
+  const { writes, store, clock } = sessionStubs(on, { cwd: here + '/samples', root: here, exists: (path) => path === '/usr/bin/python3' || undefined,
+    process: (argv) => ({ exitCode: 0, stdout: argv[0] === '/usr/bin/id' ? '501\n' : '', stderr: '' }) })
+  on('http.fetch', () => ({ value: { status: 200, ok: true, headers: {}, text: '{}' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: here })
+  const steps = await $.tool.call({ tool: 'mcp__youcloned__load_setup' })
+  expect(steps.result).toMatch(/Folder: the default is \/Users\/pat\/Documents\/Bakery /)
+  await $.tool.call({ tool: 'mcp__youcloned__save_setup', ...SETUP })
+  await clock.advance(2000)
+  expect(writes.has(here + '/YOUCLONED.md')).toBe(true)
+  expect(store.get('project')).toBe(here)
+  expect(writes.has(here + '/.claude/launch.json')).toBe(true)
+  expect(writes.has(here + '/samples/.claude/launch.json')).toBe(false)
+})
+
+test('when Apple\'s developer tools box is waiting behind the window, the desktop app says where it is', async ($, on) => {
+  const toasts: string[] = []
+  const { clock } = sessionStubs(on, { toasts, process: (argv) => ({ exitCode: argv[0] === '/usr/bin/pgrep' ? 0 : 1, stdout: '', stderr: '' }) })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/work' })
+  await clock.advance(4000)
+  expect(toasts.some(t => /developer tools box is waiting behind this window/.test(t) && /Dock/.test(t))).toBe(true)
+})
+
+test('with no developer tools box open, or in the terminal, there is no developer tools note', async ($, on) => {
+  const toasts: string[] = []
+  const { clock } = sessionStubs(on, { toasts, process: () => ({ exitCode: 1, stdout: '', stderr: '' }) })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/work' })
+  await clock.advance(4000)
+  expect(toasts.some(t => /developer tools/.test(t))).toBe(false)
 })
 
 test('a conversation open in the home folder itself still sets up in ~/YouCloned', async ($, on) => {
