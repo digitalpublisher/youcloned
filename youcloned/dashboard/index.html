@@ -417,9 +417,9 @@ body{padding:0;background:var(--ground)}
 
       <!-- SETUP -->
       <div class="vbody" data-v="setup" hidden>
-        <div class="vhead row"><div><h2>Set up your clone</h2><p>About ten minutes. Each step is one click and YouCloned does the work. Watch Jon's lesson for any step, or skip it.</p></div><div class="prog"><b>3 of 9 done</b><span class="sb"><i style="width:33%"></i></span></div></div>
+        <div class="vhead row"><div><h2>Set up your clone</h2><p>About ten minutes. Each step is one click and YouCloned does the work. Watch Jon's lesson for any step, or skip it.</p></div><div class="prog"><b id="st-count">0 of 9 done</b><span class="sb"><i id="st-bar" style="width:0%"></i></span></div></div>
         <div class="one">
-          <div class="dots" aria-label="Step 4 of 9"><i class="d"></i><i class="d"></i><i class="d"></i><i class="c"></i><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="dots" id="st-dots" aria-label="Step 4 of 9"><i></i><i></i><i></i><i class="c"></i><i></i><i></i><i></i><i></i><i></i></div>
           <span class="stepof">Step 4 of 9</span>
           <h3>Your database</h3>
           <p>Your clone needs a place to keep your dashboard numbers and your crew's memory. YouCloned sets up a free Supabase account for you. It takes about a minute.</p>
@@ -432,9 +432,9 @@ body{padding:0;background:var(--ground)}
         </div>
         <button class="back" type="button" id="allsteps">See all 9 steps</button>
         <ol class="ss" id="steplist" hidden>
-          <li class="done"><span class="sn">1</span><div><b>Your clone's home</b><p>Pick a folder. It becomes your Obsidian vault, where your clone keeps your notes, rules and work.</p><span class="les">Lesson: Obsidian</span></div><span class="pill">Done</span></li>
-          <li class="done"><span class="sn">2</span><div><b>Your tools</b><p>Installs Obsidian, Git, Node, Python, the video tools your skills use, and Wispr Flow so you can talk instead of type. Skips anything you already have.</p><span class="les">Lesson: Claude Code</span><span class="les">Lesson: The AI Stack</span></div><span class="pill">Done</span></li>
-          <li class="done"><span class="sn">3</span><div><b>Back up to GitHub</b><p>A private copy of your clone folder, saved every hour.</p><span class="les">Lesson: Git and GitHub</span></div><span class="pill">Done</span></li>
+          <li id="st-home"><span class="sn">1</span><div><b>Your clone's home</b><p>Pick a folder. It becomes your Obsidian vault, where your clone keeps your notes, rules and work.</p><span class="les">Lesson: Obsidian</span></div><span class="pill">Not yet</span></li>
+          <li id="st-tools"><span class="sn">2</span><div><b>Your tools</b><p>Installs Obsidian, Git, Node, Python, the video tools your skills use, and Wispr Flow so you can talk instead of type. Skips anything you already have.</p><span class="les">Lesson: Claude Code</span><span class="les">Lesson: The AI Stack</span></div><span class="pill">Not yet</span></li>
+          <li id="st-backup"><span class="sn">3</span><div><b>Back up to GitHub</b><p>A private copy of your clone folder, saved every hour.</p><span class="les">Lesson: Git and GitHub</span></div><span class="pill">Not yet</span></li>
           <li class="now"><span class="sn">4</span><div><b>Your database</b><p>A free Supabase account for your dashboard numbers and your crew's memory.</p><span class="les">Lesson: Supabase</span></div><button class="btn sm primary" type="button">Set it up</button></li>
           <li><span class="sn">5</span><div><b>Jon's skills and your apps</b><p>Connect SkillKey (free) for every skill Jon releases, plus BNSN, BookBuilder or CourseBuilder if you own them.</p><span class="les">Lesson: Workflow Integration</span></div><button class="btn sm" type="button" disabled>Connect</button></li>
           <li><span class="sn">6</span><div><b>Codex, your second opinion</b><p>Connect Codex with your ChatGPT plan so it checks Claude's work. Skip it if you don't use ChatGPT.</p></div><button class="btn sm" type="button" disabled>Connect</button></li>
@@ -522,6 +522,18 @@ body{padding:0;background:var(--ground)}
         document.getElementById("codexPct").textContent = Math.round(s.codex.left);
         document.getElementById("codexL").textContent = s.codex.label || "Codex plan";
         document.getElementById("codexFill").setAttribute("transform", "translate(0," + (94 - 88 * s.codex.left / 100 - 62).toFixed(1) + ")");
+      }
+      // Setup steps 1 to 3 show Done only when YouCloned checked them on this computer.
+      if (s.setup) {
+        var n = 0;
+        [["st-home", s.setup.home], ["st-tools", s.setup.tools], ["st-backup", s.setup.backup]].forEach(function (p, i) {
+          var li = document.getElementById(p[0]); if (!li) return;
+          li.classList.toggle("done", !!p[1]); li.querySelector(".pill").textContent = p[1] ? "Done" : "Not yet";
+          var dot = document.querySelectorAll("#st-dots i")[i]; if (dot) dot.className = p[1] ? "d" : "";
+          if (p[1]) n++;
+        });
+        document.getElementById("st-count").textContent = n + " of 9 done";
+        document.getElementById("st-bar").style.width = Math.round(n * 100 / 9) + "%";
       }
       if ("listening" in s && Date.now() - talkAt > 8000) hero.classList.toggle("live", !!s.listening);
     }).catch(function () {});
