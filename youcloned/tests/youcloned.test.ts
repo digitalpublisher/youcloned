@@ -385,6 +385,62 @@ test('load_setup hands Claude the setup interview from SkillKey, markers and Ski
   expect(out.result).toMatch(/^Instructions for youcloned-setup\n\nFolder: the default is /)
 })
 
+const SETTINGS = '/Users/pat/.claude/settings.json'
+
+test('setup asks once whether the clone may work without permission prompts', async ($, on) => {
+  const { store } = sessionStubs(on)
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/work' })
+  const first = await $.tool.call({ tool: 'mcp__youcloned__load_setup' })
+  expect(first.result).toMatch(/"Let your clone work without stopping to ask permission at every step\?"/)
+  expect(first.result).toMatch(/work_without_prompts/)
+  store.set('noPromptsAsked', 'no')
+  const again = await $.tool.call({ tool: 'mcp__youcloned__load_setup' })
+  expect(again.result).not.toMatch(/work_without_prompts/)
+})
+
+test('setup does not ask when bypass permission mode is already on', async ($, on) => {
+  sessionStubs(on, { files: { [SETTINGS]: JSON.stringify({ permissions: { defaultMode: 'bypassPermissions' } }) } })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/work' })
+  const out = await $.tool.call({ tool: 'mcp__youcloned__load_setup' })
+  expect(out.result).not.toMatch(/work_without_prompts/)
+})
+
+test('a yes merges bypass mode into the settings file, keeps every other setting and backs the file up', async ($, on) => {
+  const old = JSON.stringify({ model: 'opus', permissions: { allow: ['Bash(ls:*)'], defaultMode: 'default' }, hooks: { PreToolUse: [] } }, null, 2)
+  const { writes, store } = sessionStubs(on, { files: { [SETTINGS]: old } })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/work' })
+  const out = await $.tool.call({ tool: 'mcp__youcloned__work_without_prompts', allow: true })
+  expect(out.result).toMatch(/^Done/)
+  const saved = JSON.parse(writes.get(SETTINGS) as string)
+  expect(saved.permissions.defaultMode).toBe('bypassPermissions')
+  expect(saved.permissions.allow).toEqual(['Bash(ls:*)'])
+  expect(saved.model).toBe('opus')
+  expect(saved.hooks).toEqual({ PreToolUse: [] })
+  expect(saved.skipDangerousModePermissionPrompt).toBe(true)
+  const backups = [...writes.keys()].filter(k => k.startsWith(SETTINGS + '.youcloned-backup-'))
+  expect(backups.length).toBe(1)
+  expect(writes.get(backups[0])).toBe(old)
+  expect(store.get('noPromptsAsked')).toBe('yes')
+})
+
+test('a yes with no settings file yet creates one with bypass mode on', async ($, on) => {
+  const { writes } = sessionStubs(on)
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/work' })
+  await $.tool.call({ tool: 'mcp__youcloned__work_without_prompts', allow: true })
+  expect(JSON.parse(writes.get(SETTINGS) as string)).toEqual({ permissions: { defaultMode: 'bypassPermissions' }, skipDangerousModePermissionPrompt: true })
+})
+
+test('a no changes nothing, and a settings file that is not valid JSON is left alone', async ($, on) => {
+  const { writes, store } = sessionStubs(on, { files: { [SETTINGS]: '{ not json' } })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/work' })
+  const no = await $.tool.call({ tool: 'mcp__youcloned__work_without_prompts', allow: false })
+  expect(no.result).toMatch(/^Left as it is/)
+  expect(store.get('noPromptsAsked')).toBe('no')
+  const bad = await $.tool.call({ tool: 'mcp__youcloned__work_without_prompts', allow: true })
+  expect(bad.result).toMatch(/^Nothing changed/)
+  expect([...writes.keys()].some(k => k.startsWith(SETTINGS))).toBe(false)
+})
+
 test('SkillKey is found in the terminal by its usual name too', async ($, on) => {
   const mcpCalls: { server: string, tool: string, args: Record<string, unknown> }[] = []
   sessionStubs(on, { skillKey: 'claude_ai_SkillKey', mcpCalls })
