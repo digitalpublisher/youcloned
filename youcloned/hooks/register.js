@@ -302,8 +302,43 @@ let lastName
 // Claude Code's user settings file, where bypass permission mode is switched on.
 const settingsFile = () => home + '/.claude/settings.json'
 
+// The Claude Code panel in Cursor (and VS Code) ignores bypass mode in ~/.claude/settings.json unless the editor's
+// own user settings allow it (bnsnstack#268): claudeCode.allowDangerouslySkipPermissions + initialPermissionMode.
+const EDITOR_KEYS = { 'claudeCode.allowDangerouslySkipPermissions': true, 'claudeCode.initialPermissionMode': 'bypassPermissions' }
+
+// The user settings file of each editor installed on this computer (its User folder exists).
+async function editorFiles($) {
+  let base = home + '/.config'
+  if (onMac()) base = home + '/Library/Application Support'
+  else if (/^[A-Za-z]:/.test(home)) base = (await $.env.get('APPDATA')) || home + '/AppData/Roaming'
+  const out = []
+  for (const app of ['Cursor', 'Code']) { if (await $.fs.exists(base + '/' + app + '/User')) out.push(base + '/' + app + '/User/settings.json') }
+  return out
+}
+
 async function noPromptsOn($) {
-  try { return JSON.parse(await $.fs.read(settingsFile()))?.permissions?.defaultMode === 'bypassPermissions' } catch { return false }
+  try {
+    if (JSON.parse(await $.fs.read(settingsFile()))?.permissions?.defaultMode !== 'bypassPermissions') return false
+    for (const f of await editorFiles($)) { if (JSON.parse(await $.fs.read(f))?.['claudeCode.allowDangerouslySkipPermissions'] !== true) return false }
+    return true
+  } catch { return false }
+}
+
+// Merges keys into one JSON settings file, backing it up first. False when the file isn't plain JSON
+// (an editor file with comments, say): that file is left alone.
+async function mergeSettings($, file, merge) {
+  let before = null
+  let settings = {}
+  if (await $.fs.exists(file)) {
+    before = await $.fs.read(file)
+    try { settings = before.trim() ? JSON.parse(before) : {} } catch { settings = null }
+    if (!settings || typeof settings !== 'object' || Array.isArray(settings)) return false
+    const stamp = new Date(await $.clock.now()).toISOString().replace(/[:.]/g, '-')
+    await $.fs.write(file + '.youcloned-backup-' + stamp, before)
+  }
+  merge(settings)
+  await $.fs.write(file, JSON.stringify(settings, null, 2) + '\n')
+  return before !== null ? 'backup' : 'new'
 }
 
 // The buyer's answer to the one setup question. Yes merges two keys into their settings file and keeps
@@ -314,22 +349,23 @@ async function setNoPrompts($, allow) {
     return 'Left as it is: Claude keeps asking before each step. If they change their mind later, they can say so and you call work_without_prompts with allow true.'
   }
   const file = settingsFile()
-  let before = null
-  let settings = {}
-  if (await $.fs.exists(file)) {
-    before = await $.fs.read(file)
-    try { settings = before.trim() ? JSON.parse(before) : {} } catch { settings = null }
-    if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
-      return 'Nothing changed: their Claude settings file (' + file + ') isn\'t in a form YouCloned can safely edit. Tell them in one sentence, and that they can turn it on themselves later in Claude\'s settings.'
-    }
-    const stamp = new Date(await $.clock.now()).toISOString().replace(/[:.]/g, '-')
-    await $.fs.write(file + '.youcloned-backup-' + stamp, before)
+  const done = await mergeSettings($, file, settings => {
+    settings.permissions = { ...(settings.permissions && typeof settings.permissions === 'object' ? settings.permissions : {}), defaultMode: 'bypassPermissions' }
+    settings.skipDangerousModePermissionPrompt = true
+  })
+  if (!done) {
+    return 'Nothing changed: their Claude settings file (' + file + ') isn\'t in a form YouCloned can safely edit. Tell them in one sentence, and that they can turn it on themselves later in Claude\'s settings.'
   }
-  settings.permissions = { ...(settings.permissions && typeof settings.permissions === 'object' ? settings.permissions : {}), defaultMode: 'bypassPermissions' }
-  settings.skipDangerousModePermissionPrompt = true
-  await $.fs.write(file, JSON.stringify(settings, null, 2) + '\n')
+  let backup = done === 'backup'
+  const skipped = []
+  for (const f of await editorFiles($)) {
+    const ed = await mergeSettings($, f, settings => Object.assign(settings, EDITOR_KEYS))
+    if (!ed) skipped.push(f)
+    else if (ed === 'backup') backup = true
+  }
   await $.store.set('noPromptsAsked', 'yes')
-  return 'Done: their clone now works without stopping to ask permission, starting with their next new chat. Tell them that in one sentence' + (before !== null ? ' (their old settings are saved next to the file as a backup)' : '') + ', then go on with setup.'
+  return 'Done: their clone now works without stopping to ask permission, starting with their next new chat. Tell them that in one sentence' + (backup ? ' (their old settings are saved next to the file as a backup)' : '') + ', then go on with setup.'
+    + (skipped.length ? ' One more short sentence for them: their editor settings file (' + skipped.join(', ') + ') has notes in it YouCloned won\'t touch, so for the Claude panel in Cursor they open Cursor\'s settings, search "Claude Code", tick "Allow Dangerously Skip Permissions" and set "Initial Permission Mode" to bypassPermissions.' : '')
 }
 // The dashboard's "Set up your clone" steps 1 to 3, from what is on this computer, never assumed:
 // home = the rules file is saved; tools = git (Apple's developer tools or Homebrew), Obsidian, Node,

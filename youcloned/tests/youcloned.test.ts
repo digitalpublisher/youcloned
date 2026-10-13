@@ -441,6 +441,41 @@ test('a no changes nothing, and a settings file that is not valid JSON is left a
   expect([...writes.keys()].some(k => k.startsWith(SETTINGS))).toBe(false)
 })
 
+const CURSOR_DIR = '/Users/pat/Library/Application Support/Cursor/User'
+const CURSOR = CURSOR_DIR + '/settings.json'
+const cursorOn = (files: Record<string, string>) => (p: string) => p === CURSOR_DIR ? true : (p in files ? true : undefined)
+
+test('a yes also lets the Claude panel in Cursor skip prompts, keeping the other Cursor settings', async ($, on) => {
+  const files = { [CURSOR]: JSON.stringify({ 'editor.fontSize': 14 }) }
+  const { writes } = sessionStubs(on, { files, exists: cursorOn(files) })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/work' })
+  const out = await $.tool.call({ tool: 'mcp__youcloned__work_without_prompts', allow: true })
+  expect(out.result).toMatch(/^Done/)
+  expect(out.result).not.toMatch(/won't touch/)
+  expect(JSON.parse(writes.get(CURSOR) as string)).toEqual({ 'editor.fontSize': 14, 'claudeCode.allowDangerouslySkipPermissions': true, 'claudeCode.initialPermissionMode': 'bypassPermissions' })
+  expect([...writes.keys()].filter(k => k.startsWith(CURSOR + '.youcloned-backup-')).length).toBe(1)
+  expect([...writes.keys()].some(k => k.includes('/Code/User/'))).toBe(false)
+})
+
+test('a Cursor settings file with comments is left alone and the person gets the two settings to tick', async ($, on) => {
+  const files = { [CURSOR]: '{\n  // my font\n  "editor.fontSize": 14,\n}' }
+  const { writes } = sessionStubs(on, { files, exists: cursorOn(files) })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/work' })
+  const out = await $.tool.call({ tool: 'mcp__youcloned__work_without_prompts', allow: true })
+  expect(out.result).toMatch(/^Done/)
+  expect(out.result).toMatch(/Allow Dangerously Skip Permissions/)
+  expect([...writes.keys()].some(k => k.startsWith(CURSOR))).toBe(false)
+  expect(JSON.parse(writes.get(SETTINGS) as string).permissions.defaultMode).toBe('bypassPermissions')
+})
+
+test('setup still asks when only the terminal skips prompts and the Cursor panel does not', async ($, on) => {
+  const files = { [SETTINGS]: JSON.stringify({ permissions: { defaultMode: 'bypassPermissions' } }), [CURSOR]: '{}' }
+  sessionStubs(on, { files, exists: cursorOn(files) })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/work' })
+  const out = await $.tool.call({ tool: 'mcp__youcloned__load_setup' })
+  expect(out.result).toMatch(/work_without_prompts/)
+})
+
 test('SkillKey is found in the terminal by its usual name too', async ($, on) => {
   const mcpCalls: { server: string, tool: string, args: Record<string, unknown> }[] = []
   sessionStubs(on, { skillKey: 'claude_ai_SkillKey', mcpCalls })
