@@ -205,7 +205,7 @@ test('dashboard setup steps 1 to 3 are Done only when this computer has them', a
   await $.session.start({ surface: 'desktop', isInteractive: false, cwd: here })
   await clock.advance(25000)
   const state = JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}')
-  expect(state.setup).toEqual({ home: true, tools: false, backup: false })
+  expect(state.setup).toEqual({ home: true, tools: false, backup: false, pc: false })
 })
 
 test('a conversation open in the home folder itself still sets up in ~/YouCloned', async ($, on) => {
@@ -946,7 +946,7 @@ test('on a PC the setup check marks the tools step Done from Git, Obsidian, Node
   on('http.fetch', () => ({ value: { status: 404, ok: false, headers: {}, text: '' } }))
   await $.session.start({ surface: 'desktop', isInteractive: false, cwd: WIN_PROJECT })
   await clock.advance(2500)
-  expect(JSON.parse(writes.get(WIN_DATA + '/state.json') || '{}').setup).toEqual({ home: true, tools: true, backup: false })
+  expect(JSON.parse(writes.get(WIN_DATA + '/state.json') || '{}').setup).toEqual({ home: true, tools: true, backup: false, pc: true })
   have = new Set(tools.slice(0, 3))
   await clock.advance(300000)
   expect(JSON.parse(writes.get(WIN_DATA + '/state.json') || '{}').setup.tools).toBe(false)

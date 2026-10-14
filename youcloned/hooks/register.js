@@ -354,7 +354,7 @@ async function checkSetupSteps($) {
   }
   let backup = false
   if (project) { try { backup = /\[remote "[^"]+"\][^[]*url\s*=\s*\S*github\.com/i.test(await $.fs.read(project + '/.git/config')) } catch {} }
-  live.setup = { home: homeDone, tools, backup }
+  live.setup = { home: homeDone, tools, backup, pc: !!win }   // pc: the dashboard names Windows dictation instead of Wispr Flow
 }
 
 // What the dashboard reads: the numbers, the owner's name, this session (for the talk button) and

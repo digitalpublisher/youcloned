@@ -433,7 +433,7 @@ body{padding:0;background:var(--ground)}
         <button class="back" type="button" id="allsteps">See all 9 steps</button>
         <ol class="ss" id="steplist" hidden>
           <li id="st-home"><span class="sn">1</span><div><b>Your clone's home</b><p>Pick a folder. It becomes your Obsidian vault, where your clone keeps your notes, rules and work.</p><span class="les">Lesson: Obsidian</span></div><span class="pill">Not yet</span></li>
-          <li id="st-tools"><span class="sn">2</span><div><b>Your tools</b><p>Installs Obsidian, Git, Node, Python, the video tools your skills use, and Wispr Flow so you can talk instead of type. Skips anything you already have.</p><span class="les">Lesson: Claude Code</span><span class="les">Lesson: The AI Stack</span></div><span class="pill">Not yet</span></li>
+          <li id="st-tools"><span class="sn">2</span><div><b>Your tools</b><p>Installs Obsidian, Git, Node, Python, the video tools your skills use, and <span id="st-dictate">Wispr Flow</span> so you can talk instead of type. Skips anything you already have.</p><span class="les">Lesson: Claude Code</span><span class="les">Lesson: The AI Stack</span></div><span class="pill">Not yet</span></li>
           <li id="st-backup"><span class="sn">3</span><div><b>Back up to GitHub</b><p>A private copy of your clone folder, saved every hour.</p><span class="les">Lesson: Git and GitHub</span></div><span class="pill">Not yet</span></li>
           <li class="now"><span class="sn">4</span><div><b>Your database</b><p>A free Supabase account for your dashboard numbers and your crew's memory.</p><span class="les">Lesson: Supabase</span></div><button class="btn sm primary" type="button">Set it up</button></li>
           <li><span class="sn">5</span><div><b>Jon's skills and your apps</b><p>Connect SkillKey (free) for every skill Jon releases, plus BNSN, BookBuilder or CourseBuilder if you own them.</p><span class="les">Lesson: Workflow Integration</span></div><button class="btn sm" type="button" disabled>Connect</button></li>
@@ -525,6 +525,7 @@ body{padding:0;background:var(--ground)}
       }
       // Setup steps 1 to 3 show Done only when YouCloned checked them on this computer.
       if (s.setup) {
+        if (s.setup.pc) document.getElementById("st-dictate").textContent = "Windows dictation (Windows key + H)";
         var n = 0;
         [["st-home", s.setup.home], ["st-tools", s.setup.tools], ["st-backup", s.setup.backup]].forEach(function (p, i) {
           var li = document.getElementById(p[0]); if (!li) return;
