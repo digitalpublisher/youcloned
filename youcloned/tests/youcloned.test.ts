@@ -888,6 +888,41 @@ test('any BNSN answer that names the balance updates the BNSN gauge; YouCloned\'
   expect((await $.tool.check({ tool: 'mcp__other__check-word-balance', input: {} })).decision).toBe('ask')
 })
 
+// Runs one job the way the dashboard queues it (POST /do writes jobs.jsonl) and returns what reached the chat.
+async function dashboardJob($, on, text: string, opts: Record<string, unknown> = {}) {
+  const submitted: string[] = []
+  let queued = JSON.stringify({ text, at: 1 }) + '\n'
+  const { writes, clock } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' },
+    exists: (path) => path.endsWith('/jobs.jsonl') || undefined, read: (path) => path.endsWith('/jobs.jsonl') ? (writes.has(path) ? writes.get(path) : queued) : undefined, ...opts } as any)
+  on('prompt.submit', ($, e) => { submitted.push(String(e.text)); return { text: String(e.text) } })
+  on('http.fetch', () => ({ value: { status: 404, ok: false, headers: {}, text: '' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  await clock.advance(2000)
+  return submitted
+}
+
+test('setup step 5 with no connectors: SkillKey first, then BNSN for a BNSN owner, the other apps open in the browser', async ($, on) => {
+  const [job] = await dashboardJob($, on, '/youcloned connect', { skillKey: null })
+  expect(job).toMatch(/^Connect my apps to Claude, one at a time\. Start with SkillKey\./)
+  expect(job.indexOf('https://skills.bnsn.ai/claude')).toBeLessThan(job.indexOf('https://api.bnsn.ai/v1/mcp/bnsn/mcp'))
+  expect(job).toContain('whether I have a BNSN plan')
+  expect(job).toContain('BookBuilder, CourseBuilder and Improver have no Claude connector yet')
+  plainText(job)
+})
+
+test('setup step 5 with SkillKey only skips SkillKey and goes on to BNSN', async ($, on) => {
+  const [job] = await dashboardJob($, on, '/youcloned connect')
+  expect(job).toContain('SkillKey is already connected, so skip it.')
+  expect(job).toContain('https://api.bnsn.ai/v1/mcp/bnsn/mcp')
+})
+
+test('setup step 5 with SkillKey and BNSN both on names them connected and connects nothing again', async ($, on) => {
+  const [job] = await dashboardJob($, on, '/youcloned connect', { bnsn: { server: BN, tools: BN_TOOLS } })
+  expect(job).toContain('SkillKey is already connected, so skip it.')
+  expect(job).toContain('BNSN is already connected too.')
+  expect(job).not.toContain('https://api.bnsn.ai/v1/mcp/bnsn/mcp')
+})
+
 // A fresh Mac: no developer tools, so /usr/bin/python3 is only Apple's stand-in.
 function freshMac(on, sum: string) {
   const argvs: string[][] = []
