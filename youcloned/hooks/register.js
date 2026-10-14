@@ -21,6 +21,8 @@ const SCHEDULES = [{ value: '0', label: 'Only when I press Run' }, { value: '60'
 
 let interactive = true
 let home = ''
+let win = false             // this computer runs Windows (set from the environment in loadState)
+let winDirs = {}            // Windows: LOCALAPPDATA, APPDATA, Program Files, the Windows folder and the CPU kind
 let project = null          // the customer's YouCloned folder, once setup has saved
 let tab = 'home'
 let codex = { busy: false, note: '' }
@@ -166,8 +168,11 @@ async function loadFeed($) {
   const id = String(item.id || 'item').replace(/[^a-z0-9-]/gi, '')
   promo = { id, title: String(item.title), note: String(item.note || ''), button: String(item.button || 'Start'), text: String(item.job), watch: /^https:\/\//.test(item.watch || '') ? item.watch : null }
   const thumb = dataDir() + '/feed-' + id + '.jpg'
-  if (/^https:\/\//.test(item.thumb || '') && !(await $.fs.exists(thumb))) await run($, ['/usr/bin/curl', '-sfL', '--max-time', '20', '-o', thumb, item.thumb])
-  const b64 = ((await run($, ['/usr/bin/base64', '-i', thumb])).stdout || '').replace(/\s+/g, '')
+  if (/^https:\/\//.test(item.thumb || '') && !(await $.fs.exists(thumb))) await run($, [win ? sys32('curl.exe') : '/usr/bin/curl', '-sfL', '--max-time', '20', '-o', thumb, item.thumb])
+  // Windows has no base64 program, so the add-on reads the picture's bytes itself.
+  let b64 = ''
+  if (win) { try { if (await $.fs.exists(thumb)) b64 = String((await $.fs.read(thumb, { as: 'bytes' })).base64 || '') } catch {} }
+  else b64 = ((await run($, ['/usr/bin/base64', '-i', thumb])).stdout || '').replace(/\s+/g, '')
   // The panel's pictures share a size budget; a feed thumbnail over ~24k characters is left out.
   promoThumb = b64 && b64.length < 24000 ? 'data:image/jpeg;base64,' + b64 : null
   try { await $.fs.write(dataDir() + '/feed-thumb.txt', thumb) } catch {}
@@ -175,8 +180,12 @@ async function loadFeed($) {
 }
 
 // Codex's own usage record: the last rate-limit line in its newest session log.
+// Windows has no sh, ls, tail or grep, so Windows PowerShell (in every Windows 10 and 11) does the same.
 async function readCodexPlan($) {
-  const r = await run($, ['/bin/sh', '-c', 'f=$(ls -t "' + home + '"/.codex/sessions/*/*/*/*.jsonl 2>/dev/null | head -1); [ -n "$f" ] && tail -c 3000000 "$f" | grep \'"rate_limits"\' | tail -1'])
+  const r = win
+    ? await run($, powershell('$f = Get-ChildItem -LiteralPath ' + psQuote(home + '\\.codex\\sessions') + ' -Recurse -File -Filter *.jsonl -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 1; ' +
+      'if ($f) { Get-Content -LiteralPath $f.FullName -Tail 3000 -Encoding UTF8 | Where-Object { $_.Contains([char]34 + \'rate_limits\' + [char]34) } | Select-Object -Last 1 }'))
+    : await run($, ['/bin/sh', '-c', 'f=$(ls -t "' + home + '"/.codex/sessions/*/*/*/*.jsonl 2>/dev/null | head -1); [ -n "$f" ] && tail -c 3000000 "$f" | grep \'"rate_limits"\' | tail -1'])
   const find = (o) => { if (!o || typeof o !== 'object') return null; if (o.rate_limits) return o.rate_limits; for (const v of Object.values(o)) { const x = find(v); if (x) return x } return null }
   try {
     const p = (find(JSON.parse(r.stdout)) || {}).primary
@@ -195,6 +204,32 @@ const MONEY_SAMPLE = { total: 7514, up: 17, sample: true, parts: [
 
 function dataDir() {
   return home + '/.youcloned'
+}
+
+// A path for people and Claude to read: Windows spells folders with \, a Mac with /.
+function join(...parts) {
+  return parts.join(win ? '\\' : '/')
+}
+
+// On Windows one folder can be spelled with \ or / and in any case; on a Mac the spelling is the folder.
+function pathKey(p) {
+  return win ? String(p).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase() : String(p)
+}
+const samePath = (a, b) => pathKey(a) === pathKey(b)
+const insidePath = (child, parent) => samePath(child, parent) || pathKey(child).startsWith(pathKey(parent) + '/')
+
+// Windows' own programs, by full path: the Claude app may hand add-ons a short program path.
+function sys32(exe) {
+  return (winDirs.system || 'C:\\Windows') + '\\System32\\' + exe
+}
+
+function powershell(script) {
+  return [sys32('WindowsPowerShell\\v1.0\\powershell.exe'), '-NoProfile', '-NonInteractive', '-Command', script]
+}
+
+// A PowerShell string that holds any path: single quotes, with a quote inside doubled.
+function psQuote(s) {
+  return "'" + String(s).replace(/'/g, "''") + "'"
 }
 
 // Runs a job from the strip or the dashboard: YouCloned commands run here, anything else goes to the chat as the owner's words.
@@ -296,11 +331,21 @@ let lastName
 // The dashboard's "Set up your clone" steps 1 to 3, from what is on this computer, never assumed:
 // home = the rules file is saved; tools = git (Apple's developer tools or Homebrew), Obsidian, Node,
 // ffmpeg and Wispr Flow are all there; backup = the clone folder is a git repo with a GitHub remote.
+// On Windows tools = Git, Obsidian, Node and ffmpeg (what the PC installer puts on): Windows has its own
+// dictation (Windows key + H), so Wispr Flow is not asked for there.
 async function checkSetupSteps($) {
   const has = async (paths) => { for (const p of paths) { if (await $.fs.exists(p)) return true } return false }
   const homeDone = !!project && (await $.fs.exists(project + '/' + RULES_NAME))
   let tools = false
-  if (onMac()) {
+  if (win) {
+    const answers = async (argv) => (await run($, argv)).exitCode === 0
+    const { local, programs } = winDirs
+    // Known places first: a tool installed after the Claude app started is not on the app's program path yet.
+    tools = ((await has([programs + '\\Git\\cmd\\git.exe', local + '\\Programs\\Git\\cmd\\git.exe'])) || (await answers(['git', '--version'])))
+      && (await has([local + '\\Obsidian\\Obsidian.exe', local + '\\Programs\\Obsidian\\Obsidian.exe', programs + '\\Obsidian\\Obsidian.exe']))
+      && ((await has([programs + '\\nodejs\\node.exe'])) || (await answers(['node', '--version'])))
+      && ((await has([local + '\\Microsoft\\WinGet\\Links\\ffmpeg.exe', programs + '\\WinGet\\Links\\ffmpeg.exe'])) || (await answers(['ffmpeg', '-version'])))
+  } else if (onMac()) {
     const git = (await run($, ['/usr/bin/xcode-select', '-p'])).exitCode === 0 || (await has(['/opt/homebrew/bin/git', '/usr/local/bin/git']))
     tools = git && (await has(['/Applications/Obsidian.app', home + '/Applications/Obsidian.app']))
       && (await has(['/opt/homebrew/bin/node', '/usr/local/bin/node', home + '/.nvm/versions/node']))
@@ -345,34 +390,72 @@ async function dashboardUp($) {
   try { const r = await $.http.fetch(DASH_URL + '/state.json'); return r && r.status === 200 } catch { return false }
 }
 
-// Finds Python: the desktop app gives add-ons a short program path, so known places are checked first.
+// Finds Python and answers the command that starts it (a list: Windows' launcher is "py -3").
+// The desktop app gives add-ons a short program path, so known places are checked first.
 // Apple's /usr/bin/python3 is only a stand-in that asks to install the developer tools, so it counts
 // only when they are installed. A Mac with none of these gets YouCloned's own Python (ownPython).
 async function findPython($) {
+  if (win) return findPythonWindows($)
   for (const p of ['/opt/homebrew/bin/python3', '/usr/local/bin/python3', '/Library/Frameworks/Python.framework/Versions/Current/bin/python3']) {
-    if (await $.fs.exists(p)) return p
+    if (await $.fs.exists(p)) return [p]
   }
-  if (!onMac()) return 'python3'
-  if ((await $.fs.exists('/usr/bin/python3')) && (await run($, ['/usr/bin/xcode-select', '-p'])).exitCode === 0) return '/usr/bin/python3'
-  return ownPython($)
+  if (!onMac()) return ['python3']
+  if ((await $.fs.exists('/usr/bin/python3')) && (await run($, ['/usr/bin/xcode-select', '-p'])).exitCode === 0) return ['/usr/bin/python3']
+  const own = await ownPython($)
+  return own ? [own] : null
 }
 
-// YouCloned's own Python on a fresh Mac: a pinned uv, checked against its published checksum, fetches
-// a standalone Python into ~/.youcloned/python. Nothing else on the Mac changes and no password is asked.
+// Windows: the py launcher, then python, then python3, each only when it answers as Python 3. Windows'
+// own python.exe and python3.exe are stand-ins that open the Microsoft Store and answer no version.
+// Then the places python.org and winget install to (an install made after the Claude app started is not
+// on its program path yet), then YouCloned's own Python, the same way as on a Mac.
+async function findPythonWindows($) {
+  const works = async (argv) => {
+    const r = await run($, [...argv, '--version'])
+    return r.exitCode === 0 && /Python 3\./.test((r.stdout || '') + (r.stderr || ''))
+  }
+  for (const argv of [['py', '-3'], ['python'], ['python3']]) if (await works(argv)) return argv
+  const { local, programs, system } = winDirs
+  for (const py of [local + '\\Programs\\Python\\Launcher\\py.exe', (system || 'C:\\Windows') + '\\py.exe']) {
+    if ((await $.fs.exists(py)) && (await works([py, '-3']))) return [py, '-3']
+  }
+  for (const dir of [local + '\\Programs\\Python', programs]) {
+    let names = []
+    try { names = (await $.fs.list(dir)).filter(x => x.kind === 'dir' && /^Python3\d+$/i.test(x.name)).map(x => x.name) } catch {}
+    names.sort((a, b) => Number(b.slice(7)) - Number(a.slice(7)))
+    for (const name of names) {
+      const exe = dir + '\\' + name + '\\python.exe'
+      if ((await $.fs.exists(exe)) && (await works([exe]))) return [exe]
+    }
+  }
+  const own = await ownPython($)
+  return own ? [own] : null
+}
+
+// YouCloned's own Python on a fresh Mac or PC: a pinned uv, checked against its published checksum,
+// fetches a standalone Python into ~/.youcloned/python. Nothing else on the computer changes and no
+// password or admin prompt is asked. On Windows this is chosen over python.org's embeddable zip (no pip,
+// no venv) and winget (an admin prompt, and the new program path reaches the Claude app only after a
+// restart): it is the same pinned, checksum-checked path the Mac takes, using Windows' own curl.exe,
+// certutil.exe and tar.exe (Windows 10 1803 and later).
 const UV_VERSION = '0.12.15'
 const UV_SHA256 = {
   'aarch64-apple-darwin': 'dc304b9ed1b24174572290fba60ac3f6fe63c73a671f0439e62a91375841964d',
   'x86_64-apple-darwin': 'e9ca61775532368fe518ab03e7a354c7ecab8ccb3c7d941c775fcc4a362b801b',
+  'x86_64-pc-windows-msvc': '477bd99a84e34891f2bd4c9152ddeb74e971accccbc59c0f0301f11f08a32d46',
+  'aarch64-pc-windows-msvc': 'a37c8e96cb1260488c8510b64c848533a3a82a2fdf9e905de7c2700ceebf6437',
 }
 const OWN_PYTHON = '3.12'
 let fetchingPython = null
 
 function uvEnv() {
+  // Windows keeps its own program path and profile folders: uv needs them to find its cache.
+  if (win) return { UV_PYTHON_INSTALL_DIR: dataDir() + '/python', UV_NO_MODIFY_PATH: '1' }
   return { HOME: home, PATH: '/usr/bin:/bin', UV_PYTHON_INSTALL_DIR: dataDir() + '/python', UV_NO_MODIFY_PATH: '1' }
 }
 
 async function ownPython($) {
-  const uv = dataDir() + '/bin/uv'
+  const uv = dataDir() + (win ? '/bin/uv.exe' : '/bin/uv')
   const find = async () => {
     if (!(await $.fs.exists(uv))) return null
     const r = await runWith($, [uv, 'python', 'find', '--no-project', OWN_PYTHON], { env: uvEnv() })
@@ -385,6 +468,7 @@ async function ownPython($) {
 }
 
 async function fetchOwnPython($, uv) {
+  if (win) return fetchOwnPythonWindows($, uv)
   const machine = ((await run($, ['/usr/bin/uname', '-m'])).stdout || '').trim()
   const target = machine === 'arm64' ? 'aarch64-apple-darwin' : 'x86_64-apple-darwin'
   const work = dataDir() + '/uv-download'
@@ -406,9 +490,37 @@ async function fetchOwnPython($, uv) {
   }
 }
 
+async function fetchOwnPythonWindows($, uv) {
+  const target = winDirs.arch === 'ARM64' ? 'aarch64-pc-windows-msvc' : 'x86_64-pc-windows-msvc'
+  const work = dataDir() + '/uv-download'
+  const archive = work + '/uv.zip'
+  const clear = () => run($, powershell('Remove-Item -LiteralPath ' + psQuote(work) + ' -Recurse -Force -ErrorAction SilentlyContinue'))
+  await clear()
+  try {
+    const url = 'https://github.com/astral-sh/uv/releases/download/' + UV_VERSION + '/uv-' + target + '.zip'
+    if ((await runWith($, [sys32('curl.exe'), '-fsSL', '--create-dirs', '-o', archive, url], { timeoutMs: 180000 })).exitCode !== 0) return false
+    // certutil prints a heading, the hash (with spaces between bytes on older Windows), then a done line.
+    const out = (await run($, [sys32('certutil.exe'), '-hashfile', archive, 'SHA256'])).stdout || ''
+    const sum = (out.split(/\r?\n/).map(l => l.replace(/\s+/g, '')).find(l => /^[0-9a-f]{64}$/i.test(l)) || '').toLowerCase()
+    if (sum !== UV_SHA256[target]) { $.ui.log('uv download did not match its checksum'); return false }
+    try { await $.fs.write(dataDir() + '/bin/.keep', '') } catch { return false }
+    if ((await run($, [sys32('tar.exe'), '-xf', archive, '-C', dataDir() + '/bin', 'uv.exe'])).exitCode !== 0) return false
+    const r = await runWith($, [uv, 'python', 'install', '--no-bin', OWN_PYTHON], { env: uvEnv(), timeoutMs: 600000 })
+    if (r.exitCode !== 0) $.ui.log('Python install did not finish: ' + r.stderr.slice(0, 300))
+    return r.exitCode === 0
+  } finally {
+    await clear()
+  }
+}
+
 // Git counts only when it is installed: on a Mac with no developer tools /usr/bin/git is a
 // stand-in that pops an install box.
 async function gitPath($) {
+  if (win) {
+    // Git for Windows' usual places, then the program path; with no git there is no repository to leak from.
+    for (const p of [winDirs.programs + '\\Git\\cmd\\git.exe', winDirs.local + '\\Programs\\Git\\cmd\\git.exe']) if (await $.fs.exists(p)) return p
+    return (await run($, ['git', '--version'])).exitCode === 0 ? 'git' : null
+  }
   for (const p of ['/opt/homebrew/bin/git', '/usr/local/bin/git']) if (await $.fs.exists(p)) return p
   if (onMac() && (await run($, ['/usr/bin/xcode-select', '-p'])).exitCode !== 0) return null
   return (await $.fs.exists('/usr/bin/git')) ? '/usr/bin/git' : 'git'
@@ -430,7 +542,7 @@ async function loadBans($) {
 
 // On a Mac the dashboard runs as a background service, so it is already up when the person clicks
 // Claude's globe, and launch.json names its address (no play button, nothing to start). Elsewhere
-// Claude starts it from launch.json and the add-on starts it too.
+// (Windows included) Claude starts it from launch.json and the add-on starts it too, for this session.
 const onMac = () => home.startsWith('/Users/')
 
 async function run($, argv) {
@@ -445,7 +557,7 @@ function servicePlist(python, server) {
   const x = (v) => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;')
   return '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n' +
     '<plist version="1.0"><dict>\n<key>Label</key><string>' + SERVICE + '</string>\n' +
-    '<key>ProgramArguments</key><array><string>' + x(python) + '</string><string>' + x(server) + '</string><string>' + DASH_PORT + '</string></array>\n' +
+    '<key>ProgramArguments</key><array>' + python.map(p => '<string>' + x(p) + '</string>').join('') + '<string>' + x(server) + '</string><string>' + DASH_PORT + '</string></array>\n' +
     '<key>RunAtLoad</key><true/>\n<key>KeepAlive</key><true/>\n' +
     '<key>StandardErrorPath</key><string>' + x(dataDir() + '/dashboard.log') + '</string>\n</dict></plist>\n'
 }
@@ -491,9 +603,13 @@ async function startDashboard($, cwd) {
   const python = await findPython($)
   if (!python) { $.ui.log('dashboard did not start: no Python on this computer'); return }
   const server = $.plugin.root + '/dashboard/server.py'
-  await writeLaunch($, cwd, { name: 'YouCloned', runtimeExecutable: python, runtimeArgs: [server, String(DASH_PORT)], port: DASH_PORT, autoPort: false })
+  await writeLaunch($, cwd, { name: 'YouCloned', runtimeExecutable: python[0], runtimeArgs: [...python.slice(1), server, String(DASH_PORT)], port: DASH_PORT, autoPort: false })
   if (!(await dashboardUp($))) {
-    try { const r = $.process.spawn([python, server, String(DASH_PORT)]); if (r && typeof r.catch === 'function') r.catch(() => {}) } catch (err) { $.ui.log('dashboard did not start: ' + String(err)) }
+    // The server runs while this session's add-on reads its output; the loop ending ends it.
+    try {
+      const child = $.process.spawn({ argv: [...python, server, String(DASH_PORT)] })
+      void (async () => { try { for await (const _ of child) {} } catch (err) { $.ui.log('dashboard stopped: ' + String(err).slice(0, 300)) } })()
+    } catch (err) { $.ui.log('dashboard did not start: ' + String(err)) }
   }
 }
 
@@ -547,7 +663,7 @@ function openDashboard($) {
 }
 
 function crewDir(name) {
-  return project ? project + '/crew/' + name : null
+  return project ? join(project, 'crew', name) : null
 }
 
 // Apple's "install the developer tools" box (Claude Code runs git, which asks for them on a new Mac) opens
@@ -566,7 +682,7 @@ async function nudgeDevTools($) {
 // already works. A session in the home folder itself, or with no folder, falls back to ~/YouCloned.
 async function defaultFolder($) {
   const cwd = (await openedFolder($)).replace(/[\\/]+$/, '')
-  return cwd && cwd !== home && /^([A-Za-z]:)?[\\/]./.test(cwd) ? cwd : home + '/YouCloned'
+  return cwd && !samePath(cwd, home) && /^([A-Za-z]:)?[\\/]./.test(cwd) ? cwd : join(home, 'YouCloned')
 }
 
 // The folder the buyer opened this conversation in. A shell cd inside the chat (Claude reading writing
@@ -580,12 +696,25 @@ async function openedFolder($) {
 function expandHome(p) {
   const s = String(p || '').trim()
   if (s === '~') return home
-  if (s.startsWith('~/')) return home + s.slice(1)
+  if (s.startsWith('~/') || (win && s.startsWith('~\\'))) return home + s.slice(1)
   return s
 }
 
 async function loadState($) {
   home = (await $.env.get('HOME')) || (await $.env.get('USERPROFILE')) || ''
+  // Windows names itself in OS. There the profile folder is home: a HOME another program set may point elsewhere.
+  win = (await $.env.get('OS')) === 'Windows_NT' || /^(?:[A-Za-z]:[\\/]|\\\\)/.test(home)
+  if (win) {
+    home = ((await $.env.get('USERPROFILE')) || home).replace(/[\\/]+$/, '')
+    winDirs = {
+      local: (await $.env.get('LOCALAPPDATA')) || home + '\\AppData\\Local',
+      roaming: (await $.env.get('APPDATA')) || home + '\\AppData\\Roaming',
+      programs: (await $.env.get('ProgramFiles')) || 'C:\\Program Files',
+      system: (await $.env.get('SystemRoot')) || 'C:\\Windows',
+      // A 64-bit ARM PC running an x64 program says ARM64 in PROCESSOR_ARCHITEW6432.
+      arch: String((await $.env.get('PROCESSOR_ARCHITEW6432')) || (await $.env.get('PROCESSOR_ARCHITECTURE')) || '').toUpperCase(),
+    }
+  }
   everywhere = (await $.store.get('everywhere')) === true
   const saved = await $.store.get('project')
   project = typeof saved === 'string' && saved ? saved : null
@@ -623,7 +752,7 @@ async function waitingQuestions($) {
     for (const d of await $.fs.list(dir + folder)) {
       if (d.kind !== 'file' || !d.name.endsWith('.md')) continue
       const m = (await $.fs.read(dir + folder + '/' + d.name)).match(/^Question:\s*(.+)$/m)
-      if (m) answered.add(m[1].trim().split('/').pop())
+      if (m) answered.add(m[1].trim().split(win ? /[\\/]/ : '/').pop())
     }
   }
   return questions.filter(q => !answered.has(q))
@@ -728,11 +857,20 @@ async function readRules($) {
   try { return await $.fs.read(project + '/' + RULES_NAME) } catch { return null }
 }
 
+// Answers the command that starts Codex (a list), or null.
 async function findCodex($) {
   try {
     const r = await $.process.run(['codex', '--version'], { timeoutMs: 15000 })
-    if (r.exitCode === 0) return 'codex'
+    if (r.exitCode === 0) return ['codex']
   } catch {}
+  if (win) {
+    // npm puts codex.cmd on the path, which only a shell can start; Node runs the same program directly.
+    const { local, roaming, programs } = winDirs
+    for (const exe of [local + '\\Microsoft\\WinGet\\Links\\codex.exe', home + '\\.local\\bin\\codex.exe']) if (await $.fs.exists(exe)) return [exe]
+    const js = roaming + '\\npm\\node_modules\\@openai\\codex\\bin\\codex.js'
+    if (await $.fs.exists(js)) return [(await $.fs.exists(programs + '\\nodejs\\node.exe')) ? programs + '\\nodejs\\node.exe' : 'node', js]
+    return null
+  }
   const candidates = [
     '/Applications/Codex.app/Contents/Resources/codex',
     '/Applications/ChatGPT.app/Contents/Resources/codex',
@@ -741,7 +879,7 @@ async function findCodex($) {
     '/usr/local/bin/codex',
   ]
   for (const path of candidates) {
-    if (await $.fs.exists(path)) return path
+    if (await $.fs.exists(path)) return [path]
   }
   return null
 }
@@ -766,7 +904,7 @@ async function codexCheck($, question) {
   } catch {}
   try {
     if (changed && !question) {
-      const r = await $.process.run([bin, 'review', '--uncommitted'], { cwd, timeoutMs: 600000 })
+      const r = await $.process.run([...bin, 'review', '--uncommitted'], { cwd, timeoutMs: 600000 })
       const text = (r.stdout || '').trim()
       return text || 'Codex finished without a review. What it printed: ' + (r.stderr || '').trim().slice(-1500)
     }
@@ -777,7 +915,7 @@ async function codexCheck($, question) {
         'Read the files it mentions. List the problems you find, most serious first, each with the file and what to change. If it looks right, say so in one line.'
     const outFile = home + '/.youcloned/codex-last.md'
     await $.fs.write(outFile, '')
-    const r = await $.process.run([bin, 'exec', '--sandbox', 'read-only', '--skip-git-repo-check', '--ephemeral', '-C', cwd, '-o', outFile, prompt], { cwd, timeoutMs: 600000 })
+    const r = await $.process.run([...bin, 'exec', '--sandbox', 'read-only', '--skip-git-repo-check', '--ephemeral', '-C', cwd, '-o', outFile, prompt], { cwd, timeoutMs: 600000 })
     const text = (await $.fs.read(outFile)).trim()
     if (text) return text
     return 'Codex finished without an answer (exit ' + r.exitCode + '). What it printed: ' + ((r.stderr || r.stdout || '').trim().slice(-1500))
@@ -867,7 +1005,7 @@ async function runCrew($, name) {
   const r = await $.agent.spawn({
     subagentType: 'youcloned:' + name,
     description: 'YouCloned crew: ' + c.title,
-    prompt: 'Rules file: ' + project + '/' + RULES_NAME + '\nCrew folder: ' + crewDir(name) + '\nToday: ' + today + '\n' + work + '\nDo your job now.',
+    prompt: 'Rules file: ' + join(project, RULES_NAME) + '\nCrew folder: ' + crewDir(name) + '\nToday: ' + today + '\n' + work + '\nDo your job now.',
   })
   if (r.deny || !r.agentId) {
     crew[name].note = 'Could not start: ' + (r.deny || 'no agent id')
@@ -996,7 +1134,7 @@ export function register(on) {
     try {
       const cwd = await openedFolder($)
       const rulesHere = await $.fs.exists(cwd + '/' + RULES_NAME)
-      cloneHere = rulesHere || !!(project && (cwd === project || cwd.startsWith(project + '/'))) || !!(everywhere && project)
+      cloneHere = rulesHere || !!(project && insidePath(cwd, project)) || !!(everywhere && project)
       if (rulesHere) project = cwd
       // The desktop app reports its sessions as not interactive, so it counts by its surface.
       watched = e.isInteractive || e.surface === 'desktop'
@@ -1121,7 +1259,7 @@ export function register(on) {
     const rules = await readRules($)
     if (!rules) return result
     const running = version ? 'YouCloned version ' + version + ' is running in this conversation (tell the person this number if they ask which version they have).\n\n' : ''
-    const block = { name: 'youcloned', text: running + 'The owner\'s YouCloned rules, from ' + project + '/' + RULES_NAME +
+    const block = { name: 'youcloned', text: running + 'The owner\'s YouCloned rules, from ' + join(project, RULES_NAME) +
       '. Follow them in everything you write for this person.\n\n' + rules }
     return { ...result, blocks: [...result.blocks, block] }
   })
@@ -1130,7 +1268,7 @@ export function register(on) {
     const problems = checkSetup(e)
     if (problems.length) return { result: 'Not saved. Fix these and call save_setup again:\n- ' + problems.join('\n- ') }
     const folder = expandHome(e.folder) || await defaultFolder($)
-    if (!/^([A-Za-z]:)?[\\/]/.test(folder)) return { result: 'Not saved: the folder must be a full path, such as ' + home + '/YouCloned.' }
+    if (!/^([A-Za-z]:)?[\\/]/.test(folder)) return { result: 'Not saved: the folder must be a full path, such as ' + join(home, 'YouCloned') + '.' }
     await $.fs.write(folder + '/' + RULES_NAME, rulesMarkdown(e))
     for (const c of CREW) {
       await $.fs.write(folder + '/crew/' + c.name + '/drafts/.keep', '')
@@ -1146,7 +1284,7 @@ export function register(on) {
     try { await checkSkillKey($); if (skillKeyServer) await registerCrew($, true) } catch {}
     await refreshDrafts($)
     $.ui.invalidate('ui.render')
-    return { result: 'Saved. Rules file: ' + folder + '/' + RULES_NAME + '. Crew folders: ' + folder + '/crew/support and ' + folder + '/crew/inbox. Every new conversation reads the rules file. ' + SYNC_NOTE }
+    return { result: 'Saved. Rules file: ' + join(folder, RULES_NAME) + '. Crew folders: ' + join(folder, 'crew', 'support') + ' and ' + join(folder, 'crew', 'inbox') + '. Every new conversation reads the rules file. ' + SYNC_NOTE }
   })
 
   on('tool.call', { tool: 'mcp__youcloned__load_setup' }, async ($) => {
@@ -1212,7 +1350,7 @@ export function register(on) {
       await openPane($, true)
       return {}
     }
-    return { text: project ? 'YouCloned is set up. Rules file: ' + project + '/' + RULES_NAME : 'YouCloned is not set up yet. Run /youcloned setup.' }
+    return { text: project ? 'YouCloned is set up. Rules file: ' + join(project, RULES_NAME) : 'YouCloned is not set up yet. Run /youcloned setup.' }
   })
 
   // A crew member finished.
@@ -1424,7 +1562,7 @@ export function register(on) {
     }
     if (tab === 'setup') {
       body.push(Text({ bold: true, children: ['Your clone'] }))
-      body.push(Text({ dimColor: true, wrap: 'wrap', children: [project ? 'Your rules are on: ' + project + '/' + RULES_NAME : 'Tell your clone who you are, what you sell and how you sound. Everything works better after this.'] }))
+      body.push(Text({ dimColor: true, wrap: 'wrap', children: [project ? 'Your rules are on: ' + join(project, RULES_NAME) : 'Tell your clone who you are, what you sell and how you sound. Everything works better after this.'] }))
       body.push(Button({ key: 'setup', label: project ? 'Redo my setup' : 'Set me up (about 5 minutes)', autoFocus: !project, onPress: () => startSetup($) }))
       body.push(Text({ bold: true, children: ['Codex'] }))
       body.push(Text({ dimColor: true, wrap: 'wrap', children: [codex.note || (codexReady ? 'Ready. Your own Codex gives a second opinion on Claude\'s work.' : 'Codex is not on this computer yet.')] }))
