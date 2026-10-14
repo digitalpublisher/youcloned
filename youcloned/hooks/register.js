@@ -151,9 +151,8 @@ const BUILT_IN = [
     text: 'Write an opt-in page for one of my offers or free gifts. Ask me which one first. Follow my YouCloned rules, and save it as a file in my YouCloned folder.' },
   { key: 'web-page', label: 'Web page', what: 'Your copy and your brand, one page',
     text: 'Build me a one-page website for my business as a single HTML file in my YouCloned folder. Use my YouCloned rules for the copy, colors and fonts, and show me how to open it when it is done.' },
-  { key: 'offer', label: 'Plan an offer', what: 'Price, bonuses and guarantee',
-    text: 'Help me plan a new offer for my audience: what it is, the price, the bonuses and the guarantee. Ask me a few questions first, then write the plan to a file in my YouCloned folder.' },
 ]
+// No offer planning here: YouCloned never plans offers (Jon's Oct 1 split); OfferBuilder does.
 const DEFAULT_PINS = ['vsl-lead-writer', 'sales-page', 'youtube-video', 'inbox']
 
 // Copy jobs go to the best writer the owner has: BNSN's matching agent when BNSN is connected and lists it,

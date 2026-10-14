@@ -1019,6 +1019,23 @@ test('job view: Save to my project with BNSN connected saves to the BNSN project
   expect(withBnsn).toContain('mcp__' + BN + '__save-content-to-project')
 })
 
+test('Plan an offer is gone: not in Skills, not on the Dashboard even from an old pin, and no job plans an offer', async ($, on) => {
+  const { store } = sessionStubs(on)
+  store.set('pins', ['offer', 'vsl-lead-writer'])
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await ui.press({ key: 'tab-skills' })
+    expect(await ui.findAll({ key: 'skill-offer' })).toHaveLength(0)
+    expect(await ui.findAll({ key: 'pin-offer' })).toHaveLength(0)
+    expect(await ui.findAll({ type: 'Text', text: /Plan an offer/ })).toHaveLength(0)
+    await ui.press({ key: 'tab-home' })
+    expect(await ui.findAll({ key: 'home-job-offer' })).toHaveLength(0)
+    expect(await ui.find({ key: 'home-job-vsl-lead-writer' })).toBeDefined()
+    await ui.unmount()
+  }
+})
+
 // A fresh Mac: no developer tools, so /usr/bin/python3 is only Apple's stand-in.
 function freshMac(on, sum: string) {
   const argvs: string[][] = []
