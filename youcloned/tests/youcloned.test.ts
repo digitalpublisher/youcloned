@@ -18,6 +18,9 @@ const PANE = {
 // SkillKey as the desktop app names it (an id) unless a test says otherwise.
 const SK = '4a62845f-77ec-431f-8b76-2d42902a60fb'
 const skTools = (server = SK) => ['list_skills', 'start_skill', 'run_skill', 'word_balance'].map(t => ({ name: 'mcp__' + server + '__' + t, description: '', mcp: true }))
+const BN = 'b7c1e0d2-bnsn-connector'
+const BN_TOOLS = ['check-word-balance', 'ask_vslAgent', 'bnsn', 'ask_bnsn_agent', 'vsl_planner', 'list-blueprints', 'list-projects', 'save-content-to-project', 'get-generation-task-status']
+const bnTools = (server = BN, tools = BN_TOOLS) => tools.map(t => ({ name: 'mcp__' + server + '__' + t, description: '', mcp: true }))
 const fromSk = (body: string) => ({ content: [{ type: 'text', text: 'You are short on words.\n\n<<<YOUCLONED>>>\n' + body + '\n<<<END YOUCLONED>>>\n\nWhen you have everything the steps ask for, call run_skill with skill "x".' }], isError: false })
 
 function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[]) => unknown, toasts?: string[], lists?: Record<string, string[]>, cwd?: string, root?: string, skillKey?: string | null, mcpCalls?: { server: string, tool: string, args: Record<string, unknown> }[], registered?: { name: string, prompt: string }[], owns?: (slug: string) => boolean, opened?: string[], browser?: string[], toolCall?: (e: any) => unknown, read?: (path: string) => string | undefined, exists?: (path: string) => boolean | undefined, mcpThrow?: string, logs?: string[], listed?: boolean, appOwned?: boolean, connected?: () => boolean } = {}) {
@@ -33,9 +36,16 @@ function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: 
   on('fs.read', ($, e) => ({ value: opts.read?.(e.path) ?? (opts.files || {})[e.path] ?? (e.path.endsWith('SKILL.md') ? 'description: Set up YouCloned. More.' : 'crew prompt') }))
   on('fs.write', ($, e) => { writes.set(e.path, e.text); return { value: undefined } })
   const sk = opts.skillKey === undefined ? SK : opts.skillKey
-  on('tool.list', () => ({ value: sk && opts.listed !== false ? skTools(sk) : [] }))
+  // BNSN, when a test connects it: { server, tools, words, calls }. Kept out of the options type on purpose.
+  const bn = (opts as { bnsn?: { server: string, tools: string[], words?: number, calls?: string[] } }).bnsn
+  on('tool.list', () => ({ value: [...(sk && opts.listed !== false ? skTools(sk) : []), ...(bn ? bnTools(bn.server, bn.tools) : [])] }))
   on('mcp.call', ($, e) => {
     opts.mcpCalls?.push(e)
+    if (bn && e.server === bn.server) {
+      bn.calls?.push(e.tool)
+      if (e.tool === 'check-word-balance') return { value: { content: [{ type: 'text', text: JSON.stringify({ canProceed: true, wordsRemaining: bn.words ?? 25000 }) }], isError: false } }
+      return { value: { content: [{ type: 'text', text: 'BNSN ran ' + e.tool }], isError: false } }
+    }
     if (opts.mcpThrow) return { value: { content: [{ type: 'text', text: 'YouCloned MCP call: ' + opts.mcpThrow }], isError: true } }
     if (opts.browser && e.server === 'Claude_Browser') { opts.browser.push(e.tool + ' ' + JSON.stringify(e.args)); return { value: { content: [{ type: 'text', text: 'ok' }], isError: false } } }
     if (opts.connected && !opts.connected()) throw new Error('no connected MCP tool "' + e.tool + '" on a server named "' + e.server + '"')
@@ -784,6 +794,48 @@ test('a Connect job queued by the dashboard reaches the chat', async ($, on) => 
   await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
   await clock.advance(2000)
   expect(submitted.filter(t => t.startsWith('Connect BNSN') && t.includes('https://api.bnsn.ai/v1/mcp/bnsn/mcp')).length).toBe(1)
+})
+
+test('SkillKey and BNSN: BNSN is found by its tools and shows Connected and Open, with no Get BNSN', async ($, on) => {
+  const { writes, clock } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' }, bnsn: { server: BN, tools: BN_TOOLS } } as any)
+  on('http.fetch', () => ({ value: { status: 404, ok: false, headers: {}, text: '' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  await clock.advance(3000)
+  const state = JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}')
+  expect(state.bnsn).toBe(true)
+  expect(state.apps.find(a => a.key === 'bnsn').buttons).toEqual([{ kind: 'connected', label: 'Connected' }, { kind: 'open', label: 'Open', href: 'https://app.bnsn.ai' }])
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'tab-home' })
+  const { links, buttons } = await appButtons(ui)
+  expect(links).toContain('Open https://app.bnsn.ai')
+  expect(links).not.toContain('Get BNSN https://bnsn.ai')
+  expect(buttons).not.toContain('app-bnsn-connect')
+  await ui.unmount()
+})
+
+test('in the desktop app BNSN is found from the context breakdown when its tools wait behind ToolSearch', async ($, on) => {
+  const { writes, clock } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' } })
+  on('session.usage', () => ({ value: { startedAt: 0, context: { breakdown: { mcpTools: bnTools().map(t => ({ name: t.name, serverName: 'BNSN', tokens: 1, isLoaded: false })) } } } }))
+  on('http.fetch', () => ({ value: { status: 404, ok: false, headers: {}, text: '' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  await clock.advance(3000)
+  expect(JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}').bnsn).toBe(true)
+})
+
+test('BNSN shows Connected the moment Claude uses one of its writers, even when no list named it', async ($, on) => {
+  const { writes } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' } })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  await $.tool.call({ tool: 'mcp__claude_ai_BNSN__ask_vslAgent', format: 'long' })
+  expect(JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}').bnsn).toBe(true)
+})
+
+test('a connector with a word balance but none of BNSN\'s writers is not BNSN', async ($, on) => {
+  const { writes, clock } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' }, bnsn: { server: 'other-app', tools: ['check-word-balance', 'list-books'] } } as any)
+  on('http.fetch', () => ({ value: { status: 404, ok: false, headers: {}, text: '' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  await $.tool.call({ tool: 'mcp__other-app__check-word-balance' })
+  await clock.advance(3000)
+  expect(JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}').bnsn).toBe(false)
 })
 
 // A fresh Mac: no developer tools, so /usr/bin/python3 is only Apple's stand-in.

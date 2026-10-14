@@ -329,6 +329,7 @@ async function refreshLive($, withWords) {
     }
   } catch {}
   if (withWords) {
+    try { await checkBnsn($) } catch {}
     try {
       const r = await skillKeyCall($, 'word_balance', {})
       const txt = (r.content || []).map(c => c.text || '').join(' ')
@@ -695,6 +696,46 @@ function skillKeyFrom(names) {
   return null
 }
 
+// BNSN's connector is the one with check-word-balance and one of BNSN's own writers or its agent. Like
+// SkillKey, the desktop app names it by an id, so it is found by its tools. servers maps a tool prefix to
+// the connector's name for $.mcp.call, when the app reports it.
+const BNSN_MARKS = ['ask_vslAgent', 'ask_salesPageAgent', 'bnsn', 'ask_bnsn_agent', 'vsl_planner', 'list-blueprints']
+const TOOL_NAME = /^mcp__(.+)__([^_](?:(?!__).)*)$/
+function bnsnFrom(names, servers = {}) {
+  const byServer = new Map()
+  for (const n of names) {
+    const m = TOOL_NAME.exec(n)
+    if (!m || /youcloned/.test(m[1])) continue
+    if (!byServer.has(m[1])) byServer.set(m[1], new Set())
+    byServer.get(m[1]).add(m[2])
+  }
+  for (const [prefix, tools] of byServer) {
+    if (tools.has('check-word-balance') && BNSN_MARKS.some(t => tools.has(t))) {
+      return { prefix, server: servers[prefix] || (prefix === 'claude_ai_BNSN' ? 'claude.ai BNSN' : prefix), tools: [...tools] }
+    }
+  }
+  return null
+}
+
+let bnsnSeen = false         // Claude itself used BNSN in this session, so it stays Connected even when a list leaves it out
+async function checkBnsn($) {
+  const names = []
+  const servers = {}
+  try { for (const t of await $.tool.list()) names.push(typeof t === 'string' ? t : t.name || '') } catch {}
+  // In the desktop app a connector's tools wait behind ToolSearch; the context breakdown lists them all.
+  try {
+    for (const row of (await $.session.usage({ breakdown: 'summary' }))?.context?.breakdown?.mcpTools || []) {
+      names.push(row.name)
+      const m = TOOL_NAME.exec(row.name || '')
+      if (m && row.serverName) servers[m[1]] = row.serverName
+    }
+  } catch {}
+  const found = bnsnFrom(names, servers)
+  if (found) bnsn = found
+  else if (!bnsnSeen) bnsn = null
+  try { const saved = await $.store.get('ownedApps'); ownedApps = Array.isArray(saved) ? saved.filter(k => typeof k === 'string') : null } catch {}
+}
+
 async function checkSkillKey($) {
   try {
     const names = (await $.tool.list()).map(t => typeof t === 'string' ? t : t.name || '')
@@ -713,6 +754,7 @@ async function checkSkillKey($) {
   }
   if (!skillKeyServer) { const saved = await $.store.get('skillKeyServer'); if (typeof saved === 'string' && saved) skillKeyServer = saved }
   skillKey = !!skillKeyServer
+  await checkBnsn($)
 }
 
 async function skillKeyCall($, tool, args) {
@@ -1229,6 +1271,21 @@ export function register(on) {
       $.ui.invalidate('ui.render')
     }
     return r
+  })
+
+  // Learns BNSN's connector the moment Claude uses one of BNSN's writers or its agent.
+  on('tool.call', { tool: /^mcp__.+__(ask_vslAgent|ask_salesPageAgent|ask_emailAgent|ask_adCopyAgent|ask_optInPageAgent|bnsn|ask_bnsn_agent|vsl_planner|check-word-balance)$/ }, async ($, e, next) => {
+    const m = TOOL_NAME.exec(e.tool || '')
+    if (m && !/youcloned/.test(m[1]) && m[1] !== skillKeyServer) {
+      if (bnsn && bnsn.prefix === m[1]) { if (!bnsn.tools.includes(m[2])) bnsn.tools.push(m[2]) }
+      else if (m[2] !== 'check-word-balance') {
+        bnsn = { prefix: m[1], server: m[1] === 'claude_ai_BNSN' ? 'claude.ai BNSN' : m[1], tools: [m[2]] }
+        bnsnSeen = true
+        try { await writeState($) } catch {}
+        $.ui.invalidate('ui.render')
+      }
+    }
+    return next(e)
   })
 
   // The helper tool runs inside the model's request, where Auto mode lets YouCloned reach SkillKey.
