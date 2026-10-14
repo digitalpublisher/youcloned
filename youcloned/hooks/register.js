@@ -145,12 +145,67 @@ const BUILT_IN = [
     text: 'Write a sales letter for one of my offers. If I sell more than one thing, ask me which one first. Follow my YouCloned rules for voice and brand, and save it as a file in my YouCloned folder.' },
   { key: 'email-series', label: 'Email series', what: 'Welcome, launch or promo',
     text: 'Write an email series for my business. Ask me first whether it is a welcome, launch or promo series and which offer it is for. Follow my YouCloned rules, and save it as a file in my YouCloned folder.' },
+  { key: 'ads', label: 'Ads', what: 'Ad copy for one of your offers',
+    text: 'Write ads for one of my offers. Ask me which offer and which platform first. Follow my YouCloned rules, and save them as a file in my YouCloned folder.' },
+  { key: 'opt-in-page', label: 'Opt-in page', what: 'A page that turns visitors into leads',
+    text: 'Write an opt-in page for one of my offers or free gifts. Ask me which one first. Follow my YouCloned rules, and save it as a file in my YouCloned folder.' },
   { key: 'web-page', label: 'Web page', what: 'Your copy and your brand, one page',
     text: 'Build me a one-page website for my business as a single HTML file in my YouCloned folder. Use my YouCloned rules for the copy, colors and fonts, and show me how to open it when it is done.' },
   { key: 'offer', label: 'Plan an offer', what: 'Price, bonuses and guarantee',
     text: 'Help me plan a new offer for my audience: what it is, the price, the bonuses and the guarantee. Ask me a few questions first, then write the plan to a file in my YouCloned folder.' },
 ]
 const DEFAULT_PINS = ['vsl-lead-writer', 'sales-page', 'youtube-video', 'inbox']
+
+// Copy jobs go to the best writer the owner has: BNSN's matching agent when BNSN is connected and lists it,
+// then Jon's SkillKey writer for the job, then Claude from the rules file. The draft names its writer.
+// BNSN's sales page, email, ad and opt-in agents are off on BNSN's connector today (bnsn#1423, #1292); the
+// moment BNSN lists one again, its button routes there with no new add-on version.
+const COPY = {
+  'vsl-lead-writer': { ask: 'my VSL lead', bnsn: 'ask_vslAgent', agent: 'VSL agent', skill: 'vsl-lead-writer', match: /vsl lead/i, known: true },
+  'sales-page': { ask: 'a sales page', bnsn: 'ask_salesPageAgent', agent: 'sales page agent', skill: 'sales-page', match: /^sales page( writer)?$/i },
+  'sales-letter': { ask: 'a sales letter', bnsn: 'ask_salesPageAgent', agent: 'sales page agent', skill: 'sales-letter', match: /sales letter/i },
+  'email-series': { ask: 'an email series', bnsn: 'ask_emailAgent', agent: 'email agent', skill: 'email-series', match: /email (series|sequence)/i,
+    first: 'Ask me first whether it is a welcome, launch or promo series and which offer it is for.' },
+  'ads': { ask: 'ads', bnsn: 'ask_adCopyAgent', agent: 'ad copy agent', skill: 'ad-copy', match: /ad copy|\bads\b/i, first: 'Ask me which offer and which platform first.' },
+  'opt-in-page': { ask: 'an opt-in page', bnsn: 'ask_optInPageAgent', agent: 'opt-in page agent', skill: 'opt-in-page', match: /opt-?in page/i,
+    first: 'Ask me which offer or free gift it is for first.' },
+}
+
+// The writers for one copy job, best first; the last one is always Claude, which every owner has.
+function copyWriters(key) {
+  const c = COPY[key]
+  const out = []
+  if (bnsn && bnsn.tools.includes(c.bnsn)) out.push({ by: 'BNSN', name: 'BNSN\'s ' + c.agent, tool: 'mcp__' + bnsn.prefix + '__' + c.bnsn })
+  if (skillKey) {
+    const sk = skillKeySkills.find(x => x.key === c.skill || (c.match.test(x.label) && !/audit|check/i.test(x.label)))
+    if (sk) out.push({ by: 'SkillKey', name: 'Jon\'s ' + sk.label + ' on SkillKey', slug: sk.key })
+    else if (c.known && !skillKeySkills.length) out.push({ by: 'SkillKey', name: 'Jon\'s VSL Lead Writer on SkillKey', slug: c.skill })
+  }
+  out.push({ by: 'Claude', name: 'Claude from my YouCloned rules' })
+  return out
+}
+
+function copyJobText(key) {
+  const c = COPY[key]
+  const [first, ...rest] = copyWriters(key)
+  const how = (w) => w.by === 'BNSN'
+    ? 'call ' + w.tool + ' with the offer facts from my YouCloned rules, using my BNSN project and blueprint for this offer (make them with BNSN\'s create-project and create-blueprint tools if I have none). Long BNSN jobs take a few minutes: check back with get-generation-task-status until it is done'
+    : w.by === 'SkillKey' ? 'run ' + w.name + ' (start_skill with skill "' + w.slug + '")'
+    : 'write it yourself from my YouCloned rules'
+  let t = 'Write ' + c.ask + ' for one of my offers. ' + (c.first || 'Ask me which offer first if I sell more than one.') + ' '
+  t += first.by === 'Claude' ? 'No BNSN or SkillKey writer for this job is connected, so write it yourself from my YouCloned rules. '
+    : 'The writer for this job is ' + first.name + ': ' + how(first) + '. '
+  if (rest.length) t += 'If that writer says no (no active plan, no words left, or no such tool), tell me in one line and ' + how(rest[0]) + ' instead' +
+    (rest[1] ? '; if that says no too, ' + how(rest[1]) : '') + '. '
+  t += 'Follow my YouCloned rules for voice and brand, and save the draft as a file in my YouCloned folder. ' +
+    'The draft\'s first line names the writer that wrote it, like "Written by ' + first.name + '".'
+  return t
+}
+
+// Who writes each copy job right now, for the buttons that say so.
+function copyStates() {
+  return Object.keys(COPY).map(key => ({ key, label: (BUILT_IN.find(b => b.key === key) || {}).label || key, by: copyWriters(key)[0].by }))
+}
 const MAX_PINS = 6
 let skillKeySkills = []     // { key, label, what, text } for each skill SkillKey says this account owns
 let pins = DEFAULT_PINS.slice()
@@ -262,6 +317,11 @@ async function runJob($, text) {
   if (word === 'setup') return startSetup($)
   if (word === 'codex') return codexButton($)
   if (word === 'crew') { $.ui.toast(await crewNow($, (args.split(/\s+/)[1] || '').toLowerCase())); return }
+  if (word === 'write') {
+    const key = (args.split(/\s+/)[1] || '').toLowerCase()
+    if (COPY[key]) { try { await checkBnsn($) } catch {} await $.prompt.submit({ text: copyJobText(key), asUser: true }) }
+    return
+  }
   if (word === 'connect') { await $.prompt.submit({ text: connectJobText((args.split(/\s+/)[1] || '').toLowerCase()), asUser: true }); return }
 }
 
@@ -281,7 +341,10 @@ function pressJob($, job) {
 async function sendPressed($) {
   while (pressed.length) {
     const job = pressed.shift()
-    try { await runJob($, job.text); await logPress($, 'sent: ' + job.label) }
+    try {
+      if (COPY[job.key]) { try { await checkBnsn($) } catch {} }
+      await runJob($, COPY[job.key] ? copyJobText(job.key) : job.text); await logPress($, 'sent: ' + job.label)
+    }
     catch (err) { await logPress($, 'failed: ' + job.label + ': ' + String((err && err.message) || err).slice(0, 300)) }
   }
 }
@@ -380,7 +443,7 @@ async function writeState($) {
     if (!deskSession) {
       try { const old = JSON.parse(await $.fs.read(dataDir() + '/state.json')); mine = { session: old.session, listening: !!old.listening } } catch { mine = {} }
     }
-    await $.fs.write(dataDir() + '/state.json', JSON.stringify({ ...live, name: lastName, ...mine, skillKey, bnsn: !!bnsn, apps: appStates(), at: await $.clock.now() }))
+    await $.fs.write(dataDir() + '/state.json', JSON.stringify({ ...live, name: lastName, ...mine, skillKey, bnsn: !!bnsn, apps: appStates(), copy: copyStates(), at: await $.clock.now() }))
   } catch {}
 }
 
@@ -1540,7 +1603,7 @@ export function register(on) {
         const isPinned = pins.includes(sk.key)
         return Box({ key: 'card-' + sk.key, flexDirection: 'column', borderStyle: 'round', paddingX: 1, width: cardWidth, children: [
           Text({ bold: true, children: [sk.label] }),
-          Text({ dimColor: true, wrap: 'wrap', children: [sk.what] }),
+          Text({ dimColor: true, wrap: 'wrap', children: [sk.what + (COPY[sk.key] ? ' · Writer: ' + copyWriters(sk.key)[0].by : '')] }),
           Box({ flexDirection: 'row', columnGap: 2, children: [
             Button({ key: 'skill-' + sk.key, label: 'Start', onPress: () => pressJob($, sk) }),
             Button({ key: 'pin-' + sk.key, label: isPinned ? 'Unpin' : 'Pin to Dashboard', plain: true, dimColor: true, onPress: () => togglePin($, sk.key) }),

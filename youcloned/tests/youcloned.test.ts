@@ -51,7 +51,7 @@ function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: 
     if (opts.connected && !opts.connected()) throw new Error('no connected MCP tool "' + e.tool + '" on a server named "' + e.server + '"')
     if (!sk || (e.server !== sk && e.server !== 'claude.ai SkillKey')) throw new Error('no such server')
     if (opts.appOwned) throw new Error('no connected MCP tool "' + e.tool + '" on a server named "' + e.server + '"')
-    if (e.tool === 'list_skills') return { value: { content: [{ type: 'text', text: '- AI Revenue Plan (skill: "ai-revenue-plan"): A one-page 12-month plan\n- YouCloned Setup (skill: "youcloned-setup"): Sets up your clone\n\nWords left: 4,200' }], isError: false } }
+    if (e.tool === 'list_skills') return { value: { content: [{ type: 'text', text: '- AI Revenue Plan (skill: "ai-revenue-plan"): A one-page 12-month plan\n- VSL Lead Writer (skill: "vsl-lead-writer"): Your VSL lead in Jon\'s method\n- YouCloned Setup (skill: "youcloned-setup"): Sets up your clone\n\nWords left: 4,200' }], isError: false } }
     if (e.tool === 'word_balance') return { value: { content: [{ type: 'text', text: 'Words left: 4,200' }], isError: false } }
     if (e.tool === 'start_skill') return { value: (opts.owns || (() => true))(String(e.args.skill)) ? fromSk('Instructions for ' + e.args.skill) : { content: [{ type: 'text', text: 'That skill is not on this account. Call list_skills to see the skills this person has.' }], isError: false } }
     return { value: { content: [], isError: true } }
@@ -921,6 +921,90 @@ test('setup step 5 with SkillKey and BNSN both on names them connected and conne
   expect(job).toContain('SkillKey is already connected, so skip it.')
   expect(job).toContain('BNSN is already connected too.')
   expect(job).not.toContain('https://api.bnsn.ai/v1/mcp/bnsn/mcp')
+})
+
+// Presses copy jobs in the Skills tab and returns what reached the chat for each, plus the state.json copy tags.
+async function pressCopy($, on, keys: string[], opts: Record<string, unknown> = {}) {
+  const submitted: string[] = []
+  const { writes, clock } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' }, ...opts } as any)
+  on('prompt.submit', ($, e) => { submitted.push(String(e.text)); return { text: String(e.text) } })
+  on('http.fetch', () => ({ value: { status: 404, ok: false, headers: {}, text: '' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  await clock.advance(3000)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'tab-skills' })
+  const out: Record<string, string> = {}
+  for (const k of keys) {
+    const before = submitted.length
+    await ui.press({ key: 'skill-' + k })
+    await clock.advance(1600)
+    out[k] = submitted.slice(before).join('\n')
+    plainText(out[k])
+  }
+  await ui.unmount()
+  const tags = Object.fromEntries((JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}').copy || []).map(c => [c.key, c.by]))
+  return { out, tags }
+}
+
+test('copy routing with no connectors: Claude writes from the rules file and the draft says so', async ($, on) => {
+  const { out, tags } = await pressCopy($, on, ['vsl-lead-writer', 'sales-page'], { skillKey: null })
+  expect(out['vsl-lead-writer']).toMatch(/^Write my VSL lead for one of my offers\./)
+  expect(out['vsl-lead-writer']).toContain('No BNSN or SkillKey writer for this job is connected, so write it yourself from my YouCloned rules.')
+  expect(out['sales-page']).toContain('"Written by Claude from my YouCloned rules"')
+  expect(out['sales-page']).not.toContain('start_skill')
+  expect(tags).toEqual({ 'vsl-lead-writer': 'Claude', 'sales-page': 'Claude', 'sales-letter': 'Claude', 'email-series': 'Claude', 'ads': 'Claude', 'opt-in-page': 'Claude' })
+})
+
+test('copy routing with SkillKey only: the VSL lead goes to Jon\'s SkillKey writer, then Claude; a job SkillKey lacks goes to Claude', async ($, on) => {
+  const { out, tags } = await pressCopy($, on, ['vsl-lead-writer', 'sales-page'])
+  expect(out['vsl-lead-writer']).toContain('The writer for this job is Jon\'s VSL Lead Writer on SkillKey: run Jon\'s VSL Lead Writer on SkillKey (start_skill with skill "vsl-lead-writer").')
+  expect(out['vsl-lead-writer']).toContain('tell me in one line and write it yourself from my YouCloned rules instead.')
+  expect(out['vsl-lead-writer']).toContain('"Written by Jon\'s VSL Lead Writer on SkillKey"')
+  expect(out['vsl-lead-writer']).not.toContain('BNSN\'s')
+  expect(out['sales-page']).toContain('write it yourself from my YouCloned rules')
+  expect(tags['vsl-lead-writer']).toBe('SkillKey')
+  expect(tags['sales-page']).toBe('Claude')
+})
+
+test('copy routing with SkillKey and BNSN: BNSN first, then SkillKey, then Claude; BNSN\'s paused writers fall through', async ($, on) => {
+  const { out, tags } = await pressCopy($, on, ['vsl-lead-writer', 'sales-page', 'ads'], { bnsn: { server: BN, tools: BN_TOOLS } })
+  const vsl = out['vsl-lead-writer']
+  expect(vsl).toContain('The writer for this job is BNSN\'s VSL agent: call mcp__' + BN + '__ask_vslAgent with the offer facts from my YouCloned rules')
+  expect(vsl).toContain('check back with get-generation-task-status')
+  expect(vsl.indexOf('mcp__' + BN + '__ask_vslAgent')).toBeLessThan(vsl.indexOf('start_skill with skill "vsl-lead-writer"'))
+  expect(vsl.indexOf('start_skill')).toBeLessThan(vsl.indexOf('if that says no too, write it yourself'))
+  expect(vsl).toContain('"Written by BNSN\'s VSL agent"')
+  // BNSN's sales page and ad writers are off on its connector today, so those buttons skip BNSN.
+  expect(out['sales-page']).not.toContain('ask_salesPageAgent')
+  expect(out['ads']).toMatch(/^Write ads for one of my offers\. Ask me which offer and which platform first\./)
+  expect(tags).toEqual({ 'vsl-lead-writer': 'BNSN', 'sales-page': 'Claude', 'sales-letter': 'Claude', 'email-series': 'Claude', 'ads': 'Claude', 'opt-in-page': 'Claude' })
+})
+
+test('when BNSN lists its sales page, email, ad and opt-in writers again, those buttons route to BNSN on their own', async ($, on) => {
+  const tools = [...BN_TOOLS, 'ask_salesPageAgent', 'ask_emailAgent', 'ask_adCopyAgent', 'ask_optInPageAgent']
+  const { out, tags } = await pressCopy($, on, ['sales-letter', 'email-series', 'opt-in-page'], { bnsn: { server: BN, tools } })
+  expect(out['sales-letter']).toContain('call mcp__' + BN + '__ask_salesPageAgent')
+  expect(out['email-series']).toContain('call mcp__' + BN + '__ask_emailAgent')
+  expect(out['email-series']).toContain('Ask me first whether it is a welcome, launch or promo series')
+  expect(out['opt-in-page']).toContain('call mcp__' + BN + '__ask_optInPageAgent')
+  expect(Object.values(tags).every(by => by === 'BNSN')).toBe(true)
+})
+
+test('the dashboard\'s copy buttons route the same way: /youcloned write <job>', async ($, on) => {
+  const [job] = await dashboardJob($, on, '/youcloned write vsl-lead-writer', { bnsn: { server: BN, tools: BN_TOOLS } })
+  expect(job).toMatch(/^Write my VSL lead for one of my offers\./)
+  expect(job).toContain('call mcp__' + BN + '__ask_vslAgent')
+})
+
+test('Ads and Opt-in page are copy jobs in Skills, each card naming its writer', async ($, on) => {
+  sessionStubs(on)
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'tab-skills' })
+  expect(await ui.find({ key: 'skill-ads' })).toBeDefined()
+  expect(await ui.find({ key: 'skill-opt-in-page' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^A page that turns visitors into leads · Writer: Claude$/ })).toBeDefined()
+  await ui.unmount()
 })
 
 // A fresh Mac: no developer tools, so /usr/bin/python3 is only Apple's stand-in.

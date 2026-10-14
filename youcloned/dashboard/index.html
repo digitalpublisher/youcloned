@@ -180,6 +180,11 @@ p{margin:0}
 .app .plate .ob svg{width:12px;height:12px;stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round}
 .app .btn{height:28px;font-size:12px}
 a.btn{text-decoration:none}
+.copyjobs{display:flex;flex-wrap:wrap;gap:8px}
+.copyjobs .by{font-size:10.5px;font-weight:700;padding:1px 7px;border-radius:999px;background:var(--accent-soft);color:var(--accent-ink)}
+.copyjobs .by:empty{display:none}
+.copyjobs .by.sk{background:color-mix(in oklab,var(--violet),transparent 86%);color:var(--violet)}
+.copyjobs .by.cl{background:color-mix(in oklab,var(--claude-o),transparent 85%);color:var(--claude-o)}
 .app .ok{display:flex;align-items:center;justify-content:center;gap:6px;height:28px;font:600 12px var(--body);color:var(--accent-ink)}
 .app .ok::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
 .app .soon{display:flex;align-items:center;justify-content:center;height:28px;border-radius:8px;background:var(--amber-soft);color:var(--amber);font:600 12px var(--body)}
@@ -333,6 +338,9 @@ body{padding:0;background:var(--ground)}
               <div class="need"><div><b>Comment helper</b><small>Skipped two trolls</small></div><span class="pill">12 drafts</span></div>
             </div></div>
         </div>
+
+        <div class="panel"><div class="ph"><span class="hic" style="--hc:var(--violet)"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M14 6l4 4"/></svg></span><h2>All your sales copy, one tap each</h2><span class="meta" id="copyMeta">Your best writer takes each job</span></div>
+          <div class="pb"><div class="copyjobs" id="copyjobs"><button class="btn" type="button" data-job="/youcloned write vsl-lead-writer" data-copyjob="vsl-lead-writer">VSL lead<span class="by"></span></button><button class="btn" type="button" data-job="/youcloned write sales-page" data-copyjob="sales-page">Sales page<span class="by"></span></button><button class="btn" type="button" data-job="/youcloned write sales-letter" data-copyjob="sales-letter">Sales letter<span class="by"></span></button><button class="btn" type="button" data-job="/youcloned write email-series" data-copyjob="email-series">Email series<span class="by"></span></button><button class="btn" type="button" data-job="/youcloned write ads" data-copyjob="ads">Ads<span class="by"></span></button><button class="btn" type="button" data-job="/youcloned write opt-in-page" data-copyjob="opt-in-page">Opt-in page<span class="by"></span></button></div></div></div>
 
         <div class="panel"><div class="ph"><span class="hic" style="--hc:var(--accent)"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span><h2>Your BNSN apps</h2></div>
           <div class="pb"><div class="apps" id="apps">
@@ -565,6 +573,11 @@ body{padding:0;background:var(--ground)}
       }
       if (s.claudeLabel) document.getElementById("claudeL").textContent = s.claudeLabel;
       if (Array.isArray(s.apps)) renderApps(s.apps);
+      // Each copy button says who writes it: BNSN when it is connected and has that writer, then SkillKey, then Claude.
+      if (Array.isArray(s.copy)) s.copy.forEach(function (c) {
+        var tag = document.querySelector('[data-copyjob="' + c.key + '"] .by');
+        if (tag) { tag.textContent = c.by; tag.className = "by" + (c.by === "SkillKey" ? " sk" : c.by === "Claude" ? " cl" : ""); }
+      });
       document.getElementById("words").textContent = s.words != null ? fmt(s.words) : "Connect";
       document.getElementById("wordsL").textContent = s.words != null ? "SkillKey words" : "Connect SkillKey to see your words";
       // BNSN's words are their own wallet, shown only while BNSN is connected.
