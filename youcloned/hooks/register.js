@@ -60,7 +60,8 @@ const APPS = [
   { key: 'bookbuilder', open: 'https://bookbuilder.bnsn.ai', get: 'https://bookbuilder.bnsn.ai' },
   { key: 'improver', open: 'https://improver.bnsn.ai', get: 'https://improver.bnsn.ai' },
   { key: 'coursebuilder', open: 'https://coursebuilder.bnsn.ai', get: 'https://coursebuilder.bnsn.ai' },
-  { key: 'offerbuilder', soon: 'Opens Oct 14' },
+  // OfferBuilder's presale opens Wed Oct 28 (Jon, Oct 12). Its page is not public yet, so no link until it is.
+  { key: 'offerbuilder', soon: 'Presale Wed Oct 28' },
   { key: 'aic', open: 'https://community.bnsn.ai', get: 'https://collective.bnsn.ai', join: true },
 ]
 const OWNED_SAMPLE = ['bnsn', 'bookbuilder', 'improver']

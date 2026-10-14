@@ -676,6 +676,17 @@ test('SkillKey is the first app, BNSN second', async ($, on) => {
   await ui.unmount()
 })
 
+// The app buttons (card #32). Fake connectors: none, SkillKey only, SkillKey and BNSN.
+test('OfferBuilder shows its presale date, never the old Oct 14 opening', async ($, on) => {
+  sessionStubs(on)
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'tab-home' })
+  expect(await ui.find({ type: 'Text', text: 'Presale Wed Oct 28' })).toBeDefined()
+  expect((await ui.findAll({ type: 'Text' })).some(t => /Oct 14/.test(JSON.stringify(t.props.children)))).toBe(false)
+  await ui.unmount()
+})
+
 // A fresh Mac: no developer tools, so /usr/bin/python3 is only Apple's stand-in.
 function freshMac(on, sum: string) {
   const argvs: string[][] = []
