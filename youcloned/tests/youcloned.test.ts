@@ -1007,6 +1007,18 @@ test('Ads and Opt-in page are copy jobs in Skills, each card naming its writer',
   await ui.unmount()
 })
 
+test('job view: Save to my project saves to the folder, and to BNSN\'s project only when BNSN is connected', async ($, on) => {
+  const [without] = await dashboardJob($, on, '/youcloned save')
+  expect(without).toMatch(/^Save the draft you just wrote to my project: as a file in my YouCloned folder/)
+  expect(without).not.toContain('save-content-to-project')
+  plainText(without)
+})
+
+test('job view: Save to my project with BNSN connected saves to the BNSN project too', async ($, on) => {
+  const [withBnsn] = await dashboardJob($, on, '/youcloned save', { bnsn: { server: BN, tools: BN_TOOLS } })
+  expect(withBnsn).toContain('mcp__' + BN + '__save-content-to-project')
+})
+
 // A fresh Mac: no developer tools, so /usr/bin/python3 is only Apple's stand-in.
 function freshMac(on, sum: string) {
   const argvs: string[][] = []

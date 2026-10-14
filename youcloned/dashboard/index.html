@@ -374,10 +374,10 @@ body{padding:0;background:var(--ground)}
         </div>
         <div class="stats"><span><b>1,850</b>words from your wallet</span><span><b>1.5 hours</b>saved</span><span><b>$180</b>at your rate</span></div>
         <div class="next">
-          <button class="btn primary" type="button">Write the story section next</button>
-          <button class="btn" type="button">Save to my project</button>
-          <button class="btn" type="button">Make it sell harder with Improver</button>
-          <button class="btn" type="button">Turn it into a course <span class="tag">Get CourseBuilder</span></button>
+          <button class="btn primary" type="button" data-job="Write the story section of my VSL with Jon's VSL Story Writer skill.">Write the story section next</button>
+          <button class="btn" type="button" data-job="/youcloned save">Save to my project</button>
+          <a class="btn" data-app-link="improver" href="https://improver.bnsn.ai" target="_blank" rel="noopener noreferrer">Make it sell harder with Improver</a>
+          <a class="btn" data-app-link="coursebuilder" href="https://coursebuilder.bnsn.ai" target="_blank" rel="noopener noreferrer">Turn it into a course <span class="tag">Get CourseBuilder</span></a>
         </div>
       </div>
 
@@ -573,6 +573,13 @@ body{padding:0;background:var(--ground)}
       }
       if (s.claudeLabel) document.getElementById("claudeL").textContent = s.claudeLabel;
       if (Array.isArray(s.apps)) renderApps(s.apps);
+      // The job view's app buttons: the web app for an owner, its sales page otherwise.
+      if (Array.isArray(s.apps)) document.querySelectorAll("[data-app-link]").forEach(function (l) {
+        var a = s.apps.filter(function (x) { return x.key === l.dataset.appLink; })[0]; if (!a) return;
+        var b = (a.buttons || []).filter(function (x) { return x.kind === (a.owns ? "open" : "get"); })[0] || (a.buttons || []).filter(function (x) { return x.href; })[0];
+        if (b && /^https:\/\//.test(b.href)) l.href = b.href;
+        var tag = l.querySelector(".tag"); if (tag) tag.hidden = !!a.owns;
+      });
       // Each copy button says who writes it: BNSN when it is connected and has that writer, then SkillKey, then Claude.
       if (Array.isArray(s.copy)) s.copy.forEach(function (c) {
         var tag = document.querySelector('[data-copyjob="' + c.key + '"] .by');

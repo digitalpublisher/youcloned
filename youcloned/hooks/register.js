@@ -202,6 +202,13 @@ function copyJobText(key) {
   return t
 }
 
+// The job view's "Save to my project": the folder always, BNSN's project too when BNSN is connected.
+function saveJobText() {
+  return 'Save the draft you just wrote to my project: as a file in my YouCloned folder if it is not there yet' +
+    (bnsn ? ', and to my BNSN project with mcp__' + bnsn.prefix + '__save-content-to-project (ask me which project if I have more than one)' : '') +
+    '. Then tell me where each copy went, one short line each.'
+}
+
 // Who writes each copy job right now, for the buttons that say so.
 function copyStates() {
   return Object.keys(COPY).map(key => ({ key, label: (BUILT_IN.find(b => b.key === key) || {}).label || key, by: copyWriters(key)[0].by }))
@@ -317,6 +324,7 @@ async function runJob($, text) {
   if (word === 'setup') return startSetup($)
   if (word === 'codex') return codexButton($)
   if (word === 'crew') { $.ui.toast(await crewNow($, (args.split(/\s+/)[1] || '').toLowerCase())); return }
+  if (word === 'save') { try { await checkBnsn($) } catch {} await $.prompt.submit({ text: saveJobText(), asUser: true }); return }
   if (word === 'write') {
     const key = (args.split(/\s+/)[1] || '').toLowerCase()
     if (COPY[key]) { try { await checkBnsn($) } catch {} await $.prompt.submit({ text: copyJobText(key), asUser: true }) }
