@@ -422,7 +422,7 @@ test('the desktop Dashboard: greeting, job card, money (Sample), crew with its b
   expect(await ui.find({ key: 'home-run-support' })).toBeDefined()
   expect(await ui.find({ key: 'home-new' })).toBeDefined()
   const links = (await ui.findAll({ type: 'Link' })).map(l => String(l.props.href))
-  expect(links).toContain('https://app.bnsn.ai')
+  expect(links).toContain('https://bnsn.ai')
   expect(links).toContain('https://www.youtube.com/watch?v=j058ugnLtUE')
   await ui.unmount()
 })
@@ -685,6 +685,105 @@ test('OfferBuilder shows its presale date, never the old Oct 14 opening', async 
   expect(await ui.find({ type: 'Text', text: 'Presale Wed Oct 28' })).toBeDefined()
   expect((await ui.findAll({ type: 'Text' })).some(t => /Oct 14/.test(JSON.stringify(t.props.children)))).toBe(false)
   await ui.unmount()
+})
+
+// Buyer-facing text: no long dash, and no sentence opens on a digit.
+const LONG_DASH = String.fromCharCode(8212)
+function plainText(t: string) {
+  expect(t.includes(LONG_DASH)).toBe(false)
+  expect(t).not.toMatch(/(^|[.!?]\s+)\d/)
+}
+
+// Every app's buttons in the desktop panel: Link label and target, and Button keys.
+async function appButtons(ui) {
+  const card = (await ui.findAll({ type: 'Svg' })).find(p => p.props.alt === 'Your BNSN apps')
+  expect(card).toBeDefined()
+  const links = (await ui.findAll({ type: 'Link' })).map(l => String(l.props.label) + ' ' + String(l.props.href))
+  const buttons = (await ui.findAll({ type: 'Button' })).map(b => String(b.props.key))
+  return { links, buttons }
+}
+
+test('no connectors: SkillKey says Connect, BNSN says Get BNSN and Connect, the other apps Open and Get it', async ($, on) => {
+  sessionStubs(on, { skillKey: null })
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'tab-home' })
+  const { links, buttons } = await appButtons(ui)
+  expect(buttons).toContain('app-skillkey-connect')
+  expect(buttons).toContain('app-bnsn-connect')
+  expect(links).toContain('Get BNSN https://bnsn.ai')
+  expect(links).not.toContain('Open https://app.bnsn.ai')
+  for (const app of ['bookbuilder', 'improver', 'coursebuilder']) {
+    expect(links).toContain('Open https://' + app + '.bnsn.ai')
+    expect(links).toContain('Get it https://' + app + '.bnsn.ai')
+  }
+  expect(links).toContain('Join https://collective.bnsn.ai')
+  await ui.unmount()
+})
+
+test('SkillKey only: SkillKey shows Connected and Open, BNSN still Get BNSN and Connect', async ($, on) => {
+  sessionStubs(on)
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'tab-home' })
+  const { links, buttons } = await appButtons(ui)
+  expect(await ui.find({ type: 'Text', text: 'Connected' })).toBeDefined()
+  expect(links).toContain('Open https://skills.bnsn.ai')
+  expect(buttons).not.toContain('app-skillkey-connect')
+  expect(buttons).toContain('app-bnsn-connect')
+  expect(links).toContain('Get BNSN https://bnsn.ai')
+  await ui.unmount()
+})
+
+test('Connect starts the connect job in the chat with the connector address and Claude\'s Connectors steps', async ($, on) => {
+  const submitted: string[] = []
+  const { clock } = sessionStubs(on, { skillKey: null })
+  on('prompt.submit', ($, e) => { submitted.push(String(e.text)); return { text: String(e.text) } })
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'tab-home' })
+  await ui.press({ key: 'app-bnsn-connect' })
+  await ui.press({ key: 'app-skillkey-connect' })
+  await clock.advance(10)
+  const bnsnJob = submitted.find(t => t.startsWith('Connect BNSN')) || ''
+  expect(bnsnJob).toContain('https://api.bnsn.ai/v1/mcp/bnsn/mcp')
+  expect(bnsnJob).toContain('open Customize, then Connectors, click Add, then Add custom connector')
+  expect(bnsnJob).toContain('check my BNSN words')
+  expect(bnsnJob).toContain('Get BNSN')
+  const skJob = submitted.find(t => t.startsWith('Connect SkillKey')) || ''
+  expect(skJob).toContain('https://skills.bnsn.ai/claude')
+  for (const t of submitted) plainText(t)
+  await ui.unmount()
+})
+
+test('the dashboard reads every app\'s buttons from state.json: pages are https links, Connect carries its job and address', async ($, on) => {
+  const { writes, clock } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' } })
+  on('http.fetch', () => ({ value: { status: 404, ok: false, headers: {}, text: '' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  await clock.advance(3000)
+  const state = JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}')
+  expect(state.skillKey).toBe(true)
+  expect(state.apps.map(a => a.key)).toEqual(['skillkey', 'bnsn', 'bookbuilder', 'improver', 'coursebuilder', 'offerbuilder', 'aic'])
+  for (const a of state.apps) for (const b of a.buttons) {
+    if (b.kind === 'open' || b.kind === 'get') expect(b.href).toMatch(/^https:\/\//)
+    if (b.kind === 'connect') expect(b.job).toBe('/youcloned connect ' + a.key)
+  }
+  const bn = state.apps.find(a => a.key === 'bnsn')
+  expect(bn.buttons.map(b => b.label)).toEqual(['Get BNSN', 'Connect'])
+  expect(bn.buttons[1].copy).toBe('https://api.bnsn.ai/v1/mcp/bnsn/mcp')
+  expect(state.apps.find(a => a.key === 'offerbuilder').buttons).toEqual([{ kind: 'soon', label: 'Presale Wed Oct 28' }])
+})
+
+test('a Connect job queued by the dashboard reaches the chat', async ($, on) => {
+  const submitted: string[] = []
+  let queued = JSON.stringify({ text: '/youcloned connect bnsn', at: 1 }) + '\n'
+  const { writes, clock } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' },
+    exists: (path) => path.endsWith('/jobs.jsonl') || undefined, read: (path) => path.endsWith('/jobs.jsonl') ? (writes.has(path) ? writes.get(path) : queued) : undefined })
+  on('prompt.submit', ($, e) => { submitted.push(String(e.text)); return { text: String(e.text) } })
+  on('http.fetch', () => ({ value: { status: 404, ok: false, headers: {}, text: '' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  await clock.advance(2000)
+  expect(submitted.filter(t => t.startsWith('Connect BNSN') && t.includes('https://api.bnsn.ai/v1/mcp/bnsn/mcp')).length).toBe(1)
 })
 
 // A fresh Mac: no developer tools, so /usr/bin/python3 is only Apple's stand-in.

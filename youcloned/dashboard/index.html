@@ -179,6 +179,9 @@ p{margin:0}
 .app .plate .ob span{width:20px;height:20px;border-radius:5px;background:#3375d7;display:grid;place-items:center}
 .app .plate .ob svg{width:12px;height:12px;stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round}
 .app .btn{height:28px;font-size:12px}
+a.btn{text-decoration:none}
+.app .ok{display:flex;align-items:center;justify-content:center;gap:6px;height:28px;font:600 12px var(--body);color:var(--accent-ink)}
+.app .ok::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
 .app .soon{display:flex;align-items:center;justify-content:center;height:28px;border-radius:8px;background:var(--amber-soft);color:var(--amber);font:600 12px var(--body)}
 .vid{display:grid;grid-template-columns:150px minmax(0,1fr);gap:14px;align-items:center}
 .vid .th{aspect-ratio:16/9;border-radius:8px;background:url(assets/latest-video.jpg) center/cover;max-width:100%}
@@ -331,13 +334,14 @@ body{padding:0;background:var(--ground)}
         </div>
 
         <div class="panel"><div class="ph"><span class="hic" style="--hc:var(--accent)"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span><h2>Your BNSN apps</h2></div>
-          <div class="pb"><div class="apps">
-            <div class="app"><div class="plate"><img src="assets/logo-bnsn-white.png" alt="BNSN"></div><button class="btn" type="button">Open</button></div>
-            <div class="app"><div class="plate"><img src="assets/logo-bookbuilder-white.png" alt="BookBuilder"></div><button class="btn" type="button">Open</button></div>
-            <div class="app"><div class="plate"><img src="assets/logo-improver-white.png" alt="Improver"></div><button class="btn" type="button">Open</button></div>
-            <div class="app"><div class="plate"><img src="assets/logo-coursebuilder-white.png" alt="CourseBuilder"></div><button class="btn primary" type="button">Get it</button></div>
-            <div class="app"><div class="plate"><span class="ob"><span><svg viewBox="0 0 24 24"><circle cx="7" cy="12" r="3"/><circle cx="17" cy="12" r="3"/><path d="M10 12h4"/></svg></span>OfferBuilder</span></div><span class="soon">Presale Wed Oct 28</span></div>
-            <div class="app"><div class="plate"><img src="assets/logo-aic-white.png" alt="AI Collective"></div><button class="btn primary" type="button">Join</button></div>
+          <div class="pb"><div class="apps" id="apps">
+            <div class="app" data-app="skillkey"><div class="plate"><img src="assets/logo-skillkey-white.png" alt="SkillKey"></div><button class="btn primary" type="button" data-job="/youcloned connect skillkey" data-copy="https://skills.bnsn.ai/claude">Connect</button></div>
+            <div class="app" data-app="bnsn"><div class="plate"><img src="assets/logo-bnsn-white.png" alt="BNSN"></div><a class="btn" href="https://bnsn.ai" target="_blank" rel="noopener noreferrer">Get BNSN</a><button class="btn" type="button" data-job="/youcloned connect bnsn" data-copy="https://api.bnsn.ai/v1/mcp/bnsn/mcp">Connect</button></div>
+            <div class="app" data-app="bookbuilder"><div class="plate"><img src="assets/logo-bookbuilder-white.png" alt="BookBuilder"></div><a class="btn" href="https://bookbuilder.bnsn.ai" target="_blank" rel="noopener noreferrer">Open</a><a class="btn" href="https://bookbuilder.bnsn.ai" target="_blank" rel="noopener noreferrer">Get it</a></div>
+            <div class="app" data-app="improver"><div class="plate"><img src="assets/logo-improver-white.png" alt="Improver"></div><a class="btn" href="https://improver.bnsn.ai" target="_blank" rel="noopener noreferrer">Open</a><a class="btn" href="https://improver.bnsn.ai" target="_blank" rel="noopener noreferrer">Get it</a></div>
+            <div class="app" data-app="coursebuilder"><div class="plate"><img src="assets/logo-coursebuilder-white.png" alt="CourseBuilder"></div><a class="btn" href="https://coursebuilder.bnsn.ai" target="_blank" rel="noopener noreferrer">Open</a><a class="btn" href="https://coursebuilder.bnsn.ai" target="_blank" rel="noopener noreferrer">Get it</a></div>
+            <div class="app" data-app="offerbuilder"><div class="plate"><span class="ob"><span><svg viewBox="0 0 24 24"><circle cx="7" cy="12" r="3"/><circle cx="17" cy="12" r="3"/><path d="M10 12h4"/></svg></span>OfferBuilder</span></div><span class="soon">Presale Wed Oct 28</span></div>
+            <div class="app" data-app="aic"><div class="plate"><img src="assets/logo-aic-white.png" alt="AI Collective"></div><a class="btn" href="https://community.bnsn.ai" target="_blank" rel="noopener noreferrer">Open</a><a class="btn" href="https://collective.bnsn.ai" target="_blank" rel="noopener noreferrer">Join</a></div>
           </div></div></div>
 
         <div class="panel"><div class="ph"><span class="hic" style="--hc:var(--rose)"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></span><h2>New from Jon</h2></div>
@@ -502,6 +506,48 @@ body{padding:0;background:var(--ground)}
     if (map[t]) b.addEventListener("click", function () { send(map[t]); });
   });
 
+  // A button with data-job starts that job in the chat. A Connect button also copies the connector's address.
+  function copy(text) {
+    try { if (navigator.clipboard) return navigator.clipboard.writeText(text).then(function () { return true; }, function () { return false; }); } catch (e) {}
+    return Promise.resolve(false);
+  }
+  document.addEventListener("click", function (ev) {
+    var b = ev.target.closest && ev.target.closest("button[data-job]");
+    if (!b) return;
+    var job = b.dataset.job, address = b.dataset.copy;
+    fetch("/do", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: job }) })
+      .then(function (r) {
+        if (!r.ok) return say("Could not reach YouCloned");
+        if (!address) return say("Sent to your Claude chat");
+        copy(address).then(function (ok) { say(ok ? "Address copied. Your clone has the steps in the chat" : "Your clone has the steps and the address in the chat"); });
+      })
+      .catch(function () { say("Could not reach YouCloned"); });
+  });
+
+  // Your BNSN apps: each app's buttons as the add-on last worked them out (connected, owned, or neither).
+  var plates = {};
+  document.querySelectorAll("#apps .app").forEach(function (a) { plates[a.dataset.app] = a.querySelector(".plate").outerHTML; });
+  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  function renderApps(apps) {
+    var box = document.getElementById("apps"), key = JSON.stringify(apps);
+    if (!box || box.dataset.k === key) return;
+    box.dataset.k = key; box.textContent = "";
+    apps.forEach(function (a) {
+      var d = el("div", "app"); d.dataset.app = a.key;
+      d.innerHTML = plates[a.key] || '<div class="plate"><span class="ob"></span></div>';
+      if (!plates[a.key]) d.querySelector(".ob").textContent = a.name;
+      (a.buttons || []).forEach(function (b) {
+        var x;
+        if (b.kind === "soon") x = el("span", "soon", b.label);
+        else if (b.kind === "connected") x = el("span", "ok", b.label);
+        else if (b.kind === "connect") { x = el("button", "btn" + (b.primary ? " primary" : ""), b.label); x.type = "button"; x.dataset.job = b.job; if (b.copy) x.dataset.copy = b.copy; }
+        else if (/^https:\/\//.test(b.href || "")) { x = el("a", "btn" + (b.primary ? " primary" : ""), b.label); x.href = b.href; x.target = "_blank"; x.rel = "noopener noreferrer"; }
+        if (x) d.appendChild(x);
+      });
+      box.appendChild(d);
+    });
+  }
+
   // Live numbers from the add-on: plan usage, words, name.
   function fmt(n) { return Number(n).toLocaleString("en-US"); }
   function load() {
@@ -517,6 +563,7 @@ body{padding:0;background:var(--ground)}
         document.getElementById("claudeFill").setAttribute("transform", "translate(0," + (y - 64).toFixed(1) + ")");
       }
       if (s.claudeLabel) document.getElementById("claudeL").textContent = s.claudeLabel;
+      if (Array.isArray(s.apps)) renderApps(s.apps);
       document.getElementById("words").textContent = s.words != null ? fmt(s.words) : "Connect";
       document.getElementById("wordsL").textContent = s.words != null ? "BNSN words" : "Connect SkillKey to see your words";
       if (s.codex && s.codex.left != null) {

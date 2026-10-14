@@ -29,6 +29,7 @@ const crewIds = new Map()   // agentId -> crew name
 const notCrew = new Set()
 const gatePassed = new Set() // tool_use_ids of crew calls the gate allowed
 let skillKey = false        // the SkillKey connector is on in this session
+let bnsn = null             // the BNSN connector in this session: { prefix, server, tools }, found by its tools
 let skillKeyServer = null   // its name for $.mcp.call: "claude.ai SkillKey" in the terminal, an id in the desktop app
 const crewReady = new Set() // crew members registered with their instructions from SkillKey
 let sessionStartedAt = 0     // when this session began; connectors can take a minute to connect after it
@@ -53,18 +54,70 @@ const CARD = '#161d29'     // the dashboard's navy card, its border, and the sta
 const CARD_LINE = '#283346'
 const AMBER = '#e8b25c'
 const BLUE_INK = '#8fb6f4'
-// The BNSN apps on the Dashboard. Which ones the owner has is not looked up yet, so OWNED_SAMPLE stands in.
+// The BNSN apps on the Dashboard and in the panel. open = the web app, get = its sales page, connector =
+// the address a buyer pastes into Claude's Connectors (only SkillKey and BNSN have one today).
+const SK_CONNECTOR = 'https://skills.bnsn.ai/claude'
+const BNSN_CONNECTOR = 'https://api.bnsn.ai/v1/mcp/bnsn/mcp'
 const APPS = [
-  { key: 'skillkey', open: 'https://skills.bnsn.ai', get: SKILLKEY_INSTALL },
-  { key: 'bnsn', open: 'https://app.bnsn.ai', get: 'https://bnsn.ai' },
-  { key: 'bookbuilder', open: 'https://bookbuilder.bnsn.ai', get: 'https://bookbuilder.bnsn.ai' },
-  { key: 'improver', open: 'https://improver.bnsn.ai', get: 'https://improver.bnsn.ai' },
-  { key: 'coursebuilder', open: 'https://coursebuilder.bnsn.ai', get: 'https://coursebuilder.bnsn.ai' },
+  { key: 'skillkey', name: 'SkillKey', open: 'https://skills.bnsn.ai', get: SKILLKEY_INSTALL, connector: SK_CONNECTOR, free: true },
+  { key: 'bnsn', name: 'BNSN', open: 'https://app.bnsn.ai', get: 'https://bnsn.ai', connector: BNSN_CONNECTOR, getLabel: 'Get BNSN' },
+  { key: 'bookbuilder', name: 'BookBuilder', open: 'https://bookbuilder.bnsn.ai', get: 'https://bookbuilder.bnsn.ai' },
+  { key: 'improver', name: 'Improver', open: 'https://improver.bnsn.ai', get: 'https://improver.bnsn.ai' },
+  { key: 'coursebuilder', name: 'CourseBuilder', open: 'https://coursebuilder.bnsn.ai', get: 'https://coursebuilder.bnsn.ai' },
   // OfferBuilder's presale opens Wed Oct 28 (Jon, Oct 12). Its page is not public yet, so no link until it is.
-  { key: 'offerbuilder', soon: 'Presale Wed Oct 28' },
-  { key: 'aic', open: 'https://community.bnsn.ai', get: 'https://collective.bnsn.ai', join: true },
+  { key: 'offerbuilder', name: 'OfferBuilder', soon: 'Presale Wed Oct 28' },
+  { key: 'aic', name: 'AI Collective', open: 'https://community.bnsn.ai', get: 'https://collective.bnsn.ai', getLabel: 'Join' },
 ]
-const OWNED_SAMPLE = ['bnsn', 'bookbuilder', 'improver']
+// Which apps the owner bought. Nothing looks it up yet (card #32 piece B), so it stays null and an app
+// that can't be told apart shows both Open and Get it. When the lookup ships it saves the list as "ownedApps".
+let ownedApps = null
+
+// Each app's buttons, from what is known: a connected app says Connected and opens; SkillKey (free with
+// Command) connects; BNSN is paid only, so it offers Get BNSN and, for owners, Connect; the others open
+// in the browser until their connectors ship.
+function appStates() {
+  return APPS.map(a => {
+    const connected = a.key === 'skillkey' ? skillKey : a.key === 'bnsn' ? !!bnsn : false
+    const owns = connected ? true : ownedApps ? ownedApps.includes(a.key) : null
+    const open = { kind: 'open', label: 'Open', href: a.open }
+    const get = { kind: 'get', label: a.getLabel || 'Get it', href: a.get }
+    const connect = { kind: 'connect', label: 'Connect', job: '/youcloned connect ' + a.key, copy: a.connector }
+    let buttons
+    if (a.soon) buttons = [{ kind: 'soon', label: a.soon }]
+    else if (connected) buttons = [{ kind: 'connected', label: 'Connected' }, open]
+    else if (a.connector && a.free) buttons = [{ ...connect, primary: true }]
+    else if (a.connector) buttons = owns === true ? [{ ...connect, primary: true }] : owns === false ? [{ ...get, primary: true }] : [get, connect]
+    else buttons = owns === true ? [open] : owns === false ? [{ ...get, primary: true }] : [open, get]
+    return { key: a.key, name: a.name, connected, owns, buttons }
+  })
+}
+
+// The connect job a Connect button starts in the chat: Claude walks the owner through Claude's own
+// Connectors screen, since a connector lives in their Claude account and only they can add it.
+const CONNECT_STEPS = (name, address, signIn, check) => 'Walk me through it one step at a time and wait for me after each step. ' +
+  'Show me this address in a code block so I can copy it: ' + address + ' (the YouCloned dashboard copied it for me too). ' +
+  'In Claude, open Customize, then Connectors, click Add, then Add custom connector. Type ' + name + ' in the first box and paste the address in the second. ' +
+  'Click Connect. ' + signIn + ' Then open a new chat and type "' + check + '". The balance coming back means it worked. ' +
+  'The first time each ' + name + ' tool runs, Claude asks to allow it: allow the ones that read, and keep the ones that save or change something on ask.'
+
+function connectJobText(key) {
+  const sk = 'Connect SkillKey to my Claude account. SkillKey comes with YouCloned and carries Jon\'s skills and my SkillKey words. ' +
+    CONNECT_STEPS('SkillKey', SK_CONNECTOR, 'A browser tab opens SkillKey\'s sign-in: I sign in with my email and the code SkillKey sends.', 'check my SkillKey words')
+  const bn = 'Connect BNSN to my Claude account so BNSN\'s agents write my copy from my blueprints. ' +
+    CONNECT_STEPS('BNSN', BNSN_CONNECTOR, 'A browser tab opens BNSN\'s sign-in: I sign in with the BNSN login I bought BNSN with, then click Approve.', 'check my BNSN words') +
+    ' BNSN needs an active BNSN plan. If I don\'t have one, say so in one line: the Get BNSN button on my dashboard shows the plans, and until then Jon\'s SkillKey writers write my copy.'
+  if (key === 'skillkey') return skillKey ? 'SkillKey is already connected in this Claude account. Tell me that in one line and check my SkillKey words.' : sk
+  if (key === 'bnsn') return bnsn ? 'BNSN is already connected in this Claude account. Tell me that in one line and check my BNSN words.' : bn
+  const app = APPS.find(a => a.key === key)
+  if (app && app.open) return 'Open ' + app.name + ' for me: ' + app.open + '. ' + app.name + ' has no Claude connector yet, so it opens in the browser.'
+  // Setup step 5: SkillKey first, then each app the owner has.
+  return 'Connect my apps to Claude, one at a time. ' +
+    (skillKey ? 'SkillKey is already connected, so skip it. ' : 'Start with SkillKey. ' + sk + ' ') +
+    (bnsn ? 'BNSN is already connected too. '
+      : 'When SkillKey is done, ask me in one short question whether I have a BNSN plan. If I do, connect BNSN next. ' + bn + ' ') +
+    'BookBuilder, CourseBuilder and Improver have no Claude connector yet: tell me they open from the Open buttons on my YouCloned dashboard.'
+}
+
 const DASH_PORT = 4600
 const DASH_URL = 'http://localhost:' + DASH_PORT
 const SERVICE = 'ai.bnsn.youcloned.dashboard'
@@ -209,6 +262,7 @@ async function runJob($, text) {
   if (word === 'setup') return startSetup($)
   if (word === 'codex') return codexButton($)
   if (word === 'crew') { $.ui.toast(await crewNow($, (args.split(/\s+/)[1] || '').toLowerCase())); return }
+  if (word === 'connect') { await $.prompt.submit({ text: connectJobText((args.split(/\s+/)[1] || '').toLowerCase()), asUser: true }); return }
 }
 
 // Going through a helper's drafts with the owner, one at a time; nothing goes out without their yes.
@@ -323,7 +377,7 @@ async function writeState($) {
     if (!deskSession) {
       try { const old = JSON.parse(await $.fs.read(dataDir() + '/state.json')); mine = { session: old.session, listening: !!old.listening } } catch { mine = {} }
     }
-    await $.fs.write(dataDir() + '/state.json', JSON.stringify({ ...live, name: lastName, ...mine, at: await $.clock.now() }))
+    await $.fs.write(dataDir() + '/state.json', JSON.stringify({ ...live, name: lastName, ...mine, skillKey, bnsn: !!bnsn, apps: appStates(), at: await $.clock.now() }))
   } catch {}
 }
 
@@ -1326,11 +1380,14 @@ export function register(on) {
             ] })
           })))
 
-        const owned = new Set([...OWNED_SAMPLE, ...(skillKey ? ['skillkey'] : [])])
-        body.push(card({ icon: 'apps', color: '#5a92ea', title: 'Your BNSN apps' }, [row(APPS.map(a => Box({ flexDirection: 'column', rowGap: 1, alignItems: 'stretch', children: [
+        // Each app's buttons come from appStates(): a page opens in the browser, Connect starts the connect job.
+        const appButton = (a, b) => b.kind === 'soon' ? Text({ dimColor: true, children: [b.label] })
+          : b.kind === 'connected' ? Text({ bold: true, color: BLUE_INK, children: [b.label] })
+          : b.kind === 'connect' ? ycButton('app-' + a.key + '-connect', b.label, () => pressJob($, { label: 'Connect ' + a.name, text: b.job }), !!b.primary)
+          : ycLink(b.href, b.label, !!b.primary)
+        body.push(card({ icon: 'apps', color: '#5a92ea', title: 'Your BNSN apps' }, [row(appStates().map(a => Box({ flexDirection: 'column', rowGap: 1, alignItems: 'stretch', children: [
           Svg({ alt: a.key, source: plateSvg(a.key), width: PLATE.w, height: PLATE.h }),
-          a.soon ? Text({ dimColor: true, children: [a.soon] })
-            : owned.has(a.key) ? ycLink(a.open, 'Open', false) : ycLink(a.get, a.join ? 'Join' : 'Get it', true),
+          ...a.buttons.map(b => appButton(a, b)),
         ] })))]))
 
         body.push(card({ icon: 'play', color: '#5a92ea', title: 'New from Jon' }, [Box({ flexDirection: 'row', columnGap: 2, alignItems: 'center', children: [
