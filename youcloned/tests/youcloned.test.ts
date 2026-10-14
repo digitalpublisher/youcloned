@@ -838,6 +838,56 @@ test('a connector with a word balance but none of BNSN\'s writers is not BNSN', 
   expect(JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}').bnsn).toBe(false)
 })
 
+test('words: SkillKey words are labeled SkillKey, and BNSN words come from BNSN\'s balance tool when it is connected', async ($, on) => {
+  const calls: string[] = []
+  const { writes, clock } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' }, bnsn: { server: BN, tools: BN_TOOLS, words: 31500, calls } } as any)
+  on('http.fetch', () => ({ value: { status: 404, ok: false, headers: {}, text: '' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  await clock.advance(3000)
+  const state = JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}')
+  expect(state.words).toBe(4200)
+  expect(state.bnsnWords).toBe(31500)
+  expect(calls).toContain('check-word-balance')
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'tab-home' })
+  const hero = (await ui.findAll({ type: 'Svg' })).find(p => /Your day/.test(String(p.props.alt)))
+  expect(hero.props.source).toContain('SkillKey words · BNSN 31,500')
+  expect(hero.props.source).not.toContain('>BNSN words<')
+  await ui.unmount()
+  const term = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await term.press({ key: 'tab-home' })
+  expect(await term.find({ type: 'Text', text: /SkillKey words: 4,200 {3}BNSN words: 31,500/ })).toBeDefined()
+  await term.unmount()
+})
+
+test('words with SkillKey only: no BNSN number anywhere, and the SkillKey number never says BNSN', async ($, on) => {
+  const { writes, clock } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' } })
+  on('http.fetch', () => ({ value: { status: 404, ok: false, headers: {}, text: '' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  await clock.advance(3000)
+  const state = JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}')
+  expect(state.words).toBe(4200)
+  expect(state.bnsnWords ?? null).toBe(null)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'tab-home' })
+  const hero = (await ui.findAll({ type: 'Svg' })).find(p => /Your day/.test(String(p.props.alt)))
+  expect(hero.props.source).toContain('>SkillKey words<')
+  expect(hero.props.source).not.toContain('BNSN')
+  await ui.unmount()
+})
+
+test('any BNSN answer that names the balance updates the BNSN gauge; YouCloned\'s own balance look-up asks no question', async ($, on) => {
+  const { writes } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' }, bnsn: { server: BN, tools: BN_TOOLS },
+    toolCall: (e) => e.tool === 'mcp__' + BN + '__ask_vslAgent' ? { result: 'ok', text: 'Your VSL is ready. {"wordsRemaining": 1200}' } : undefined } as any)
+  on('tool.check', () => ({ decision: 'ask' }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  await $.tool.call({ tool: 'mcp__' + BN + '__ask_vslAgent', format: 'long' })
+  expect(JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}').bnsnWords).toBe(1200)
+  expect((await $.tool.check({ tool: 'mcp__' + BN + '__check-word-balance', input: {} })).decision).toBe('allow')
+  expect((await $.tool.check({ tool: 'mcp__' + BN + '__ask_vslAgent', input: {} })).decision).toBe('ask')
+  expect((await $.tool.check({ tool: 'mcp__other__check-word-balance', input: {} })).decision).toBe('ask')
+})
+
 // A fresh Mac: no developer tools, so /usr/bin/python3 is only Apple's stand-in.
 function freshMac(on, sum: string) {
   const argvs: string[][] = []

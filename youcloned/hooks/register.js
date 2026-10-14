@@ -330,6 +330,8 @@ async function refreshLive($, withWords) {
   } catch {}
   if (withWords) {
     try { await checkBnsn($) } catch {}
+    if (bnsn) { const n = bnsnWordsIn(await bnsnCall($, 'check-word-balance', {})); if (n != null) live.bnsnWords = n }
+    else live.bnsnWords = null
     try {
       const r = await skillKeyCall($, 'word_balance', {})
       const txt = (r.content || []).map(c => c.text || '').join(' ')
@@ -736,6 +738,27 @@ async function checkBnsn($) {
   try { const saved = await $.store.get('ownedApps'); ownedApps = Array.isArray(saved) ? saved.filter(k => typeof k === 'string') : null } catch {}
 }
 
+// Calls one of BNSN's tools for YouCloned: straight to the connector, or, where the desktop app keeps its
+// connectors to itself, the way the model calls it. The text of the answer, or null.
+async function bnsnCall($, tool, args) {
+  if (!bnsn) return null
+  try {
+    const r = await $.mcp.call(bnsn.server, tool, args || {})
+    if (r && !r.isError) return (r.content || []).map(c => c.text || '').join('\n')
+  } catch {}
+  try {
+    const r = await $.tool.call({ tool: 'mcp__' + bnsn.prefix + '__' + tool, ...(args || {}) })
+    if (r && !r.deny && !r.isError && String(r.text ?? '').trim()) return String(r.text)
+  } catch {}
+  return null
+}
+
+// BNSN's check-word-balance answers {"canProceed": true, "wordsRemaining": 25000}.
+function bnsnWordsIn(text) {
+  const m = /"?wordsRemaining"?\s*[:=]\s*(-?[\d,]+)/i.exec(String(text || ''))
+  return m ? Math.max(0, Number(m[1].replace(/,/g, ''))) : null
+}
+
 async function checkSkillKey($) {
   try {
     const names = (await $.tool.list()).map(t => typeof t === 'string' ? t : t.name || '')
@@ -1062,6 +1085,12 @@ export function register(on) {
     return next(e)
   })
 
+  on('tool.check', { tool: /^mcp__.+__check-word-balance$/ }, async ($, e, next) => {
+    const m = TOOL_NAME.exec(e.tool || '')
+    if (m && bnsn && m[1] === bnsn.prefix) return { decision: 'allow', reason: 'a BNSN word balance look-up by YouCloned' }
+    return next(e)
+  })
+
   // A crew call the gate allowed runs without a permission question, since the crew works
   // while nobody watches. A rule of the customer's that denies the call still wins.
   on('tool.check', async ($, e, next) => {
@@ -1285,7 +1314,14 @@ export function register(on) {
         $.ui.invalidate('ui.render')
       }
     }
-    return next(e)
+    const r = await next(e)
+    const n = bnsn && m && m[1] === bnsn.prefix ? bnsnWordsIn(String(r?.text ?? '')) : null
+    if (n != null) {
+      live.bnsnWords = n
+      try { await writeState($) } catch {}
+      $.ui.invalidate('ui.render')
+    }
+    return r
   })
 
   // The helper tool runs inside the model's request, where Auto mode lets YouCloned reach SkillKey.
@@ -1394,7 +1430,7 @@ export function register(on) {
         ] })
         const row = (children) => Box({ flexDirection: 'row', flexWrap: 'wrap', columnGap: 1, rowGap: 1, alignItems: 'center', children })
 
-        body.push(pic('Your day: plan left, Codex and BNSN words', heroSvg({ name, left, reset, span: live.claudeSpan, words: live.words, codex: codexReady, codexPlan: live.codex || null, lines })))
+        body.push(pic('Your day: plan left, Codex and your words', heroSvg({ name, left, reset, span: live.claudeSpan, words: live.words, bnsnWords: live.bnsnWords, codex: codexReady, codexPlan: live.codex || null, lines })))
         body.push(Client
           ? Client({ key: 'talk', module: './talk.js', props: { listening } })
           : ycButton('home-talk', listening ? 'Isaac is listening · press to stop' : 'Talk to Isaac', () => pressTalk($), true))
@@ -1462,7 +1498,8 @@ export function register(on) {
         body.push(Text({ dimColor: true, children: ['The full ', Text({ bold: true, color: BLUE_INK, children: ['YouCloned'] }), ' dashboard: click the globe at the top right'] }))
       } else {
         body.push(Text({ bold: true, color: BLUE, children: ['YouCloned'] }))
-        body.push(Text({ children: ['Claude plan left: ' + (left == null ? '?' : Math.round(left) + '%') + '   BNSN words: ' + (live.words == null ? 'not linked' : Number(live.words).toLocaleString('en-US'))] }))
+        body.push(Text({ children: ['Claude plan left: ' + (left == null ? '?' : Math.round(left) + '%') + '   SkillKey words: ' + (live.words == null ? 'not linked' : Number(live.words).toLocaleString('en-US')) +
+          (live.bnsnWords == null ? '' : '   BNSN words: ' + Number(live.bnsnWords).toLocaleString('en-US'))] }))
         body.push(Box({ flexDirection: 'row', flexWrap: 'wrap', columnGap: 1, rowGap: 0, children: [
           ...pinnedSkills().map(j => Button({ key: 'home-job-' + j.key, label: j.label, onPress: () => pressJob($, j) })),
           Button({ key: 'home-all', label: 'All skills', plain: true, onPress: () => { tab = 'skills'; redraw() } }),

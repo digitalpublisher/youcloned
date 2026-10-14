@@ -35,7 +35,8 @@ function tile(y, gauge, big, small) {
 
 // The blue greeting card: the mark, the greeting, what needs the owner, and the three gauges.
 // codexPlan: { left, label } from Codex's own usage record, or null when it has none yet.
-export function heroSvg({ name, left, reset, span, words, codex, codexPlan, lines }) {
+// words: SkillKey's balance; bnsnWords: BNSN's, when BNSN is connected (two separate wallets today).
+export function heroSvg({ name, left, reset, span, words, bnsnWords, codex, codexPlan, lines }) {
   const hour = new Date().getHours()
   const hi = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
   const list = (lines || []).slice(0, 3).map((t, i) =>
@@ -53,7 +54,7 @@ export function heroSvg({ name, left, reset, span, words, codex, codexPlan, line
     '<rect x="' + (tx + 14) + '" y="159" width="36" height="36" rx="9" fill="#ffffff" fill-opacity=".14"/>' +
     '<g transform="translate(' + (tx + 18) + ' 163) scale(.29)" fill="none" stroke="#ffffff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"><rect x="12" y="24" width="72" height="54" rx="12"/><path d="M20 24l38-10c4-1 8 2 8 6v4"/><path d="M25 43h26M25 56h18"/></g>' +
     '<text x="' + (tx + 64) + '" y="175" ' + FONT + ' font-size="19" font-weight="700" fill="#ffffff">' + (words == null ? 'Connect' : Number(words).toLocaleString('en-US')) + '</text>' +
-    '<text x="' + (tx + 64) + '" y="193" ' + FONT + ' font-size="11.5" fill="#c8d7f2">' + (words == null ? 'SkillKey shows your words' : 'BNSN words') + '</text>'
+    '<text x="' + (tx + 64) + '" y="193" ' + FONT + ' font-size="11.5" fill="#c8d7f2">' + (words == null ? 'SkillKey shows your words' : bnsnWords == null ? 'SkillKey words' : 'SkillKey words · BNSN ' + Number(bnsnWords).toLocaleString('en-US')) + '</text>'
   return '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="' + W + '" height="230" viewBox="0 0 ' + W + ' 230">' +
     '<defs><radialGradient id="bg" cx="0" cy="0" r="1.1" gradientUnits="objectBoundingBox"><stop offset="0" stop-color="#4c8ff0"/><stop offset=".45" stop-color="#2f6fd0"/><stop offset="1" stop-color="#1d4fa6"/></radialGradient>' +
     '<radialGradient id="glow" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#ffffff" stop-opacity=".18"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></radialGradient></defs>' +
