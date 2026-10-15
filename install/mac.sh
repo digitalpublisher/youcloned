@@ -212,6 +212,16 @@ else
     fi
 fi
 
+# Make sure a NEW Terminal window finds claude too. A fresh Mac often has no
+# ~/.zshrc yet, so create it, then add ~/.npm-global/bin (npm fallback above)
+# and ~/.local/bin (Anthropic's native installer) if they exist. Idempotent.
+touch "$HOME/.zshrc"
+for d in .npm-global/bin .local/bin; do
+    if [ -d "$HOME/$d" ] && ! grep -q "$d" "$HOME/.zshrc"; then
+        printf '\n# YouCloned: so new Terminal windows find claude\nexport PATH="$HOME/%s:$PATH"\n' "$d" >> "$HOME/.zshrc"
+    fi
+done
+
 # ----- Step 8: Obsidian vault folder + starter CLAUDE.md -----
 say ""
 say "Where is your Obsidian vault located?"
