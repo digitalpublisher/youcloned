@@ -249,6 +249,7 @@ test('every clone, Mac or PC, is told to say when it is time to change chats and
   expect(text).toContain('handoffs/<project>/')
   expect(text).toMatch(/latest project chat/)
   expect(text).toContain('Automatic chat switching: off')
+  expect(text).toMatch(/every three hours, sooner, later/)
 })
 
 test('the clone folder conversation is told which YouCloned version is running', async ($, on) => {
