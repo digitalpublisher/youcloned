@@ -35,6 +35,82 @@ warn() { echo -e "${RED}WARN${RESET} $1"; }
 say "Starting full-stack install for macOS"
 say ""
 
+# ----- Intel Macs: steps 1 to 6 without Homebrew -----
+# Since September 2026 Homebrew's install script stops on every Intel Mac with
+# "Homebrew on macOS is only supported on Apple Silicon processors!" (#296).
+# So on an Intel Mac each tool comes from its maker's own download instead.
+# Apple Silicon Macs skip this block and run steps 1 to 6 below as before.
+if [ "$(/usr/bin/uname -m)" = "x86_64" ]; then
+    YC_TMP=$(mktemp -d /tmp/yc-intel.XXXXXX)
+    yc_dmg_app() {  # $1 = downloaded .dmg, $2 = the .app inside it
+        local mnt; mnt=$(mktemp -d /tmp/yc-mnt.XXXXXX)
+        hdiutil attach -nobrowse -quiet -mountpoint "$mnt" "$1"
+        ditto "$mnt/$2" "/Applications/$2" 2>/dev/null || sudo ditto "$mnt/$2" "/Applications/$2"
+        hdiutil detach -quiet "$mnt" || true
+    }
+    say "Intel Mac found. Homebrew no longer installs on Intel Macs, so each tool comes from its maker's own download."
+    say "(You may be prompted for your Mac password.)"
+
+    # Git comes with Apple's Command Line Tools (Homebrew used to install these for you).
+    if xcode-select -p >/dev/null 2>&1; then
+        ok "Git already installed ($(git --version | head -1)). Skipping."
+    else
+        say "Installing Apple's Command Line Tools (this gives you Git). This can take a few minutes..."
+        sudo /usr/bin/touch /tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress
+        CLT=$(/usr/sbin/softwareupdate -l 2>/dev/null | grep -B 1 -E 'Command Line Tools' | awk -F'*' '/^ *\*/ {print $2}' | sed -e 's/^ *Label: //' -e 's/^ *//' | sort -V | tail -n1)
+        if [ -n "$CLT" ] && sudo /usr/sbin/softwareupdate -i "$CLT"; then
+            sudo /usr/bin/xcode-select --switch /Library/Developer/CommandLineTools
+            ok "Git installed: $(git --version | head -1)"
+        else
+            warn "Could not install the Command Line Tools here. Opening Apple's installer: click Install, then re-run this script."
+            xcode-select --install || true
+        fi
+        sudo /bin/rm -f /tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress
+    fi
+
+    if command -v node >/dev/null 2>&1; then
+        ok "Node.js already installed ($(node --version)). Skipping."
+    else
+        say "Installing Node.js (from nodejs.org)..."
+        NODE_PKG=$(curl -fsSL https://nodejs.org/dist/latest-v22.x/SHASUMS256.txt | awk '/\.pkg$/ {print $2}')
+        curl -fsSL "https://nodejs.org/dist/latest-v22.x/$NODE_PKG" -o "$YC_TMP/node.pkg"
+        sudo /usr/sbin/installer -pkg "$YC_TMP/node.pkg" -target /
+        export PATH="/usr/local/bin:$PATH"
+        ok "Node.js installed: $(node --version)"
+    fi
+
+    if [ -x /usr/local/bin/python3 ]; then
+        ok "Python 3 already installed ($(/usr/local/bin/python3 --version)). Skipping."
+    else
+        say "Installing Python 3 (from python.org, required for NotebookLM and several YouCloned skills)..."
+        curl -fsSL https://www.python.org/ftp/python/3.13.16/python-3.13.16-macos11.pkg -o "$YC_TMP/python.pkg"
+        sudo /usr/sbin/installer -pkg "$YC_TMP/python.pkg" -target /
+        "/Applications/Python 3.13/Install Certificates.command" >/dev/null 2>&1 || warn "Python certificates step skipped."
+        ok "Python 3 installed: $(/usr/local/bin/python3 --version)"
+    fi
+
+    if [ -d "/Applications/Obsidian.app" ]; then
+        ok "Obsidian already installed at /Applications/Obsidian.app. Skipping."
+    else
+        say "Installing Obsidian (from obsidian.md's GitHub releases)..."
+        OBS_V=$(curl -fsSIL -o /dev/null -w '%{url_effective}' https://github.com/obsidianmd/obsidian-releases/releases/latest)
+        OBS_V=${OBS_V##*/v}
+        curl -fsSL "https://github.com/obsidianmd/obsidian-releases/releases/download/v$OBS_V/Obsidian-$OBS_V.dmg" -o "$YC_TMP/obsidian.dmg"
+        yc_dmg_app "$YC_TMP/obsidian.dmg" Obsidian.app
+        ok "Obsidian installed."
+    fi
+
+    if [ -d "/Applications/Cursor.app" ]; then
+        ok "Cursor already installed at /Applications/Cursor.app. Skipping."
+    else
+        say "Installing Cursor (from cursor.com)..."
+        curl -fsSL https://api2.cursor.sh/updates/download/golden/darwin-x64/cursor/latest -o "$YC_TMP/cursor.dmg"
+        yc_dmg_app "$YC_TMP/cursor.dmg" Cursor.app
+        ok "Cursor installed."
+    fi
+    rm -rf "$YC_TMP"
+else
+
 # ----- Step 1: Homebrew -----
 if command -v brew >/dev/null 2>&1; then
     ok "Homebrew already installed."
@@ -96,6 +172,7 @@ else
     brew install --cask cursor
     ok "Cursor installed."
 fi
+fi  # end of the Apple Silicon steps 1 to 6
 
 # ----- Step 7: Claude Code CLI -----
 # If Node was installed via the nodejs.org pkg installer (not Homebrew), the

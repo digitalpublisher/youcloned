@@ -1,0 +1,75 @@
+# Runs install/mac.sh from scratch on GitHub's own Macs, one Intel and one Apple Silicon (#296).
+# Each job first moves the runner's preinstalled tools out of the way so the installer sees a bare Mac.
+# The live copy buyers download is youcloned.bnsn.ai/install/mac.sh; it must match install/mac.sh here.
+name: Mac installer
+
+on:
+  pull_request:
+    paths: ["install/mac.sh", ".github/workflows/mac-installer.yml"]
+  workflow_dispatch:
+
+jobs:
+  intel:
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+      - name: This is an Intel Mac
+        run: test "$(uname -m)" = x86_64
+      - name: Homebrew's own installer refuses it (the bug buyers hit)
+        run: |
+          set +e
+          NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" > brew.txt 2>&1
+          code=$?
+          cat brew.txt
+          test $code -ne 0 && grep -q "only supported on Apple Silicon" brew.txt
+      - name: Clear the runner's preinstalled tools
+        run: |
+          sudo mv /usr/local /usr/local.runner
+          sudo mkdir -p /usr/local/bin
+          test ! -e /Applications/Obsidian.app && test ! -e /Applications/Cursor.app
+      - name: First run installs everything
+        run: |
+          export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+          printf '\n' | bash install/mac.sh 2>&1 | tee first.txt
+          test "${PIPESTATUS[1]}" -eq 0
+      - name: Every tool is there and runs
+        run: |
+          export PATH="$HOME/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+          node --version
+          /usr/local/bin/python3 --version
+          /usr/local/bin/python3 -c "import urllib.request; urllib.request.urlopen('https://www.python.org').read(10); print('python https ok')"
+          git --version
+          claude --version
+          test -d /Applications/Obsidian.app && test -d /Applications/Cursor.app
+          lipo -archs /Applications/Cursor.app/Contents/MacOS/Cursor
+          test -f "$HOME/Documents/Obsidian Vault/CLAUDE.md"
+          ls "$HOME/.claude/skills" | head
+      - name: Second run skips every tool
+        run: |
+          export PATH="$HOME/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+          printf '\n' | bash install/mac.sh 2>&1 | tee second.txt
+          test "${PIPESTATUS[1]}" -eq 0
+          n=$(grep -c "Skipping" second.txt); echo "skipped $n"; test "$n" -eq 6
+
+  apple-silicon:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: This is an Apple Silicon Mac
+        run: test "$(uname -m)" = arm64
+      - name: Clear the runner's preinstalled tools
+        run: |
+          sudo mv /opt/homebrew /opt/homebrew.runner
+          test ! -e /Applications/Obsidian.app && test ! -e /Applications/Cursor.app
+      - name: First run installs everything through Homebrew, as before
+        run: |
+          export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+          printf '\n' | bash install/mac.sh 2>&1 | tee first.txt
+          test "${PIPESTATUS[1]}" -eq 0
+          grep -q "Homebrew installed" first.txt
+          ! grep -q "Intel Mac found" first.txt
+      - name: Every tool is there and runs
+        run: |
+          eval "$(/opt/homebrew/bin/brew shellenv)"
+          node --version && python3 --version && git --version && claude --version
+          test -d /Applications/Obsidian.app && test -d /Applications/Cursor.app
