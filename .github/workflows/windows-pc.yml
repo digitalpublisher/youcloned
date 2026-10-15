@@ -1,6 +1,8 @@
 # Runs the PC pieces on GitHub's own Windows computers, since no Windows PC of ours tests them yet (#30).
-# It covers what a script can prove: the installer, the dashboard server, the add-on tests. The live mic,
-# Zoom and Slack checks still need a person at a Windows PC.
+# It covers what a script can prove: the installer and the dashboard server. The add-on tests stay on the
+# Mac: their stubs expect Mac-shaped paths, and on a Windows host the test engine rewrites /Users/pat/x to
+# D:\Users\pat\x before a stub sees it (checked Oct 14: 30 of 78 failed on that alone, every answer right).
+# The live mic, Zoom and Slack checks still need a person at a Windows PC.
 name: Windows PC
 
 on:
@@ -43,14 +45,3 @@ jobs:
           Stop-Process $p.Id
           if (-not $ok) { throw "dashboard did not answer on port 4600" }
 
-  addon-tests:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 22 }
-      - name: Add-on tests on a PC
-        shell: pwsh
-        run: |
-          npm install -g @anthropic-ai/claude-code
-          claude plugin test ./youcloned
