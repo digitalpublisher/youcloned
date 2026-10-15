@@ -1,5 +1,6 @@
 # Runs install/mac.sh from scratch on GitHub's own Macs, one Intel and one Apple Silicon (#296).
-# Each job first moves the runner's preinstalled tools out of the way so the installer sees a bare Mac.
+# The installer reads the vault folder from the keyboard; brew and npm also read stdin, so the jobs feed
+# endless Enter presses with yes ''. Each job first moves the runner's preinstalled tools out of the way so the installer sees a bare Mac.
 # The live copy buyers download is youcloned.bnsn.ai/install/mac.sh; it must match install/mac.sh here.
 name: Mac installer
 
@@ -24,13 +25,16 @@ jobs:
           test $code -ne 0 && grep -q "only supported on Apple Silicon" brew.txt
       - name: Clear the runner's preinstalled tools
         run: |
-          sudo mv /usr/local /usr/local.runner
+          # /usr/local itself sits on the read-only system volume, so rename what is inside it.
+          sudo mv /usr/local/bin /usr/local/bin.runner
           sudo mkdir -p /usr/local/bin
+          sudo mv /usr/local/lib/node_modules /usr/local/lib/node_modules.runner 2>/dev/null || true
+          ls /Library/Frameworks/Python.framework/Versions 2>/dev/null || true
           test ! -e /Applications/Obsidian.app && test ! -e /Applications/Cursor.app
       - name: First run installs everything
         run: |
           export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
-          printf '\n' | bash install/mac.sh 2>&1 | tee first.txt
+          yes '' | bash install/mac.sh 2>&1 | tee first.txt
           test "${PIPESTATUS[1]}" -eq 0
       - name: Every tool is there and runs
         run: |
@@ -47,7 +51,7 @@ jobs:
       - name: Second run skips every tool
         run: |
           export PATH="$HOME/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-          printf '\n' | bash install/mac.sh 2>&1 | tee second.txt
+          yes '' | bash install/mac.sh 2>&1 | tee second.txt
           test "${PIPESTATUS[1]}" -eq 0
           n=$(grep -c "Skipping" second.txt); echo "skipped $n"; test "$n" -eq 6
 
@@ -64,7 +68,7 @@ jobs:
       - name: First run installs everything through Homebrew, as before
         run: |
           export PATH=/usr/bin:/bin:/usr/sbin:/sbin
-          printf '\n' | bash install/mac.sh 2>&1 | tee first.txt
+          yes '' | bash install/mac.sh 2>&1 | tee first.txt
           test "${PIPESTATUS[1]}" -eq 0
           grep -q "Homebrew installed" first.txt
           ! grep -q "Intel Mac found" first.txt
