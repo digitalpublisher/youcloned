@@ -237,6 +237,20 @@ test('every conversation in the clone folder gets the rules file', async ($, on)
   expect(out.blocks[1].text).toMatch(/My YouCloned rules\nPat/)
 })
 
+test('every clone, Mac or PC, is told to say when it is time to change chats and how to hand off', async ($, on) => {
+  sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# My YouCloned rules\nPat' } })
+  on('prompt.context', ($, e) => ({ blocks: e.blocks }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/work' })
+  const text = (await $.prompt.context({ blocks: [] })).blocks.find(b => b.name === 'youcloned').text
+  expect(text).toMatch(/My YouCloned rules\nPat[\s\S]*Rules every YouCloned clone follows/)
+  expect(text).toContain('"Hey, it\'s time to change chats."')
+  expect(text).toMatch(/never in the middle of one/)
+  for (const part of ['Start here', 'newest first', "what's open", 'every file you touched', 'the Done list']) expect(text).toContain(part)
+  expect(text).toContain('handoffs/<project>/')
+  expect(text).toMatch(/latest project chat/)
+  expect(text).toContain('Automatic chat switching: off')
+})
+
 test('the clone folder conversation is told which YouCloned version is running', async ($, on) => {
   sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# My YouCloned rules\nPat' },
     read: (path) => path.endsWith('/.claude-plugin/plugin.json') ? JSON.stringify({ name: 'youcloned', version: '9.8.7' }) : undefined })
