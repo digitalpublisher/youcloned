@@ -25,16 +25,17 @@ function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: 
   // This test host is a Mac, where the engine reads a Windows path as relative to the working folder; the
   // stubs see the path the add-on asked for.
   const fsPath = (p: string) => { const m = /[A-Za-z]:[\\/]/.exec(p); return m ? p.slice(m.index) : p }
+  const _fsPath = fsPath; const fsPathLog = (p: string) => { if ((globalThis as any).process?.platform === 'win32') console.log('FSPATH ' + JSON.stringify(p) + ' -> ' + JSON.stringify(_fsPath(p))); return _fsPath(p) }
   const store = new Map<string, unknown>(opts.project ? [['project', opts.project]] : [])
   const clock = mock.clock(on)
   on('env.get', ($, e) => ({ value: opts.env ? opts.env[e.name] : e.name === 'HOME' ? '/Users/pat' : undefined }))
   on('store.get', ($, e) => ({ value: store.get(e.key) }))
   on('store.set', ($, e) => { store.set(e.key, e.value); return { value: undefined } })
-  on('fs.exists', ($, e) => { const path = fsPath(e.path); return { value: opts.exists?.(path) ?? (path in (opts.files || {}) || path.endsWith('/skills')) } })
+  on('fs.exists', ($, e) => { const path = fsPathLog(e.path); return { value: opts.exists?.(path) ?? (path in (opts.files || {}) || path.endsWith('/skills')) } })
   on('fs.list', ($, e) => ({ value: opts.dirs?.[fsPath(e.path)] ? opts.dirs[fsPath(e.path)].map(name => ({ name, kind: 'dir', size: 0, mtimeMs: 0, isLink: false })) : e.path.endsWith('/skills') ? [{ name: 'setup', kind: 'dir', size: 0, mtimeMs: 0, isLink: false }, { name: 'notes.txt', kind: 'file', size: 1, mtimeMs: 0, isLink: false }]
     : (opts.lists?.[fsPath(e.path)] || []).map(name => ({ name, kind: 'file', size: 1, mtimeMs: 0, isLink: false })) }))
   on('fs.read', ($, e) => ({ value: opts.read?.(fsPath(e.path), e.as) ?? (opts.files || {})[fsPath(e.path)] ?? (e.path.endsWith('SKILL.md') ? 'description: Set up YouCloned. More.' : 'crew prompt') }))
-  on('fs.write', ($, e) => { writes.set(fsPath(e.path), e.text); return { value: undefined } })
+  on('fs.write', ($, e) => { writes.set(fsPathLog(e.path), e.text); return { value: undefined } })
   const sk = opts.skillKey === undefined ? SK : opts.skillKey
   on('tool.list', () => ({ value: sk && opts.listed !== false ? skTools(sk) : [] }))
   on('mcp.call', ($, e) => {
