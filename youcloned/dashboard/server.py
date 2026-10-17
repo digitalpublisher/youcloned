@@ -13,7 +13,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(os.path.expanduser("~"), ".youcloned")
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 4600
 RELAY = "http://127.0.0.1:8771/say"
-TALK = "Talk to Isaac was pressed in YouCloned. Start a voice conversation now: call converse with a short hello and listen."
+TALK = "Talk to Isaac was pressed in YouCloned. Start a voice conversation now: call converse with a short hello and listen (listen_duration_min 8, listen_duration_max 600, so a short pause never ends their turn)."
 
 
 class Handler(SimpleHTTPRequestHandler):

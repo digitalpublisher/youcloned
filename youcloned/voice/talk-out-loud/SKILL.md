@@ -14,7 +14,7 @@ Every listening turn uses these settings:
 
 - `wait_for_response`: true
 - `listen_duration_max`: 600 (never cut the owner off; they think out loud in long runs)
-- `listen_duration_min`: 4
+- `listen_duration_min`: 8 (a short pause to think never ends their turn)
 - `vad_aggressiveness`: 0 (the most patient setting)
 
 ## The rhythm

@@ -16,13 +16,17 @@ if [ ! -S "$SOCK" ] || ! /usr/sbin/lsof "$SOCK" >/dev/null 2>&1; then
   exit 0
 fi
 
+# One JSON line straight to the voice's control socket, so the key works in under half a second
+# (the voicemode command alone takes a fifth of a second just to start). Falls back to it if the direct send fails.
+send() { printf '%s\n' "$1" | /usr/bin/nc -U -w 1 "$SOCK" >> "$LOG" 2>&1; }
+
 case "$1" in
   next)
-    "$VM" control skip-forward >> "$LOG" 2>&1
+    send '{"command": "skip_forward"}' || "$VM" control skip-forward >> "$LOG" 2>&1
     note "next: cut off or turn ended"
     chime Tink ;;
   stop)
-    "$VM" control stop --hint switch-to-text >> "$LOG" 2>&1
+    send '{"command": "stop", "hint": "switch-to-text"}' || "$VM" control stop --hint switch-to-text >> "$LOG" 2>&1
     note "stop: voice off, back to text"
     chime Pop ;;
   *)

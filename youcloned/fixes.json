@@ -21,11 +21,12 @@
       "fix": "Control while the clone speaks stops the voice and opens the listen in under half a second",
       "jon_file": "~/.local/isaac/voice/isaac_keys.sh",
       "card": "bnsnstack#303",
-      "buyer_file": "voice/setup-keys.sh",
+      "buyer_file": "voice/clone-keys.sh",
       "buyers": "yes",
-      "mac": "to-port",
-      "pc": "to-port",
-      "check": null
+      "mac": "in-pr",
+      "pc": "in-pr",
+      "check": null,
+      "note": "Ported Oct 17: Ctrl+Opt+N / Ctrl+Opt+S send one JSON line straight to the voice control socket (0.2 to 0.4s in the fake-socket test), with the voicemode command as fallback. PC already sent straight to the socket (pc_voice.py COMMANDS)."
     },
     {
       "id": "voice-02",
@@ -34,10 +35,11 @@
       "jon_file": "~/.local/isaac/voice/vm_phase.py",
       "card": "bnsnstack#303",
       "buyer_file": "voice/setup-keys.sh",
-      "buyers": "yes",
-      "mac": "to-port",
-      "pc": "to-port",
-      "check": null
+      "buyers": "jon",
+      "mac": "n/a",
+      "pc": "n/a",
+      "check": null,
+      "note": "Not needed for buyers (Oct 17): the bug was Jon's one Control key guessing the phase and reading a long listen as idle. Buyer keys never read the phase; Ctrl+Opt+N always ends the turn and sends the words."
     },
     {
       "id": "voice-03",
@@ -146,11 +148,12 @@
       "fix": "Listens use listen_duration_min 8, so a short pause doesn't close your turn",
       "jon_file": "Voice Command converse parameter",
       "card": "bnsnstack#318",
-      "buyer_file": "Talk prompt (register.js) and voicemode.env defaults",
+      "buyer_file": "voice/talk-out-loud/SKILL.md; hooks/register.js and dashboard/server.py (Talk prompt)",
       "buyers": "yes",
-      "mac": "to-port",
-      "pc": "to-port",
-      "check": null
+      "mac": "in-pr",
+      "pc": "in-pr",
+      "check": null,
+      "note": "Ported Oct 17: the talk skill says listen_duration_min 8 (was 4) and the Talk button prompt names 8 and 600. VoiceMode 8.12.0 has no env setting for the minimum, so it lives in the instructions."
     },
     {
       "id": "voice-14",
