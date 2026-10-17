@@ -67,7 +67,7 @@ select
 ```
 
 - `has_schema` is false: nothing is there yet. Go to Step 3.
-- `library_tables` is 4: a library from an earlier setup is already in this project. Tell the buyer: "You already have a YouCloned library in this project. I'll keep everything in it and just bring it up to date." Then go on. Step 3 never deletes anything.
+- `library_tables` is 4: a library from an earlier setup is already in this project. Tell the buyer: "You already have a YouCloned library in this project. I'll keep everything in it and just bring it up to date." Then do Step 3 and Step 4 anyway: they bring the tables and the library function up to date and never delete anything. If the library already holds sources, tell the buyer how many (call stats after Step 6) and ask whether they are all theirs before feeding more.
 - Anything else (a `youcloned` section exists but it is not our library, or only part of it): stop. Tell the buyer: "This project already has a section called youcloned that I didn't make, so I won't touch it." Offer another of their projects or the free one (Path B).
 
 Keep the project id for every step below.

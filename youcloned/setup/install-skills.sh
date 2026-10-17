@@ -67,7 +67,7 @@ if [ -f "$SKILLS/youcloned-setup/SKILL.md" ]; then
   say "Moved the old YouCloned setup skill aside (it clashes with this setup)."
 fi
 
-new=0; updated=0; kept=0
+new=0; updated=0; kept=0; kept_names=""
 for d in "$work/stage/skills"/*/; do
   [ -d "$d" ] || continue
   name=$(basename "$d")
@@ -76,7 +76,7 @@ for d in "$work/stage/skills"/*/; do
   # A pack skill the owner changed is kept: the old copy goes to ~/.youcloned/skills-backup before the refresh.
   if [ -d "$SKILLS/$name" ] && ! diff -rq "$SKILLS/$name" "$d" >/dev/null 2>&1; then
     keep="$HOME/.youcloned/skills-backup/$(date +%Y%m%d-%H%M%S)"
-    mkdir -p "$keep" && cp -R "$SKILLS/$name" "$keep/$name" && kept=$((kept + 1))
+    mkdir -p "$keep" && cp -R "$SKILLS/$name" "$keep/$name" && kept=$((kept + 1)) && kept_names="${kept_names:+$kept_names, }$name"
   fi
   rm -rf "$SKILLS/$name.youcloned-new"
   cp -R "$d" "$SKILLS/$name.youcloned-new"
@@ -85,5 +85,5 @@ for d in "$work/stage/skills"/*/; do
 done
 
 say "Installed $new new skills and refreshed $updated. Your own skills were left as they were."
-[ "$kept" -gt 0 ] && say "You had changed $kept of the pack's skills, so a copy of each is saved in ~/.youcloned/skills-backup before the refresh."
+[ "$kept" -gt 0 ] && say "You had changed $kept of the pack's skills ($kept_names), so a copy of each is saved in ~/.youcloned/skills-backup before the refresh."
 if check; then say "ALL SKILLS READY"; else say "Some skills from the list are still missing (above). Run this again."; exit 1; fi

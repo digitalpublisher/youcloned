@@ -80,7 +80,7 @@ try {
     Write-Host 'Moved the old YouCloned setup skill aside (it clashes with this setup).'
   }
 
-  $New = 0; $Updated = 0; $Kept = 0
+  $New = 0; $Updated = 0; $Kept = 0; $KeptNames = @()
   foreach ($d in Get-ChildItem -LiteralPath $From -Directory) {
     if ($d.Name.StartsWith('.') -or $d.Name -eq 'youcloned-setup') { continue }
     $Target = Join-Path $Skills $d.Name
@@ -93,7 +93,7 @@ try {
         $Keep = Join-Path $env:USERPROFILE ('.youcloned\skills-backup\' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
         New-Item -ItemType Directory -Force -Path $Keep | Out-Null
         Copy-Item -LiteralPath $Target -Destination (Join-Path $Keep $d.Name) -Recurse
-        $Kept++
+        $Kept++; $KeptNames += $d.Name
       }
     } else { $New++ }
     $Tmp = $Target + '.youcloned-new'
@@ -103,7 +103,7 @@ try {
     Move-Item -LiteralPath $Tmp -Destination $Target
   }
   Write-Host "Installed $New new skills and refreshed $Updated. Your own skills were left as they were."
-  if ($Kept -gt 0) { Write-Host "You had changed $Kept of the pack's skills, so a copy of each is saved in .youcloned\skills-backup in your user folder before the refresh." }
+  if ($Kept -gt 0) { Write-Host "You had changed $Kept of the pack's skills ($($KeptNames -join ', ')), so a copy of each is saved in .youcloned\skills-backup in your user folder before the refresh." }
   if (Test-Pack) { Write-Host 'ALL SKILLS READY'; exit 0 }
   Write-Host 'Some skills from the list are still missing (above). Run this again.'
   exit 1

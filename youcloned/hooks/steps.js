@@ -80,7 +80,7 @@ export function stepText(step, ctx) {
         'Before the first question, look in that folder for what they already wrote about themselves (a CLAUDE.md or YOUCLONED.md, an "about me" or business note, writing samples). If you find any, tell them in one sentence what you found, fill in every answer it already gives, and ask only what is missing; never delete or rewrite their CLAUDE.md. When save_setup says Saved, call setup_next.'
     case 'skills':
       return 'Run with Bash: ' + sh('install-skills') + '. It downloads Jon\'s starter skills pack from YouCloned, checks it, and puts each skill where Claude finds it. ' +
-        'Tell them how many skills it installed, then call setup_next.'
+        'Tell them how many skills it installed. If it says it saved copies of skills they had changed, tell them which ones, that their copy is in ~/.youcloned/skills-backup, that the pack\'s newer version is the one in use now, and offer to put their change back into the new version. Then call setup_next.'
     case 'backup':
       return TWO_PATHS + 'Ask: do you already have a GitHub account (and maybe a private repository you want to use), or should I walk you through the free one I recommend? ' +
         'If they need one, have them sign up at github.com (free plan) and come back. If they already have a PRIVATE repository they want to use, add its address as the second argument to the command below; a public one is refused. ' +
@@ -127,7 +127,7 @@ export function setupText(status, skipped, ctx) {
   const n = STEPS.indexOf(next) + 1
   return 'YouCloned setup: ' + p.done + ' of ' + p.total + ' steps done.\n' + list +
     '\n\nNext is step ' + n + ', ' + next.title + ': ' + next.why + '\n' +
-    (p.done > 0 && p.done < p.total ? 'If this is the first setup_next of this chat, start by telling them in one or two sentences which steps they already have (the ones marked done), that you keep everything they already set up and skip those, and that you only do what is missing.\n' : '') +
+    (p.done > 0 && p.done < p.total || Object.keys(ctx.detail || {}).length ? 'If this is the first setup_next of this chat, start by telling them in one or two sentences everything they already have: the steps marked done, and anything in brackets on the list above. Say you keep all of it, skip what is done, and only add what is missing.\n' : '') +
     'Tell them in one short sentence which step this is and why it matters, then do it:\n' + stepText(next, ctx) +
     '\n\nDo only this step now. Never skip ahead, and never call a step done yourself: setup_next checks it on this computer.'
 }

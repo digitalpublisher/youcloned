@@ -450,6 +450,7 @@ async function checkSetupSteps($) {
   const folder = await cloneFolder($)
   const root = $.plugin.root
   const st = {}
+  const detail = {} // what is already there for a step not done yet, so the clone can name it (Jon, Oct 17)
   // tools
   if (onMac()) {
     if (await $.fs.exists(root + '/setup/install-tools.sh')) {
@@ -464,6 +465,7 @@ async function checkSetupSteps($) {
     st.tools = (await runWith($, ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', root + '\\setup\\install-tools.ps1', '-Check'], { timeoutMs: 60000 })).exitCode === 0
   }
   st.home = !!folder && ((await $.fs.exists(folder + '/.youcloned-folder')) || (await $.fs.exists(folder + '/' + RULES_NAME)))
+  if (!st.home && (await $.fs.exists(nightFolder() + sep() + 'CLAUDE.md'))) detail.home = 'an Obsidian Vault with a CLAUDE.md is already at ' + nightFolder() + ', offer to use it'
   st.protection = (await $.fs.exists(home + '/.youcloned/git-hooks/pre-commit')) && (await $.fs.exists(home + '/.youcloned/lib/secret-rules.mjs'))
   if (st.protection) {
     // --verify plants a fake key in a scratch repository and passes only when the commit is refused.
@@ -481,7 +483,9 @@ async function checkSetupSteps($) {
   try {
     const names = (await $.fs.read(root + '/skills-pack.txt')).split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'))
     st.skills = names.length > 0
-    for (const n of names) { if (!(await $.fs.exists(home + '/.claude/skills/' + n + '/SKILL.md'))) { st.skills = false; break } }
+    let have = 0
+    for (const n of names) { if (await $.fs.exists(home + '/.claude/skills/' + n + '/SKILL.md')) have++; else st.skills = false }
+    if (!st.skills && have) detail.skills = have + ' of the ' + names.length + ' already on this computer, kept'
     if (await $.fs.exists(home + '/.claude/skills/youcloned-setup/SKILL.md')) st.skills = false // the old setup skill, retired by install-skills
   } catch {}
   st.backup = false
@@ -527,7 +531,7 @@ async function checkSetupSteps($) {
     steps: STEPS.map(s => ({ id: s.id, title: s.title, why: s.why, done: !!st[s.id], skipped: !st[s.id] && skipped.includes(s.id) })),
     next: next ? next.id : null,
   }
-  return { st, skipped: new Set(skipped), folder }
+  return { st, skipped: new Set(skipped), folder, detail }
 }
 
 async function setupNext($, e) {
@@ -547,7 +551,7 @@ async function setupNext($, e) {
     if (!s.includes(e.skip)) s.push(e.skip)
     await $.store.set('skipped', s)
   }
-  const { st, skipped, folder } = await checkSetupSteps($)
+  const { st, skipped, folder, detail } = await checkSetupSteps($)
   await writeState($)
   $.ui.invalidate('ui.render')
   const f = folder || nightFolder()
@@ -555,7 +559,7 @@ async function setupNext($, e) {
   if (next && next.id === 'feed') { try { await registerHelpers($) } catch (err) { $.ui.log('feed-me helpers not registered: ' + String(err).slice(0, 200)) } }
   return setupText(st, skipped, {
     root: $.plugin.root, home, folder: f, mac: onMac(), defaultFolder: nightFolder(),
-    needsSkillKey: NEEDS_SKILLKEY, envFile: f + sep() + '.env', scratch: home + sep() + '.youcloned' + sep() + 'feeding',
+    needsSkillKey: NEEDS_SKILLKEY, envFile: f + sep() + '.env', detail, scratch: home + sep() + '.youcloned' + sep() + 'feeding',
     python: next && next.id === 'feed' && onMac() ? await findPython($) : '',
   })
 }
@@ -1290,8 +1294,14 @@ export function register(on) {
     return next(e)
   })
 
-  // The crew runs from the pane, the command and the schedule, never by Claude's own choice.
-  on('agent.offer', { agent: /^youcloned:/ }, async () => ({ isOffered: false }))
+  // The crew runs from the pane, the command and the schedule, never by Claude's own choice. The feed-me helpers
+  // (librarian, wiki writer) are the exception: the feed-me skill starts them with the Agent tool, behind their own
+  // gate in helpers.js (clean-Mac run 4, Oct 17: hiding them too gave "Agent type 'youcloned:librarian' not found").
+  on('agent.offer', { agent: /^youcloned:/ }, async ($, e, next) => {
+    const name = String((e && (e.agent || e.agentType || e.type)) || '').replace(/^youcloned:/, '')
+    if (HELPERS.some(h => h.name === name)) return next(e)
+    return { isOffered: false }
+  })
 
   on('session.start', async ($, e, next) => {
     try { sessionStartedAt = await $.clock.now() } catch {}

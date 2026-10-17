@@ -32,6 +32,8 @@ Ask in one short message, as a list they can answer in a few words:
 - Do you have books, courses, workbooks, slides, PDFs or Word files?
 - Do you have recorded videos or calls on this computer (course videos, webinars, coaching calls)?
 
+Before you ask, look in their clone folder for notes they already wrote (about them, their business, their offers, writing samples, earlier newsletters) and offer to feed those too, naming what you found.
+
 Then say which you'd start with and why, in one or two sentences: sent email first when they use Gmail (thousands of examples of how they write to people), then their website and sales pages, then their files, then YouTube, and recordings last because they transcribe overnight on this computer. Start with what they have and say yes to.
 
 ## Make the Feed me folder
