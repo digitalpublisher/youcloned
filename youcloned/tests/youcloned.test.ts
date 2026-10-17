@@ -3,7 +3,8 @@ import { judge } from '../hooks/gate.js'
 import { claimProblems } from '../hooks/claims.js'
 import { checkSetup } from '../hooks/rules.js'
 import { setupText, STEPS } from '../hooks/steps.js'
-import { helperJudge, feedCommandReason, parseAgent } from '../hooks/helpers.js'
+import { helperJudge, helperLinkReason, feedCommandReason, parseAgent } from '../hooks/helpers.js'
+import { normalize } from '../hooks/gate.js'
 
 const PROJECT = '/Users/pat/YouCloned'
 const SAMPLE = 'Hey friend, '.repeat(40)
@@ -23,7 +24,53 @@ const SK = '4a62845f-77ec-431f-8b76-2d42902a60fb'
 const skTools = (server = SK) => ['list_skills', 'start_skill', 'run_skill', 'word_balance'].map(t => ({ name: 'mcp__' + server + '__' + t, description: '', mcp: true }))
 const fromSk = (body: string) => ({ content: [{ type: 'text', text: 'You are short on words.\n\n<<<YOUCLONED>>>\n' + body + '\n<<<END YOUCLONED>>>\n\nWhen you have everything the steps ask for, call run_skill with skill "x".' }], isError: false })
 
-function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[]) => unknown, toasts?: string[], lists?: Record<string, string[]>, cwd?: string, root?: string, skillKey?: string | null, mcpCalls?: { server: string, tool: string, args: Record<string, unknown> }[], registered?: { name: string, prompt: string, model?: string, tools?: readonly string[] }[], extraTools?: string[], owns?: (slug: string) => boolean, opened?: string[], browser?: string[], toolCall?: (e: any) => unknown, read?: (path: string) => string | undefined, exists?: (path: string) => boolean | undefined, mcpThrow?: string, logs?: string[], listed?: boolean, appOwned?: boolean, connected?: () => boolean } = {}) {
+// A small file system for the link tests: 'file', 'dir', { link: where it points } or { size, mtimeMs } (a file) by full path.
+// Folders above any entry are there too. stat follows links the way the engine's $.fs.stat with resolve does.
+type Node = 'file' | 'dir' | { link: string } | { size: number, mtimeMs: number }
+function fakeFs(tree: Record<string, Node>) {
+  const isLinkAt = (p: string) => { const n = tree[p]; return typeof n === 'object' && 'link' in n }
+  const there = (p: string) => p === '/' || (p in tree && !isLinkAt(p)) || Object.keys(tree).some(k => k.startsWith(p + '/'))
+  const follow = (p: string, depth = 0): string | null => {
+    const parts = p.split('/').filter(Boolean)
+    let cur = ''
+    for (let i = 0; i < parts.length; i++) {
+      cur += '/' + parts[i]
+      const n = tree[cur]
+      if (typeof n === 'object' && 'link' in n) {
+        if (depth > 20) return null
+        const to = n.link.startsWith('/') ? n.link : cur.replace(/\/[^/]+$/, '') + '/' + n.link
+        return follow(normalize(to + '/' + parts.slice(i + 1).join('/')) as string, depth + 1)
+      }
+    }
+    return cur || '/'
+  }
+  const missing = () => Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' })
+  return {
+    async stat(path: string) {
+      const p = normalize(path) as string
+      const lands = follow(p)
+      if (!lands || !there(lands)) {
+        if (isLinkAt(p)) return { kind: 'other', size: 0, mtimeMs: 0, isLink: true }
+        throw missing()
+      }
+      const n = tree[lands]
+      const kind = n === 'file' || (typeof n === 'object' && 'size' in n) ? 'file' : 'dir'
+      const size = typeof n === 'object' && 'size' in n ? n.size : 1
+      const mtimeMs = typeof n === 'object' && 'mtimeMs' in n ? n.mtimeMs : 1000 + Object.keys(tree).indexOf(lands)
+      return { kind, size, mtimeMs, isLink: isLinkAt(p), realPath: lands }
+    },
+    async list(path: string) {
+      const d = follow(normalize(path) as string) as string
+      const names = new Set(Object.keys(tree).filter(k => k.startsWith(d + '/')).map(k => k.slice(d.length + 1).split('/')[0]))
+      return [...names].map(name => {
+        const k = d + '/' + name
+        return { name, kind: isLinkAt(k) ? 'other' : there(k) && tree[k] !== 'file' && !(typeof tree[k] === 'object') ? 'dir' : 'file', size: 1, mtimeMs: 0, isLink: isLinkAt(k) }
+      })
+    },
+  }
+}
+
+function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[]) => unknown, toasts?: string[], lists?: Record<string, string[]>, cwd?: string, root?: string, skillKey?: string | null, mcpCalls?: { server: string, tool: string, args: Record<string, unknown> }[], registered?: { name: string, prompt: string, model?: string, tools?: readonly string[] }[], extraTools?: string[], owns?: (slug: string) => boolean, opened?: string[], browser?: string[], toolCall?: (e: any) => unknown, read?: (path: string) => string | undefined, exists?: (path: string) => boolean | undefined, mcpThrow?: string, logs?: string[], listed?: boolean, appOwned?: boolean, connected?: () => boolean, fsx?: ReturnType<typeof fakeFs> } = {}) {
   const writes = new Map<string, string>()
   const store = new Map<string, unknown>(opts.project ? [['project', opts.project]] : [])
   const clock = mock.clock(on)
@@ -35,6 +82,8 @@ function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: 
     : (opts.lists?.[e.path] || []).map(name => ({ name, kind: 'file', size: 1, mtimeMs: 0, isLink: false })) }))
   on('fs.read', ($, e) => ({ value: opts.read?.(e.path) ?? (opts.files || {})[e.path] ?? (e.path.endsWith('SKILL.md') ? 'description: Set up YouCloned. More.' : 'crew prompt') }))
   on('fs.write', ($, e) => { writes.set(e.path, e.text); return { value: undefined } })
+  const fsx = opts.fsx || fakeFs({})
+  on('fs.stat', async ($, e) => fsx.stat(e.path).then(value => ({ value }), (err: Error) => ({ deny: err.message })))
   const sk = opts.skillKey === undefined ? SK : opts.skillKey
   on('tool.list', () => ({ value: [...(sk && opts.listed !== false ? skTools(sk) : []), ...(opts.extraTools || []).map(name => ({ name, description: '', mcp: true }))] }))
   on('mcp.call', ($, e) => {
@@ -1160,6 +1209,110 @@ test('the helpers\' gate keeps every path, glob and feed.py argument inside thei
   expect(helperJudge('wiki-writer', run(feed + "wiki-put notes 'Notes' \"" + PROJECT + "/YOUCLONED.md\"" + tail), ctx)).toMatch(/outside/)
   expect(helperJudge('wiki-writer', run(feed + "wiki-put env 'Env' \"" + PROJECT + "/Library/../.env\"" + tail), ctx)).not.toBe(null)
   expect(helperJudge('wiki-writer', run(feed + "wiki-put offers/garden 'Garden' \"" + PROJECT + "/Library/offers/garden.md\"" + tail), ctx)).toBe(null)
+})
+
+test('Windows spellings of an env file count as the env file, and stream, short-name and trailing-dot tricks are refused', () => {
+  const ctx = { feed: '/plug/youcloned/library/feed.py', scratch: '/Users/pat/.youcloned/feeding', library: PROJECT + '/Library', folder: PROJECT }
+  const feedMe = PROJECT + '/Feed me'
+  const run = (cmd: string) => ({ tool: 'Bash', command: cmd })
+  const feed = 'python3 /plug/youcloned/library/feed.py '
+  const tail = ' --env "' + PROJECT + '/.env" --helper'
+  // Codex review 2: ".env." and ".env:stream" passed the spelling checks.
+  for (const name of ['.env.', '.env ', '.env:stream', '.env::$DATA', '.ENV', '.Env.Local.', '.env.local:x']) {
+    expect(helperJudge('librarian', { tool: 'Read', file_path: feedMe + '/' + name }, ctx)).toMatch(/env file/)
+    expect(helperJudge('wiki-writer', { tool: 'Write', file_path: PROJECT + '/Library/' + name }, ctx)).toMatch(/env file/)
+    expect(helperJudge('wiki-writer', { tool: 'Edit', file_path: PROJECT + '/Library/' + name }, ctx)).toMatch(/env file/)
+  }
+  expect(helperJudge('librarian', { tool: 'Read', file_path: feedMe + '/notes.md:x' }, ctx)).toMatch(/colon/)
+  expect(helperJudge('wiki-writer', { tool: 'Edit', file_path: PROJECT + '/Library/index.md:hidden' }, ctx)).toMatch(/colon/)
+  expect(helperJudge('librarian', { tool: 'Read', file_path: feedMe + '/ENV~1' }, ctx)).toMatch(/short Windows name/)
+  expect(helperJudge('wiki-writer', { tool: 'Write', file_path: PROJECT + '/Library/NOTES~1.MD' }, ctx)).toMatch(/short Windows name/)
+  expect(helperJudge('librarian', { tool: 'Read', file_path: feedMe + '/notes.md.' }, ctx)).toMatch(/dot or a space/)
+  expect(helperJudge('librarian', { tool: 'Read', file_path: feedMe + '/id_rsa.' }, ctx)).toMatch(/key file/)
+  expect(helperJudge('librarian', { tool: 'Glob', pattern: '**/*.md:x', path: feedMe }, ctx)).toMatch(/colon/)
+  expect(helperJudge('librarian', run(feed + 'doc "' + feedMe + '/.env."' + tail), ctx)).toMatch(/env file/)
+  expect(helperJudge('librarian', run(feed + 'doc "' + feedMe + '/.env:stream"' + tail), ctx)).toMatch(/env file/)
+  expect(helperJudge('librarian', run(feed + 'doc "' + feedMe + '/ENV~1"' + tail), ctx)).toMatch(/short Windows name/)
+  expect(helperJudge('wiki-writer', run(feed + "wiki-put n 'N' \"" + PROJECT + "/Library/n.md:x\"" + tail), ctx)).toMatch(/colon/)
+  const win = { feed: 'C:\\Users\\pat\\yc\\library\\feed.py', scratch: 'C:\\Users\\pat\\.youcloned\\feeding', library: 'C:\\Users\\pat\\YouCloned\\Library', folder: 'C:\\Users\\pat\\YouCloned' }
+  expect(helperJudge('librarian', { tool: 'Read', file_path: 'C:\\Users\\pat\\YouCloned\\Feed me\\.ENV.' }, win)).toMatch(/env file/)
+  expect(helperJudge('librarian', { tool: 'Read', file_path: 'C:\\Users\\pat\\YouCloned\\Feed me\\notes.md' }, win)).toBe(null)
+  expect(helperJudge('librarian', { tool: 'Read', file_path: 'C:\\Users\\pat\\YouCloned\\Feed me\\notes.md:x' }, win)).toMatch(/colon/)
+  expect(helperJudge('librarian', { tool: 'Read', file_path: feedMe + '/notes.md' }, ctx)).toBe(null)
+})
+
+test('the helpers\' gate follows links: a link to the env file, or anywhere, is refused for Read, Edit, Write, Grep and feed.py', async () => {
+  const ctx = { feed: '/plug/youcloned/library/feed.py', scratch: '/Users/pat/.youcloned/feeding', library: PROJECT + '/Library', folder: PROJECT }
+  const feedMe = PROJECT + '/Feed me'
+  const lib = PROJECT + '/Library'
+  const run = (cmd: string) => ({ tool: 'Bash', command: cmd })
+  const feed = 'python3 /plug/youcloned/library/feed.py '
+  const tail = ' --env "' + PROJECT + '/.env" --helper'
+  const fsx = fakeFs({
+    [PROJECT + '/.env']: { size: 120, mtimeMs: 77 },
+    [feedMe + '/book.md']: 'file',
+    [feedMe + '/notes.md']: { link: '../.env' },
+    [feedMe + '/twin.md']: { size: 120, mtimeMs: 77 },
+    [feedMe + '/gone.md']: { link: '../nothing.md' },
+    [feedMe + '/inside.md']: { link: 'book.md' },
+    [feedMe + '/away']: { link: '/Users/pat' },
+    [feedMe + '/sub/a.md']: 'file',
+    [lib + '/index.md']: 'file',
+    [lib + '/notes.md']: { link: '../.env' },
+    [lib + '/offers']: { link: '..' },
+    [lib + '/new.md']: { link: '../.env2' },
+    '/Users/pat/.youcloned/feeding/m1.txt': 'file',
+    '/Users/pat/private.md': 'file',
+  })
+  const gate = async (name: string, call: Record<string, unknown>) => helperJudge(name, call, ctx) || helperLinkReason(name, call, ctx, fsx)
+  // Codex review 2: "Feed me/notes.md -> ../.env" let the librarian Read the env file.
+  expect(await gate('librarian', { tool: 'Read', file_path: feedMe + '/notes.md' })).toMatch(/link/)
+  // Codex review 2: "Library/notes.md -> ../.env" let the wiki writer Edit it.
+  expect(await gate('wiki-writer', { tool: 'Edit', file_path: lib + '/notes.md' })).toMatch(/link/)
+  expect(await gate('wiki-writer', { tool: 'Write', file_path: lib + '/notes.md' })).toMatch(/link/)
+  expect(await gate('wiki-writer', { tool: 'Write', file_path: lib + '/offers/YOUCLONED.md' })).toMatch(/link/)
+  expect(await gate('wiki-writer', { tool: 'Write', file_path: lib + '/new.md' })).toMatch(/link/)
+  expect(await gate('librarian', { tool: 'Read', file_path: feedMe + '/away/private.md' })).toMatch(/link/)
+  expect(await gate('librarian', { tool: 'Read', file_path: feedMe + '/inside.md' })).toMatch(/link/)
+  expect(await gate('librarian', { tool: 'Read', file_path: feedMe + '/gone.md' })).toMatch(/leads nowhere/)
+  expect(await gate('librarian', { tool: 'Read', file_path: feedMe + '/twin.md' })).toMatch(/second name for the env file/)
+  expect(await gate('librarian', { tool: 'Grep', pattern: 'x', path: feedMe, glob: '**/*.md', output_mode: 'content' })).toMatch(/is a link/)
+  expect(await gate('librarian', { tool: 'Grep', pattern: 'x', path: feedMe + '/notes.md', output_mode: 'content' })).toMatch(/link/)
+  expect(await gate('librarian', run(feed + 'doc "' + feedMe + '/notes.md"' + tail))).toMatch(/link/)
+  expect(await gate('librarian', run(feed + "add --kind note --ref x --title 'x' --file \"" + feedMe + "/notes.md\"" + tail))).toMatch(/link/)
+  expect(await gate('wiki-writer', run(feed + "wiki-put n 'N' \"" + lib + "/notes.md\"" + tail))).toMatch(/link/)
+  // Plain files, new files and searches with no link in them still pass.
+  expect(await gate('librarian', { tool: 'Read', file_path: feedMe + '/book.md' })).toBe(null)
+  expect(await gate('librarian', { tool: 'Read', file_path: feedMe + '/sub/a.md' })).toBe(null)
+  expect(await gate('librarian', { tool: 'Grep', pattern: 'x', path: feedMe + '/sub', glob: '**/*.md', output_mode: 'content' })).toBe(null)
+  expect(await gate('librarian', { tool: 'Write', file_path: '/Users/pat/.youcloned/feeding/m2.txt' })).toBe(null)
+  expect(await gate('librarian', run(feed + "add --kind email --ref g:1 --title 'x' --file \"/Users/pat/.youcloned/feeding/m1.txt\" --remove" + tail))).toBe(null)
+  expect(await gate('wiki-writer', { tool: 'Edit', file_path: lib + '/index.md' })).toBe(null)
+  expect(await gate('wiki-writer', { tool: 'Write', file_path: lib + '/people/pat.md' })).toBe(null)
+  expect(await gate('wiki-writer', run(feed + "wiki-put index 'Index' \"" + lib + "/index.md\"" + tail))).toBe(null)
+  // A clone folder that itself sits behind a link (another drive) is fine: only links inside the helper's folders count.
+  const moved = fakeFs({ '/Users/pat/YouCloned': { link: '/Volumes/Data/YouCloned' }, '/Volumes/Data/YouCloned/Feed me/book.md': 'file', '/Volumes/Data/YouCloned/.env': 'file' })
+  expect(await helperLinkReason('librarian', { tool: 'Read', file_path: feedMe + '/book.md' }, ctx, moved)).toBe(null)
+})
+
+test('a running helper is held to the link check: Read and Edit through a link to the env file are refused', async ($, on) => {
+  const vault = '/Users/pat/Documents/Obsidian Vault'
+  const agents = [{ id: 'L1', type: 'youcloned:librarian', description: '', status: 'running' }, { id: 'W1', type: 'youcloned:wiki-writer', description: '', status: 'running' }]
+  const fsx = fakeFs({
+    [vault + '/.env']: 'file',
+    [vault + '/Feed me/notes.md']: { link: '../.env' },
+    [vault + '/Feed me/book.md']: 'file',
+    [vault + '/Library/notes.md']: { link: '../.env' },
+    [vault + '/Library/index.md']: 'file',
+  })
+  sessionStubs(on, { project: vault, cwd: vault, agents, ...helperFiles, fsx, files: { [vault + '/YOUCLONED.md']: '# rules' } })
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: vault })
+  const read = await $.tool.call({ tool: 'Read', file_path: vault + '/Feed me/notes.md', agentId: 'L1' })
+  expect(read.deny).toMatch(/safety gate refused.*link/)
+  const edit = await $.tool.call({ tool: 'Edit', file_path: vault + '/Library/notes.md', old_string: 'a', new_string: 'b', agentId: 'W1' })
+  expect(edit.deny).toMatch(/safety gate refused.*link/)
+  expect((await $.tool.call({ tool: 'Read', file_path: vault + '/Feed me/book.md', agentId: 'L1' })).result).toBe('ran')
+  expect((await $.tool.call({ tool: 'Edit', file_path: vault + '/Library/index.md', old_string: 'a', new_string: 'b', agentId: 'W1' })).result).toBe('ran')
 })
 
 test('a running librarian is held to its gate, and the feed step hands over its paths', async ($, on) => {

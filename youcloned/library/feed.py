@@ -76,9 +76,19 @@ ENV_NAME = re.compile(r"^\.env(?:\..+)?$", re.I)
 KEY_NAME = re.compile(r"(?:\.(?:pem|key|p12|pfx|keystore|jks|ppk|gpg|asc|kdbx)$|^id_(?:rsa|dsa|ecdsa|ed25519)|^(?:credentials|secrets?)(?:\.|$)"
                       r"|^\.(?:npmrc|netrc|pgpass|pypirc|git-credentials)$|^token\.json$)", re.I)
 FEEDS_FILES = {"add", "web", "doc", "folder", "transcribe", "youtube"}
+# Said when a source or a wiki page holds the library token. It never names the title, the file or any of its words,
+# since the token may be in them.
+TOKEN_SKIP = "Skipped one source: it holds your library token, and that never goes in the library."
+
+
+# The library token once the env file is read. say() never prints it, whatever line it is handed.
+HIDE = []
 
 
 def say(line):
+    line = str(line)
+    for secret in HIDE:
+        line = line.replace(secret, "[your library token]")
     print(line, flush=True)
 
 
@@ -110,10 +120,40 @@ def env_values(env_file):
     return values
 
 
+# Windows opens ".env." and ".env " as .env, "name:stream" as a hidden stream inside name, and ENV~1 as a
+# short name for a long one. A name counts as what Windows would open, and the tricks are refused outright.
+# hooks/helpers.js holds the same rules (winName, SHORT_NAME); change both together.
+SHORT_NAME = re.compile(r"^[^~\s]{1,6}~\d+(?:\.[^.]{0,3})?$")
+DRIVE = re.compile(r"^[A-Za-z]:[\\/]*$")
+
+
+def win_name(part):
+    return re.sub(r"[. ]+$", "", part.split(":", 1)[0])
+
+
+def path_parts(path):
+    """Every name along the path, split at both kinds of slash, the drive (C:) left out."""
+    parts = [p for p in re.split(r"[\\/]+", str(path)) if p]
+    return parts[1:] if parts and DRIVE.match(parts[0]) else parts
+
+
 def secret_name(path):
-    """True when the path names an env file (anywhere along it) or a file that holds keys."""
-    parts = Path(path).parts
-    return any(ENV_NAME.match(part) for part in parts) or bool(parts and KEY_NAME.search(parts[-1]))
+    """True when the path names an env file (anywhere along it) or a file that holds keys, Windows spellings too."""
+    parts = path_parts(path)
+    return (any(ENV_NAME.match(part) or ENV_NAME.match(win_name(part)) for part in parts)
+            or bool(parts and (KEY_NAME.search(parts[-1]) or KEY_NAME.search(win_name(parts[-1])))))
+
+
+def name_trick(path):
+    """Why a path spelled with a Windows name trick is refused, or None."""
+    for part in path_parts(path):
+        if ":" in part:
+            return "a name with a colon (a hidden Windows stream) is not allowed"
+        if part not in (".", "..") and re.search(r"[. ]$", part):
+            return "a name that ends in a dot or a space is not allowed"
+        if SHORT_NAME.match(part):
+            return "a short Windows name such as ENV~1 is not allowed; use the full name"
+    return None
 
 
 def within(path, folder):
@@ -135,6 +175,8 @@ class Library:
         values = env_values(self.env_file)
         self.url = values.get(URL_NAME, "")
         self._token = values.get(TOKEN_NAME, "")
+        if self._token:
+            HIDE.append(self._token)
         if not self.url or not self._token:
             say("Your env file has no library address or token yet. The library step of setup adds them.")
             finish(3)
@@ -195,6 +237,11 @@ class Library:
         """Why feed.py won't read this file (or folder), or None. Env and key files never; for a helper,
         only inside its own folders, judged by where a link leads."""
         given = Path(path).expanduser()
+        if secret_name(path) or secret_name(given.absolute()):
+            return str(given) + " is an env file or a key file, and those never go in the library"
+        trick = name_trick(path)
+        if trick:
+            return str(given) + ": " + trick
         if not os.path.lexists(str(given)):
             return None  # the command says there is nothing there
         try:
@@ -255,17 +302,21 @@ class Library:
             say(str(len(gone)) + (" source is" if len(gone) == 1 else " sources are") + " no longer in your library, so "
                 + ("it goes" if len(gone) == 1 else "they go") + " in again.")
 
+    def holds_token(self, *values):
+        """True when the library token is in any of the values (text, title, ref, date, slug...)."""
+        return bool(self._token) and any(self._token in str(v) for v in values if v)
+
     def ingest(self, kind, ref, title, text, happened_at=None, quiet=False):
         """Sends one source, in pieces of at most 8k characters. Returns (sent, chunks) or None on failure."""
+        if self.holds_token(kind, ref, title, text, happened_at):
+            say(TOKEN_SKIP)
+            return None
         self.check_once()
         text = text.strip()
         if not text:
             if not quiet:
                 say("Skipped " + title + ": no words in it.")
             return (0, 0)
-        if self._token and self._token in text:
-            say("Skipped " + title + ": it holds your library token, and that never goes in the library.")
-            return None
         digest = hashlib.sha256((kind + "\n" + title + "\n" + (happened_at or "") + "\n" + text).encode("utf-8")).hexdigest()
         if self.state["hashes"].get(ref) == digest:
             if not quiet:
@@ -1111,8 +1162,11 @@ def cmd_wiki_put(lib, args):
     if not path.is_file():
         say("There is no file at " + str(path) + ".")
         return 1
-    status, reply = lib.call({"action": "wiki_upsert", "slug": args.slug, "title": args.title,
-                              "body": path.read_text(encoding="utf-8", errors="replace")})
+    body = path.read_text(encoding="utf-8", errors="replace")
+    if lib.holds_token(args.slug, args.title, body):
+        say("Skipped that wiki page: it holds your library token, and that never goes in the library.")
+        return 1
+    status, reply = lib.call({"action": "wiki_upsert", "slug": args.slug, "title": args.title, "body": body})
     if status != 200:
         say("Could not save wiki page " + args.slug + " (status " + str(status) + ": " + str(reply.get("error", "")) + ")")
         return 1
