@@ -377,6 +377,19 @@ test('every conversation in the clone folder gets the rules file', async ($, on)
   expect(out.blocks[1].text).toMatch(/My YouCloned rules\nPat/)
 })
 
+test('a new chat already has the owner\'s saved lessons, so its first answer follows them', async ($, on) => {
+  sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: {
+    [PROJECT + '/YOUCLONED.md']: '# My YouCloned rules\nPat',
+    [PROJECT + '/memory/INDEX.md']: '- [Call buyers members](call-buyers-members.md): never say users\n',
+    [PROJECT + '/memory/call-buyers-members.md']: 'Oct 17: call the people who buy from me members, never users.',
+  } })
+  on('prompt.context', ($, e) => ({ blocks: e.blocks }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/work' })
+  const text = (await $.prompt.context({ blocks: [] })).blocks.find(b => b.name === 'youcloned').text
+  expect(text).toMatch(/Lessons the owner taught you \(follow every one, starting with your first reply\)/)
+  expect(text).toContain('call the people who buy from me members, never users')
+})
+
 test('every clone, Mac or PC, is told to say when it is time to change chats and how to hand off', async ($, on) => {
   sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# My YouCloned rules\nPat' } })
   on('prompt.context', ($, e) => ({ blocks: e.blocks }))

@@ -333,6 +333,30 @@ async function cloneFolder($) {
 
 const sep = () => (onMac() ? '/' : '\\')
 
+// The owner's saved lessons ride along in every chat, so a NEW chat's first answer already follows them (clean-Mac
+// recording, Oct 17: a fresh chat found the "members, never users" lesson only when asked, after it had answered).
+// memory/INDEX.md first, then each note it lists, newest first, up to LESSONS_MAX characters.
+const LESSONS_MAX = 12000
+async function lessonNotes($) {
+  if (!project) return ''
+  const dir = project + '/memory'
+  let index = ''
+  try { index = await $.fs.read(dir + '/INDEX.md') } catch { return '' }
+  let out = '\n\n## Lessons the owner taught you (follow every one, starting with your first reply)\n\n' + index.trim() + '\n'
+  const names = [...index.matchAll(/\(([^)\s]+\.md)\)|\b([\w.-]+\.md)\b/g)].map(m => m[1] || m[2]).filter(n => n && n !== 'INDEX.md')
+  const seen = new Set()
+  for (const n of names.reverse()) {
+    if (seen.has(n) || n.includes('..') || n.includes('/')) continue
+    seen.add(n)
+    let body = ''
+    try { body = await $.fs.read(dir + '/' + n) } catch { continue }
+    const piece = '\n### ' + n + '\n' + body.trim() + '\n'
+    if (out.length + piece.length > LESSONS_MAX) { out += '\n(More notes are in ' + dir + ': read the ones that match the job before you start it.)\n'; break }
+    out += piece
+  }
+  return out
+}
+
 // Normal chats search the owner's library too, not only the helpers (Oct 17): before answering about the owner's
 // business, offers, customers or past work, look it up there. The command never shows the token.
 let pluginRoot = ''
@@ -1438,7 +1462,7 @@ export function register(on) {
     if (!rules) return result
     const running = version ? 'YouCloned version ' + version + ' is running in this conversation (tell the person this number if they ask which version they have).\n\n' : ''
     const block = { name: 'youcloned', text: running + 'The owner\'s YouCloned rules, from ' + project + '/' + RULES_NAME +
-      '. Follow them in everything you write for this person.\n\n' + rules + '\n\nRules every YouCloned clone follows:\n\n' + UNIVERSAL_RULES + LIBRARY_NOTE() }
+      '. Follow them in everything you write for this person.\n\n' + rules + '\n\nRules every YouCloned clone follows:\n\n' + UNIVERSAL_RULES + LIBRARY_NOTE() + (await lessonNotes($)) }
     return { ...result, blocks: [...result.blocks, block] }
   })
 
