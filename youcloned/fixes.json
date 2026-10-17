@@ -60,11 +60,12 @@
       "fix": "\"One second, still working\" waits 45 seconds and never talks over a listen",
       "jon_file": "~/.local/isaac/voice/wake_feedback.py",
       "card": "bnsnstack#303",
-      "buyer_file": "voice/setup-voice.sh",
-      "buyers": "yes",
-      "mac": "to-port",
-      "pc": "to-port",
-      "check": null
+      "buyer_file": "Talk button relay (youcloned#28)",
+      "buyers": "adapt",
+      "mac": "waiting",
+      "pc": "waiting",
+      "check": null,
+      "note": "Oct 17: the buyer install has no wake helper (Jon's wake_feedback.py watches a Hey Isaac wake relayed to Voice Command). The buyer form is \"Talk pressed, no answer in 45s: one short line, never over a listen\", built with the Talk relay in #28. Until then the talk skill tells the clone to say a short line before slow work."
     },
     {
       "id": "voice-05",
@@ -100,9 +101,10 @@
       "card": "bnsnstack#318",
       "buyer_file": "voice/check-voice.sh",
       "buyers": "yes",
-      "mac": "to-port",
-      "pc": "to-port",
-      "check": null
+      "mac": "waiting",
+      "pc": "waiting",
+      "check": null,
+      "note": "Oct 17: waits on #321 with voice-10. Jon's check reads the mic entry for the versioned ~/.local/bin/claude path; which program holds a buyer's mic (Claude app or a fixed Claude Code path) is what #321 settles. Reading the permission list may also need Full Disk Access on a buyer Mac, so the buyer check needs its own design."
     },
     {
       "id": "voice-08",
@@ -162,11 +164,12 @@
       "fix": "Full-loop voice test and stop-time test (talk, stop, listen again, words arrive)",
       "jon_file": "~/.local/isaac/voice/tests/full_loop_test.py, stop_latency_test.py",
       "card": "bnsnstack#303",
-      "buyer_file": "voice/check-voice.sh",
+      "buyer_file": "voice/loop-test.py (bash check-voice.sh loop)",
       "buyers": "yes",
-      "mac": "to-port",
+      "mac": "in-pr",
       "pc": "to-port",
-      "check": null
+      "check": "bash voice/check-voice.sh loop",
+      "note": "Ported Oct 17 (Mac): three rounds, Ctrl+Opt+N mid-sentence must stop the voice within 1s, the listen must open, and a say-voice phrase must arrive. Not run on Jon's Mac (plays sound, shares the control socket with Voice Command); first run on the clean test Mac. check-voice.sh also now checks the instant-stop fix every run. PC version to write."
     },
     {
       "id": "bridge-12",

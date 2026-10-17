@@ -1,6 +1,8 @@
-# Checks every piece of your clone's voice on this Mac and says what passed. Add the word "speak" to also hear a test line.
-# Usage: bash check-voice.sh            or            bash check-voice.sh speak
+# Checks every piece of your clone's voice on this Mac and says what passed. Add the word "speak" to also hear a test line,
+# or "loop" to also run the full loop test (talk, key cuts it off, listen, hear a phrase), which plays sound and uses the mic.
+# Usage: bash check-voice.sh            or            bash check-voice.sh speak            or            bash check-voice.sh loop
 
+HERE="$(cd "$(dirname "$0")" && pwd)"
 HOMEDIR="$HOME/.youcloned-phone"
 LOG="$HOMEDIR/check.log"
 ENVFILE="$HOME/.voicemode/voicemode.env"
@@ -19,6 +21,10 @@ VOICE="am_michael"
 [ -f "$ENVFILE" ] && V="$(grep '^VOICEMODE_VOICES=' "$ENVFILE" | head -1 | cut -d= -f2 | cut -d, -f1)" && [ -n "$V" ] && VOICE="$V"
 
 if [ -x "$HOME/.local/bin/voicemode" ]; then pass "VoiceMode is installed"; else fail "VoiceMode is missing (run setup-voice.sh)"; fi
+UV=""
+for p in /opt/homebrew/bin/uv /usr/local/bin/uv; do [ -x "$p" ] && UV="$p" && break; done
+VMPY="$([ -n "$UV" ] && "$UV" tool dir 2>/dev/null)/voice-mode/bin/python"
+if [ -x "$VMPY" ] && "$VMPY" "$HERE/patch-voicemode.py" check >> "$LOG" 2>&1; then pass "The instant-stop fix is in"; else fail "The instant-stop fix is missing (run setup-voice.sh)"; fi
 
 # The speaking voice takes a few minutes to wake up the first time, so give it up to 5 minutes.
 UP=""
@@ -64,6 +70,10 @@ if [ -d "$HOME/Library/Services/Clone Next.workflow" ] && [ -d "$HOME/Library/Se
 
 if grep -q '^VOICEMODE_TTS_BASE_URLS=.*8895' "$ENVFILE" 2>/dev/null; then
   if /usr/bin/curl -s -m 3 http://127.0.0.1:8895/v1/models | grep -q model; then pass "The Speechify voice connector is running"; else fail "The Speechify voice connector isn't answering"; fi
+fi
+
+if [ "${1:-}" = "loop" ]; then
+  if [ -x "$VMPY" ] && ( set -o pipefail; "$VMPY" "$HERE/loop-test.py" | tee -a "$LOG" ); then pass "The full voice loop passed 3 of 3"; else fail "The full voice loop test didn't pass"; fi
 fi
 
 rm -rf "$TMP"
