@@ -376,12 +376,15 @@
       "fix": "Installer's skill list follows the skills split page (Global downloads, SkillKey Custom, Jon-only never shipped)",
       "jon_file": null,
       "card": "bnsnstack#88",
-      "buyer_file": "installer skill list",
+      "buyer_file": "skills/youcloned-starter-skills.zip on youcloned.bnsn.ai (installer Step 10), names in skills-pack.txt",
       "buyers": "yes",
-      "mac": "to-port",
-      "pc": "to-port",
-      "check": null,
-      "note": "Oct 17 audit (read-only): the live starter pack (youcloned.bnsn.ai/install/skills/youcloned-starter-skills.zip, installed by Step 10 of mac.sh and windows.ps1) holds 4 of the 32 Global skills and none of the 15 in the four yes groups; no Yours-only skill ships. Full list: ~/isaac-voice/course/youcloned-command/portal-plan/skills-split-audit-1017.md. The check comes with the rebuilt pack, once buyer folder names are set."
+      "mac": "in-pr",
+      "pc": "in-pr",
+      "check": {
+        "mac": "if [ ! -f \"$HOME/.youcloned/vault-path\" ]; then exit 0; fi; while IFS= read -r n || [ -n \"$n\" ]; do [ -z \"$n\" ] || [ -f \"$HOME/.claude/skills/$n/SKILL.md\" ] || exit 1; done < skills-pack.txt",
+        "pc": "$m = Join-Path $env:USERPROFILE '.youcloned\\vault-path'; if (-not (Test-Path -LiteralPath $m)) { exit 0 }; foreach ($n in (Get-Content -Encoding UTF8 -LiteralPath (Join-Path $PWD 'skills-pack.txt'))) { $n = $n.Trim(); if ($n -and -not (Test-Path -LiteralPath (Join-Path $env:USERPROFILE (Join-Path '.claude\\skills' (Join-Path $n 'SKILL.md'))))) { exit 1 } }; exit 0"
+      },
+      "note": "Oct 17: buyer pack rebuilt from Jon's split page in the author's staging folder (day-one/skills-pack: ADAPT-SPEC.md rules 1 to 15, pack_gate.py, value_scan.py, build.sh): 75 folders (45 split-page skills, COM, done-day, recap-all, jon-benson-voice-hacks held for Jon's call, 26 third-party), the three Yours-only skills absent. Jon-only names, paths, voice ids, services and keys taken out by gate in code; voice skills read ELEVENLABS_VOICE_ID from the owner's vault env file; every helper finds the vault from ~/.youcloned/vault-path, which the patched installer writes. Codex reviewed it three times. The check passes before the new installer has run (no ~/.youcloned/vault-path) and fails when any pack skill is missing its SKILL.md after it ran. Ships only on Jon's or Ben's deploy word: zip to .youcloned-deploy/install/skills/, patched mac.sh and windows.ps1 to .youcloned-deploy/install/, deploy.sh."
     },
     {
       "id": "words-buy-more",
