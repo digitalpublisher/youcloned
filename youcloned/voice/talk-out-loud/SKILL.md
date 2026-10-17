@@ -19,7 +19,7 @@ Every listening turn uses these settings:
 
 ## The rhythm
 
-1. Start with one short hello and listen.
+1. Start with one short hello and listen. If the Talk press came in right after the owner wrapped up ("I'll look at it in a bit"), or it's more than a minute old by the clock, skip the hello: listen once with `skip_tts` true, so their words still get through if they speak.
 2. Answer in two to four short sentences, the way a person talks. No lists, no headings, no links read aloud.
 3. After every spoken answer, listen again. The conversation stays open until the owner says they're done ("that's all", "stop talking", "back to typing").
 4. Before a job that takes more than a few seconds, say one short line with `wait_for_response` false ("Got it, give me a second"), do the work, then give the answer with a normal listening turn. Silence sounds like the voice broke.

@@ -330,11 +330,15 @@
       "fix": "Voice late-skip fix and the never-silent \"Hey\" lines",
       "jon_file": null,
       "card": "bnsnstack#88",
-      "buyer_file": "voice/setup-voice.sh",
+      "buyer_file": "voice/talk-out-loud/SKILL.md (steps 1 and 4); the Talk press itself waits on youcloned#28",
       "buyers": "yes",
-      "mac": "to-port",
-      "pc": "to-port",
-      "check": null
+      "mac": "waiting",
+      "pc": "waiting",
+      "check": {
+        "mac": "grep -q \"Silence sounds like the voice broke\" voice/talk-out-loud/SKILL.md && grep -q \"skip the hello\" voice/talk-out-loud/SKILL.md",
+        "pc": "if ((Select-String -Quiet -SimpleMatch -Path voice\\talk-out-loud\\SKILL.md -Pattern 'Silence sounds like the voice broke') -and (Select-String -Quiet -SimpleMatch -Path voice\\talk-out-loud\\SKILL.md -Pattern 'skip the hello')) { exit 0 } else { exit 1 }"
+      },
+      "note": "Oct 17: never-silent was already in the talk skill (step 4: a short holding line with no listen before a long job). The late-tap rule is now in step 1: a Talk press that comes right after the owner wrapped up, or is more than a minute old, gets no hello, only a silent listen (skip_tts). Jon's version is an instruction to Voice Command too. Waiting: a buyer's Talk button still posts to Jon's own voice relay (youcloned#28, unassigned), so dropping a stale press in code goes with that fix. voice-11's check compares the installed skill with this file."
     },
     {
       "id": "install-win-python",
