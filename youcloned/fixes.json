@@ -27,7 +27,7 @@
       "pc": "in-pr",
       "check": {
         "mac": "cmp -s voice/clone-keys.sh \"$HOME/.youcloned-phone/clone-keys.sh\"",
-        "pc": "$a = Join-Path $env:USERPROFILE '.youcloned-phone\\pc_voice.py'; if ((Test-Path -LiteralPath $a) -and ((Get-FileHash -LiteralPath voice\\pc_voice.py).Hash -eq (Get-FileHash -LiteralPath $a).Hash)) { exit 0 } else { exit 1 }"
+        "pc": "$a = Join-Path $env:USERPROFILE '.youcloned-phone\\pc_voice.py'; $b = Join-Path $PWD 'voice\\pc_voice.py'; if ((Test-Path -LiteralPath $a) -and ([Convert]::ToBase64String([IO.File]::ReadAllBytes($a)) -ceq [Convert]::ToBase64String([IO.File]::ReadAllBytes($b)))) { exit 0 } else { exit 1 }"
       },
       "note": "Ported Oct 17: Ctrl+Opt+N / Ctrl+Opt+S send one JSON line straight to the voice control socket (0.2 to 0.4s in the fake-socket test), with the voicemode command as fallback. PC already sent straight to the socket (pc_voice.py COMMANDS)."
     },
@@ -85,7 +85,7 @@
       "pc": "in-pr",
       "check": {
         "mac": "[ ! -f \"$HOME/.youcloned-phone/speechify-voice.py\" ] || cmp -s voice/speechify-voice.py \"$HOME/.youcloned-phone/speechify-voice.py\"",
-        "pc": "$a = Join-Path $env:USERPROFILE '.youcloned-phone\\speechify-voice.py'; if ((-not (Test-Path -LiteralPath $a)) -or ((Get-FileHash -LiteralPath voice\\speechify-voice.py).Hash -eq (Get-FileHash -LiteralPath $a).Hash)) { exit 0 } else { exit 1 }"
+        "pc": "$a = Join-Path $env:USERPROFILE '.youcloned-phone\\speechify-voice.py'; $b = Join-Path $PWD 'voice\\speechify-voice.py'; if ((-not (Test-Path -LiteralPath $a)) -or ([Convert]::ToBase64String([IO.File]::ReadAllBytes($a)) -ceq [Convert]::ToBase64String([IO.File]::ReadAllBytes($b)))) { exit 0 } else { exit 1 }"
       },
       "note": "Ported Oct 17 (same file runs on Mac and PC). Repo test: tools/voice/test_speechify_voice.py. Buyer check still to write with the setup check."
     },
@@ -169,7 +169,7 @@
       "pc": "in-pr",
       "check": {
         "mac": "cmp -s voice/talk-out-loud/SKILL.md \"$HOME/.claude/skills/talk-out-loud/SKILL.md\"",
-        "pc": "$a = Join-Path $env:USERPROFILE '.claude\\skills\\talk-out-loud\\SKILL.md'; if ((Test-Path -LiteralPath $a) -and ((Get-FileHash -LiteralPath voice\\talk-out-loud\\SKILL.md).Hash -eq (Get-FileHash -LiteralPath $a).Hash)) { exit 0 } else { exit 1 }"
+        "pc": "$a = Join-Path $env:USERPROFILE '.claude\\skills\\talk-out-loud\\SKILL.md'; $b = Join-Path $PWD 'voice\\talk-out-loud\\SKILL.md'; if ((Test-Path -LiteralPath $a) -and ([Convert]::ToBase64String([IO.File]::ReadAllBytes($a)) -ceq [Convert]::ToBase64String([IO.File]::ReadAllBytes($b)))) { exit 0 } else { exit 1 }"
       },
       "note": "Ported Oct 17: the talk skill says listen_duration_min 8 (was 4) and the Talk button prompt names 8 and 600. VoiceMode 8.12.0 has no env setting for the minimum, so it lives in the instructions."
     },
