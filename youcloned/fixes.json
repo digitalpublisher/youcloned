@@ -353,7 +353,10 @@
       "buyers": "yes",
       "mac": "in-pr",
       "pc": "n/a",
-      "check": null
+      "check": {
+        "mac": "xcode-select -p >/dev/null 2>&1 && git --version >/dev/null && node --version >/dev/null && python3 --version >/dev/null && claude --version >/dev/null && [ -d /Applications/Obsidian.app ] && [ -d /Applications/Cursor.app ] && { [ \"$(uname -m)\" != x86_64 ] || lipo -archs /Applications/Cursor.app/Contents/MacOS/Cursor | grep -q x86_64; }"
+      },
+      "note": "Oct 17: the check mirrors PR #36's runner checks: Apple's command line tools, git, node, python3 and claude all run, Obsidian and Cursor are in Applications, and on an Intel Mac Cursor's app holds Intel code. It starts with xcode-select so a bare Mac never gets Apple's install pop-up from the git or python3 stand-ins. PR #36 waits on review and the deploy word."
     },
     {
       "id": "skills-split",
