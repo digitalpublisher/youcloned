@@ -28,8 +28,12 @@ class Fail extends Error {
   }
 }
 
+// Every reply carries this header, so setup can tell a function of ours from another one with the same name.
+const MARKER = 'x-youcloned-library'
+const VERSION = '2'
+
 function reply(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', [MARKER]: VERSION } })
 }
 
 async function sha256Hex(text: string): Promise<string> {
@@ -220,6 +224,15 @@ async function stats() {
   return { ok: true, kinds: perKind, ...totals }
 }
 
+// Which of these refs are in the library (feed.py asks before it skips what it fed before).
+async function has(body: Record<string, unknown>) {
+  if (!Array.isArray(body.refs) || body.refs.length > 1000) throw new Fail(400, 'refs must be a list of at most 1000')
+  const refs = body.refs.map((r) => text(r, 'ref', 2000))
+  if (!refs.length) return { ok: true, refs: [] }
+  const rows = await sql`select ref from youcloned.sources where ref in ${sql(refs)}`
+  return { ok: true, refs: rows.map((r) => r.ref) }
+}
+
 async function forget(body: Record<string, unknown>) {
   const ref = text(body.ref, 'ref', 2000).trim()
   const rows = await sql`delete from youcloned.sources where ref = ${ref} returning id`
@@ -227,13 +240,13 @@ async function forget(body: Record<string, unknown>) {
 }
 
 const ACTIONS: Record<string, (body: Record<string, unknown>) => Promise<unknown>> = {
-  ingest, search, stats, forget,
+  ingest, search, stats, has, forget,
   wiki_upsert: wikiUpsert, wiki_get: wikiGet, wiki_list: wikiList,
 }
 
 Deno.serve(async (req) => {
   try {
-    if (req.method !== 'POST') return reply(405, { ok: false, error: 'use POST' })
+    if (req.method !== 'POST') return reply(405, { ok: false, error: 'use POST', youcloned: 'library', version: VERSION })
     if (!(await authorized(req))) return reply(401, { ok: false, error: 'unauthorized' })
     const raw = await req.text()
     if (raw.length > MAX_BODY) return reply(413, { ok: false, error: 'request is too large' })

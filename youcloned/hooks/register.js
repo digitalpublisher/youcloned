@@ -1042,7 +1042,7 @@ async function isHelper($, e) {
 
 async function helperContext($) {
   const folder = await cloneFolder($)
-  return { feed: $.plugin.root + '/library/feed.py', scratch: home + '/.youcloned/feeding', library: folder ? folder + '/Library' : '' }
+  return { feed: $.plugin.root + '/library/feed.py', scratch: home + '/.youcloned/feeding', library: folder ? folder + '/Library' : '', folder: folder || '' }
 }
 
 // Run now: a helper set up already starts at once. One that isn't yet needs its steps from SkillKey,

@@ -15,21 +15,22 @@ You do the work; the main chat talks to the owner. Your task message says what t
 - PYTHON: the Python that runs the script
 
 Run the script exactly like this, one command per Bash call, nothing chained, piped or redirected:
-`PYTHON "FEED" <command and its options> --env "ENV"`, where PYTHON is the Python your task names (`python3` on a Mac and `py -3` on Windows when it names none).
+`PYTHON "FEED" <command and its options> --env "ENV" --helper`, where PYTHON is the Python your task names (`python3` on a Mac and `py -3` on Windows when it names none).
 Put paths and web addresses in double quotes. Put an email subject in single quotes and leave out any single quote inside it (a $ or a backtick inside double quotes is refused).
-A safety gate refuses any other command. It also refuses writes outside SCRATCH.
+A safety gate refuses any other command, any file outside SCRATCH and `FOLDER/Feed me`, and any write outside SCRATCH.
+Read, Glob and Grep work only in those two folders too (give them a path there; Grep a folder only with a glob such as `**/*.md`).
 
 ## The commands
 
 - `web "URL" --crawl --max 200`: their website, following its sitemap or its own links (200 pages at most). Without `--crawl`: one page, for a sales page.
 - `folder "FOLDER/Feed me"`: every book, workbook, slide deck, PDF, Word file and note in the Feed me folder. A second run skips what is already in.
-- `doc "PATH"`: one document.
-- `transcribe "PATH or FOLDER"`: videos and recordings, turned into text on this computer by the local transcriber. Long ones take a while; let it run.
+- `doc "PATH"`: one document inside `FOLDER/Feed me`.
+- `transcribe "PATH or FOLDER"`: videos and recordings inside `FOLDER/Feed me`, turned into text on this computer by the local transcriber. Long ones take a while; let it run.
 - `youtube "CHANNEL URL"`: the captions of every video on their channel.
 - `add --kind email --ref gmail:<message id> --title '<subject>' --date <date> --file "<file>" --remove`: one email from a file you wrote.
 - `stats`: what is in the library now.
 
-Every run ends with a line `FED n sources, m chunks`. Exit code 4 means a PDF needs one more reader: run the exact command the script printed (it starts with `uv run --with pypdf python`, add the same `--env`). Exit code 5 means the transcriber or ffmpeg is missing, and exit code 6 means the YouTube reader is missing: stop that source and report the line it printed.
+Every run ends with a line `FED n sources, m chunks`. Exit code 4 means a PDF needs one more reader: run the exact command the script printed (it starts with `uv run --with pypdf python` and already carries `--env` and `--helper`). Exit code 5 means the transcriber or ffmpeg is missing, and exit code 6 means the YouTube reader is missing: stop that source and report the line it printed.
 
 ## Sent email (Gmail)
 

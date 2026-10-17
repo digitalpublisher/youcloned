@@ -2,10 +2,12 @@
 """Make the YouCloned library token and save it in the buyer's env file.
 
 Usage:
-  python3 make-token.py [ENV_FILE] --project-url URL [--new]
+  python3 make-token.py [ENV_FILE] --project-url URL [--function NAME] [--new]
 
 ENV_FILE defaults to the .env file in the vault named by ~/.youcloned/vault-path.
 URL is the project address the Supabase connector's get_project_url returns.
+NAME is the library function's name in that project: library (the default), or youcloned-library when the
+project already has a function called library that isn't ours.
 The script writes two lines (the token and the library address) and keeps every other line.
 It prints only the sha256 of the token, which goes into youcloned.settings.
 The token itself is never printed. Run it again without --new and it keeps the token it made before.
@@ -58,19 +60,26 @@ def git_ok(env_file):
     fail(str(env_file) + " is inside a git folder but git does not ignore it; add .env to that folder's .gitignore first")
 
 
-def library_url(project_url):
+FUNCTION_NAMES = ("library", "youcloned-library")
+
+
+def library_url(project_url, name="library"):
+    if name not in FUNCTION_NAMES:
+        fail("--function must be one of " + ", ".join(FUNCTION_NAMES))
     url = project_url.strip().rstrip("/")
     if not (url.startswith("https://") or url.startswith("http://127.0.0.1") or url.startswith("http://localhost")):
         fail("--project-url must be the https address get_project_url returns")
-    if url.endswith("/functions/v1/library"):
-        return url
-    return url + "/functions/v1/library"
+    for other in FUNCTION_NAMES:
+        if url.endswith("/functions/v1/" + other):
+            url = url[: -len("/functions/v1/" + other)]
+    return url + "/functions/v1/" + name
 
 
 def main():
     parser = argparse.ArgumentParser(description="Make the YouCloned library token.")
     parser.add_argument("env_file", nargs="?")
     parser.add_argument("--project-url", required=True)
+    parser.add_argument("--function", default="library", help="the library function's name (library or youcloned-library)")
     parser.add_argument("--new", action="store_true", help="replace the token even if one is saved")
     args = parser.parse_args()
 
@@ -89,7 +98,7 @@ def main():
             existing = line.split("=", 1)[1].strip().strip('"').strip("'")
     token = existing if (existing and not args.new) else secrets.token_urlsafe(32)
 
-    wanted = {TOKEN_NAME: TOKEN_NAME + "=" + token, URL_NAME: URL_NAME + "=" + library_url(args.project_url)}
+    wanted = {TOKEN_NAME: TOKEN_NAME + "=" + token, URL_NAME: URL_NAME + "=" + library_url(args.project_url, args.function)}
     out, seen = [], set()
     for line in lines:
         name = line.strip().split("=", 1)[0].strip()
