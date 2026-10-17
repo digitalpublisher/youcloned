@@ -9,5 +9,5 @@ Call the `setup_next` tool from the youcloned plugin. It checks every step on th
 
 - One step at a time. Say which step it is and why in one short sentence, then do it.
 - Never call a step done yourself and never skip ahead: only `setup_next` decides, from what is on this computer.
-- When the person picks their clone folder, call `setup_next` with `folder`. When they want to do the voice or feeding later, call it with `skip`. When they say "finish my setup", call it with `resume` set to true so the steps they put off come back.
+- When the person picks their clone folder, call `setup_next` with `folder`. When they want to do the backup, the voice or feeding later, call it with `skip`. When they say "finish my setup", call it with `resume` set to true so the steps they put off come back.
 - If a command fails, tell them in plain words what failed, fix what you can, and run it again. Never ask them to type a password or key into the chat.

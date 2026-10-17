@@ -29,7 +29,9 @@ export const STEP_IDS = STEPS.map(s => s.id)
 
 // Steps a buyer may put off and come back to. Setup is "all set" only when every step is done or put off,
 // and the dashboard shows what was put off.
-export const CAN_SKIP = new Set(['voice', 'feed'])
+// Backup can be put off too (clean-Mac run, Oct 17): a GitHub sign-up can be blocked for a while, and nothing after
+// it needs GitHub. The dashboard keeps showing it as put off until it's done.
+export const CAN_SKIP = new Set(['backup', 'voice', 'feed'])
 
 // status: { [id]: true | false }, skipped: Set of ids. Returns the first step not done and not put off.
 export function nextStep(status, skipped = new Set()) {
@@ -44,6 +46,10 @@ export function progress(status, skipped = new Set()) {
 // Jon (Oct 17): some buyers already have a tool. Every step that needs an outside account offers both
 // paths: "I already have one, here it is" or "sign me up for the free one you recommend".
 const TWO_PATHS = 'Offer both paths: use what they already have, or the free one we recommend. '
+
+// A tool the Tools step just installed isn't on this chat's search path yet (clean-Mac run, Oct 17), so Mac
+// commands carry the folders Homebrew and the Intel installs use.
+const MAC_PATH = 'PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH" '
 
 const q = (p) => '"' + String(p).replace(/(["\\$`])/g, '\\$1') + '"'
 
@@ -63,7 +69,7 @@ export function stepText(step, ctx) {
         'When they answer, call setup_next with folder set to the full path. YouCloned makes the folder if it isn\'t there and never moves or deletes what is already in it.'
     case 'protection':
       return 'Your chats are already guarded: YouCloned blocks a key going into a file or a command in every conversation. This step adds the same check to every save that goes to GitHub. ' +
-        'Run with Bash: node ' + q(ctx.root + (ctx.mac ? '/setup/guards/install-git-hooks.mjs' : '\\setup\\guards\\install-git-hooks.mjs')) + ' --install' +
+        'Run with Bash: ' + (ctx.mac ? MAC_PATH : '') + 'node ' + q(ctx.root + (ctx.mac ? '/setup/guards/install-git-hooks.mjs' : '\\setup\\guards\\install-git-hooks.mjs')) + ' --install' +
         '. Tell them in one sentence what it did, then call setup_next.'
     case 'skillkey':
       return ctx.needsSkillKey + ' Walk them through it one click at a time and wait for each. Then call setup_next; a new connector can take up to a minute to show up, so if the step still shows not done, wait a moment and call setup_next again.'
@@ -75,7 +81,8 @@ export function stepText(step, ctx) {
     case 'backup':
       return TWO_PATHS + 'Ask: do you already have a GitHub account (and maybe a private repository you want to use), or should I walk you through the free one I recommend? ' +
         'If they need one, have them sign up at github.com (free plan) and come back. If they already have a PRIVATE repository they want to use, add its address as the second argument to the command below; a public one is refused. ' +
-        'Then run with Bash: gh auth status. If it says they are not logged in, run: gh auth login --web --git-protocol https --hostname github.com, and tell them a browser page opens with a code to paste. ' +
+        'Then run with Bash: ' + (ctx.mac ? MAC_PATH : '') + 'gh auth status. If it says they are not logged in, run: ' + (ctx.mac ? MAC_PATH : '') + 'gh auth login --web --git-protocol https --hostname github.com, and tell them a page opens with a code to paste (they can also open github.com/login/device on their phone). ' +
+        'If GitHub won\'t let them sign up right now (it sometimes blocks new accounts for a while), call setup_next with skip set to backup and come back to it later. ' +
         'When gh is logged in, run with Bash: ' + sh('setup-backup', q(ctx.folder)) + ' (plus their repository address if they gave one). With no address it makes a PRIVATE repository, saves the folder there, and sets a nightly backup. ' +
         'It never makes a public one. When it prints BACKUP READY, call setup_next.'
     case 'library':

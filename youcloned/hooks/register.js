@@ -1289,7 +1289,7 @@ export function register(on) {
     try {
       await $.tool.register({
         name: 'setup_next',
-        description: 'Night-one setup, one step at a time in the only order that works. Checks every step on this computer and says exactly what to do next. Call it to start or continue setup, after each step, with folder once the person picks their clone folder, or with skip (voice or feed) when they want to do that step later.',
+        description: 'Night-one setup, one step at a time in the only order that works. Checks every step on this computer and says exactly what to do next. Call it to start or continue setup, after each step, with folder once the person picks their clone folder, or with skip (backup, voice or feed) when they want to do that step later.',
         inputSchema: {
           type: 'object',
           properties: {
