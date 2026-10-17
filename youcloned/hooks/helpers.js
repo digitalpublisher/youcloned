@@ -84,7 +84,28 @@ const PYTHON = /^(?:.*[\\/])?(?:python3?(?:\.\d+)?|py)(?:\.exe)?$/i
 // library/feed.py holds the same list (KEY_NAME); change both together.
 const KEY_NAME = /(?:\.(?:pem|key|p12|pfx|keystore|jks|ppk|gpg|asc|kdbx)$|^id_(?:rsa|dsa|ecdsa|ed25519)|^(?:credentials|secrets?)(?:\.|$)|^\.(?:npmrc|netrc|pgpass|pypirc|git-credentials)$|^token\.json$)/i
 const segments = (p) => String(p).split('/').filter(Boolean)
-export const isKeyFile = (file) => typeof file === 'string' && KEY_NAME.test(segments(String(file).replace(/\\/g, '/')).pop() || '')
+
+// Windows opens ".env." and ".env " as .env, "name:stream" as a hidden stream inside name, and ENV~1 as a
+// short name for a long one. A name counts as what Windows would open, and the tricks are refused outright.
+// library/feed.py holds the same rules (win_name, SHORT_NAME); change both together.
+const SHORT_NAME = /^[^~\s]{1,6}~\d+(?:\.[^.]{0,3})?$/
+const DRIVE = /^[A-Za-z]:$/
+const winName = (s) => String(s).replace(/:.*$/, '').replace(/[. ]+$/, '')
+const envName = (s) => isEnvFile(s) || isEnvFile(winName(s))
+const keyName = (s) => KEY_NAME.test(s) || KEY_NAME.test(winName(s))
+export const isKeyFile = (file) => typeof file === 'string' && keyName(segments(String(file).replace(/\\/g, '/')).pop() || '')
+export const isEnvPath = (file) => typeof file === 'string' && segments(String(file).replace(/\\/g, '/')).some(envName)
+
+// null, or why a path spelled with a Windows name trick is refused (the drive, such as C:, is fine).
+function trickReason(parts) {
+  for (const [i, s] of parts.entries()) {
+    if (i === 0 && DRIVE.test(s)) continue
+    if (s.includes(':')) return 'a name with a colon (a hidden Windows stream) is not allowed'
+    if (/[. ]$/.test(s) && s !== '.' && s !== '..') return 'a name that ends in a dot or a space is not allowed'
+    if (SHORT_NAME.test(s)) return 'a short Windows name such as ENV~1 is not allowed; use the full name'
+  }
+  return null
+}
 
 // A file a helper reads through Grep without a folder-wide glob: these kinds only, never an env or key file.
 const SAFE_EXT = new Set(['txt', 'text', 'md', 'markdown', 'csv', 'html', 'htm', 'docx', 'pptx', 'epub', 'pdf', 'vtt', 'srt'])
@@ -103,8 +124,10 @@ export function pathReason(p, dirs, what = 'that path') {
   const n = normalize(p)
   if (!n) return what + ' must be a full path'
   if (/(?:^|[\\/])\.\.(?:[\\/]|$)/.test(p)) return what + ' may not use ..'
-  if (segments(n).some(s => isEnvFile(s))) return 'helpers never touch an env file'
-  if (isKeyFile(n)) return 'helpers never touch a key file'
+  if (isEnvPath(n) || isEnvPath(p)) return 'helpers never touch an env file'
+  if (isKeyFile(n) || isKeyFile(p)) return 'helpers never touch a key file'
+  const trick = trickReason(segments(n)) || trickReason(segments(String(p).replace(/\\/g, '/')))
+  if (trick) return trick
   const own = dirs.filter(Boolean)
   if (!own.length) return 'the helper\'s folder is not known yet'
   return own.some(d => inside(n, d)) ? null : what + ' (' + p + ') is outside ' + own.join(' and ')
@@ -118,6 +141,8 @@ function patternReason(pattern, dirs, needsExt) {
   if (/env/i.test(g)) return 'helpers never search for env files'
   const parts = segments(g.replace(/\\/g, '/'))
   if (parts.some(s => s.startsWith('.'))) return 'a pattern may not reach dot files'
+  const trick = trickReason(parts)
+  if (trick) return trick
   if (/^(?:[A-Za-z]:)?[\\/]/.test(g)) {
     const why = pathReason(g.replace(/[*?\[{].*$/, '') || '/', dirs, 'the pattern')
     if (why) return why
@@ -250,12 +275,126 @@ export function helperJudge(name, call, ctx) {
   if (tool === 'Write' || (tool === 'Edit' && name === 'wiki-writer')) {
     const dir = name === 'librarian' ? ctx.scratch : ctx.library
     if (!dir) return 'the helper\'s folder is not known yet'
-    if (isEnvFile(call.file_path)) return 'helpers never write an env file'
-    if (isKeyFile(call.file_path)) return 'helpers never write a key file'
-    return inside(call.file_path, dir) ? null : tool + ' to ' + call.file_path + ' is outside ' + dir
+    if (isEnvPath(call.file_path) || isEnvPath(normalize(call.file_path) || '')) return 'helpers never write an env file'
+    if (isKeyFile(call.file_path) || isKeyFile(normalize(call.file_path) || '')) return 'helpers never write a key file'
+    if (!inside(call.file_path, dir)) return tool + ' to ' + call.file_path + ' is outside ' + dir
+    return pathReason(call.file_path, [dir], tool + ' to ' + call.file_path)
   }
   if (name === 'librarian' && GMAIL_READS.test(tool)) return null
   return tool + ' is not on the ' + name + '\'s list'
+}
+
+// The paths a feed.py command reads or writes, each with the folders it must stay in (after the gate above passed it).
+function feedPaths(command, own) {
+  const parsed = shellWords(command)
+  if (parsed.why) return []
+  const words = parsed.words
+  const at = words.findIndex(x => Object.hasOwn(FEED_ARGS, x))
+  if (at < 0) return []
+  const spec = FEED_ARGS[words[at]]
+  const w = words.slice(at + 1)
+  const flags = { ...COMMON, ...spec.flags }
+  const dirsOf = (kind) => kind === 'in' ? own.feed || [] : kind === 'wiki' ? own.wiki || [] : null
+  const out = []
+  let n = 0
+  for (let i = 0; i < w.length; i++) {
+    const word = w[i]
+    if (word.startsWith('-')) {
+      const eq = word.indexOf('=')
+      const kind = flags[eq > 0 ? word.slice(0, eq) : word]
+      if (kind === 0 || kind === undefined) continue
+      const value = eq > 0 ? word.slice(eq + 1) : w[++i]
+      if (dirsOf(kind)) out.push({ path: value, dirs: dirsOf(kind) })
+      continue
+    }
+    const kind = spec.args[n++]
+    if (dirsOf(kind)) out.push({ path: word, dirs: dirsOf(kind) })
+  }
+  return out
+}
+
+// Where a path lands, every link followed: { landed, stat } or { why }. A file not there yet (a Write) lands in
+// its nearest folder that is there, plus the rest of its name. stat: (path) => $.fs.stat(path, { resolve: true }).
+async function landing(p, stat) {
+  const n = normalize(p)
+  if (!n) return { why: p + ' must be a full path' }
+  const drive = /^[a-z]:/.test(n) ? n.slice(0, 2) : ''
+  const parts = segments(n.slice(drive.length))
+  const rest = []
+  while (true) {
+    const here = drive + '/' + parts.join('/')
+    let st = null
+    try { st = await stat(here) } catch (err) {
+      if (!/ENOENT|no such|not found|missing/i.test(String(err?.code || '') + ' ' + String(err?.message || err))) return { why: 'could not tell where ' + p + ' leads' }
+    }
+    if (st) {
+      if (!st.realPath) return { why: p + ' goes through a link that leads nowhere, and helpers never follow links' }
+      const base = normalize(String(st.realPath).replace(/^\\\\\?\\/, ''))
+      if (!base) return { why: 'could not tell where ' + p + ' leads' }
+      return { landed: base.replace(/\/$/, '') + (rest.length ? '/' + rest.join('/') : ''), stat: rest.length ? null : st }
+    }
+    if (!parts.length) return { why: 'could not tell where ' + p + ' leads' }
+    rest.unshift(parts.pop())
+  }
+}
+
+// null, or why a call is refused once links are followed: each path the call names must land exactly where its
+// spelling says, inside the helper's own folder (a link anywhere on the way, even to a file next to it, is refused),
+// never on an env or key file, and never on a second name (a hard link) for the env file.
+// fsx: { stat: (path) => FsStat with realPath, list: (dir) => FsEntry[] }. Run it after helperJudge allowed the call.
+export async function helperLinkReason(name, call, ctx, fsx) {
+  const own = folders(name, ctx)
+  const tool = String(call.tool || '')
+  let todo = []
+  if (tool === 'Read') todo = [{ path: call.file_path, dirs: own.read }]
+  else if (tool === 'Grep' || tool === 'Glob') todo = [{ path: call.path, dirs: own.read, scan: tool === 'Grep' }]
+  else if (tool === 'Write' || tool === 'Edit') todo = [{ path: call.file_path, dirs: own.write }]
+  else if (tool === 'Bash') todo = feedPaths(call.command, own)
+  if (!todo.length) return null
+  const env = own.env ? await landing(own.env, fsx.stat) : null
+  for (const t of todo) {
+    const dir = t.dirs.filter(Boolean).find(d => inside(t.path, d))
+    if (!dir) return t.path + ' is outside the helper\'s folders'
+    const got = await landing(t.path, fsx.stat)
+    if (got.why) return got.why
+    const base = await landing(dir, fsx.stat)
+    if (base.why) return base.why
+    const rel = normalize(t.path).slice(normalize(dir).length)
+    if (got.landed.toLowerCase() !== (base.landed + rel).toLowerCase()) return t.path + ' goes through a link (a shortcut to another place), and helpers never follow links'
+    if (isEnvPath(got.landed)) return 'helpers never touch an env file'
+    if (isKeyFile(got.landed)) return 'helpers never touch a key file'
+    const st = got.stat
+    if (st && env?.stat && st.kind === 'file' && st.size > 0 && st.size === env.stat.size && st.mtimeMs === env.stat.mtimeMs) return t.path + ' looks like a second name for the env file, and helpers never touch it'
+    if (t.scan && st?.kind === 'dir') {
+      const why = await linkInside(t.path, fsx.list)
+      if (why) return why
+    }
+  }
+  return null
+}
+
+// A Grep over a folder reads every file under it: refuse when any of them is a link. Big folders are searched in parts.
+async function linkInside(dir, list, cap = 5000) {
+  const queue = [dir]
+  let seen = 0
+  while (queue.length) {
+    const d = queue.shift()
+    let entries
+    try { entries = await list(d) } catch { return 'could not look inside ' + d }
+    for (const e of entries) {
+      if (++seen > cap) return d + ' holds too many files to search at once; search one folder inside it'
+      if (e.isLink) return d + '/' + e.name + ' is a link (a shortcut to another place), and helpers never follow links'
+      if (e.kind === 'dir') queue.push(d.replace(/[\\/]$/, '') + '/' + e.name)
+    }
+  }
+  return null
+}
+
+// The whole gate for one helper call: the spelling first, then where every path lands once links are followed.
+export async function helperGate($, name, call, ctx) {
+  const no = helperJudge(name, call, ctx)
+  if (no) return no
+  return helperLinkReason(name, call, ctx, { stat: (p) => $.fs.stat(p, { resolve: true }), list: (p) => $.fs.list(p) })
 }
 
 export function helperDenyText(name, why) {

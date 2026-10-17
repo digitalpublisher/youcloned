@@ -10,7 +10,7 @@ import { judge, denyText } from './gate.js'
 import { firstKey, writtenText, isEnvFile, commandReason, parseBans, bannedIn } from './guards.js'
 import { RULES_NAME, checkSetup, rulesMarkdown } from './rules.js'
 import { STEPS, CAN_SKIP, setupText, nextStep } from './steps.js'
-import { HELPERS, parseAgent, gmailReads, helperJudge, helperDenyText } from './helpers.js'
+import { HELPERS, parseAgent, gmailReads, helperJudge, helperGate, helperDenyText } from './helpers.js'
 import { UNIVERSAL_RULES } from './universal.js'
 import { topSvg, heroSvg, moneySvg, cardHeadSvg, plateSvg, thumbSvg, PLATE, THUMB, setWidth } from './panel.js'
 
@@ -1208,7 +1208,7 @@ export function register(on) {
   on('tool.call', async ($, e, next) => {
     const helper = await isHelper($, e)
     if (helper) {
-      const no = helperJudge(helper, e, await helperContext($))
+      const no = await helperGate($, helper, e, await helperContext($))
       if (no) {
         $.ui.log('safety gate refused ' + e.tool + ' for the ' + helper + ': ' + no)
         return { deny: helperDenyText(helper, no) }

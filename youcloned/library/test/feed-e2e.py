@@ -468,6 +468,46 @@ wiki_page = hv / "Library" / "helper.md"
 wiki_page.write_text("# Helper page\n", encoding="utf-8")
 code, out, fed = hrun("wiki-put", "feedtest/helper", "Helper page", str(wiki_page))
 check("helper: wiki-put of a page in Library works", code == 0 and "Saved wiki page feedtest/helper" in out, out)
+
+# Codex review 2: Windows spellings of the env file (".env.", ".env:stream", a short name) passed feed.py's checks.
+for name, why in ((".env.", "env file"), (".env ", "env file"), (".env:stream", "env file"), (".ENV", "env file"),
+                  ("notes.md:x", "colon"), ("ENV~1", "short Windows name"), ("notes.md.", "dot or a space")):
+    odd = hv / "Feed me" / name
+    odd.write_text("Drummaquill is in a file with an odd name.\n", encoding="utf-8")
+    code, out, fed = hrun("doc", str(odd))
+    check("helper: doc of Feed me/" + name.strip() + " is refused (" + why + ")", code != 0 and fed == (0, 0) and why in out, out)
+    code, out, fed = feed("doc", str(odd), env_file=henv)
+    check("without --helper Feed me/" + name.strip() + " is refused too", code != 0 and fed == (0, 0) and why in out, out)
+    odd.unlink()
+
+# Codex review 2 (blocker): with the token in the title and the body, the refusal printed the title, token and all.
+# A refusal never names the title or any of the source's words, and the token counts in the title, ref and date too.
+tok_page = feeding / "tok.txt"
+tok_page.write_text("Gristlewood notes. " + TOKEN + "\n", encoding="utf-8")
+code, out, fed = hrun("add", "--kind", "note", "--ref", "test:tok1", "--title", "Gristlewood " + TOKEN, "--file", str(tok_page))
+check("token in the title and the body: refused, and the refusal names neither the title nor the token",
+      code != 0 and fed == (0, 0) and "holds your library token" in out and "Gristlewood" not in out and TOKEN not in out, out)
+clean_page = feeding / "clean.txt"
+clean_page.write_text("Gristlewood notes with nothing secret in them.\n", encoding="utf-8")
+for flag, value in (("--title", "Gristlewood " + TOKEN), ("--ref", "test:" + TOKEN), ("--date", "2026-10-17 " + TOKEN)):
+    argv = ["add", "--kind", "note", "--ref", "test:tok2", "--title", "Gristlewood", "--date", "2026-10-17", "--file", str(clean_page)]
+    argv[argv.index(flag) + 1] = value
+    code, out, fed = hrun(*argv)
+    check("token only in " + flag[2:] + ": refused without naming it", code != 0 and fed == (0, 0)
+          and "holds your library token" in out and "Gristlewood" not in out and TOKEN not in out, out)
+check("nothing with the token reached the library", not found("Gristlewood", "test:tok")[0])
+# Codex review 2: wiki-put skipped the token check.
+tok_wiki = hv / "Library" / "tok.md"
+tok_wiki.write_text("# Gristlewood\n\n" + TOKEN + "\n", encoding="utf-8")
+code, out, fed = hrun("wiki-put", "feedtest/tok", "Gristlewood", str(tok_wiki))
+check("helper: wiki-put of a page holding the token is refused without naming it", code != 0
+      and "holds your library token" in out and "Gristlewood" not in out and TOKEN not in out, out)
+code, out, fed = hrun("wiki-put", "feedtest/tok", "Gristlewood " + TOKEN, str(wiki_page))
+check("helper: wiki-put with the token in the title is refused", code != 0 and "holds your library token" in out and TOKEN not in out, out)
+code, out, fed = hrun("wiki-put", "feedtest/" + TOKEN, "Gristlewood", str(wiki_page))
+check("helper: wiki-put with the token in the slug is refused", code != 0 and "holds your library token" in out and TOKEN not in out, out)
+code, out, fed = hrun("wiki-list")
+check("no wiki page holding the token was saved", code == 0 and "feedtest/tok" not in out and "Gristlewood" not in out, out)
 for ref in ("gmail:quenwick", (hv / "Feed me" / "keep.txt").resolve().as_posix()):
     library_call({"action": "forget", "ref": ref})
 
