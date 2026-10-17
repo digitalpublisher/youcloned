@@ -1,34 +1,53 @@
 #!/bin/sh
-# YouCloned key check before a push. A push sends every commit the remote doesn't have yet, not just
-# the newest files, so a key added in an older commit and deleted later would still go up. This scans
-# every file version, commit message and tag being sent (for a new branch: its whole history that isn't
-# already on that remote). Matched values are never printed.
+# YouCloned key check before a push. A push sends every commit the destination doesn't have yet, not
+# just the newest files, so a key added in an older commit and deleted later would still go up. This
+# scans every file version, commit message and tag being sent. Only objects the DESTINATION already has
+# are skipped: Git passes the remote name and the push URL, the hook asks that URL which commits it
+# holds, and when it can't be asked the whole history of each pushed ref is scanned. Remote-tracking
+# refs are never trusted, because the push URL can differ from the fetch URL. Matched values are never
+# printed.
 set -eu
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 rules="$script_dir/../lib/secret-rules.mjs"
 zero=0000000000000000000000000000000000000000
 remote=${1:-}
+push_url=${2:-$remote}
 temporary=$(mktemp "${TMPDIR:-/tmp}/youcloned-push.XXXXXX")
 objects=$(mktemp "${TMPDIR:-/tmp}/youcloned-objects.XXXXXX")
 wanted=$(mktemp "${TMPDIR:-/tmp}/youcloned-wanted.XXXXXX")
 list=$(mktemp "${TMPDIR:-/tmp}/youcloned-list.XXXXXX")
-trap 'rm -f "$temporary" "$objects" "$wanted" "$list"' EXIT HUP INT TERM
+advertised=$(mktemp "${TMPDIR:-/tmp}/youcloned-advertised.XXXXXX")
+held=$(mktemp "${TMPDIR:-/tmp}/youcloned-held.XXXXXX")
+revisions=$(mktemp "${TMPDIR:-/tmp}/youcloned-revisions.XXXXXX")
+trap 'rm -f "$temporary" "$objects" "$wanted" "$list" "$advertised" "$held" "$revisions"' EXIT HUP INT TERM
+
+# Never fetch missing objects from a partial clone's server while checking.
+GIT_NO_LAZY_FETCH=1
+export GIT_NO_LAZY_FETCH
 
 blocked() {
   echo "Blocked: $1" >&2
   exit 1
 }
 
+# What the destination already holds, kept only where this repository has the same commit or tag.
+# No prompt, no output: a failure here just means more gets scanned.
+if [ -n "$push_url" ] && GIT_TERMINAL_PROMPT=0 git ls-remote -- "$push_url" > "$advertised" 2>/dev/null < /dev/null; then
+  cut -f1 < "$advertised" | git cat-file --batch-check='%(objecttype) %(objectname)' 2>/dev/null \
+    | awk '$1 == "commit" || $1 == "tag" { print "^" $2 }' > "$held" || : > "$held"
+fi
+
 while read -r local_ref local_sha remote_ref remote_sha; do
   [ -n "${local_sha:-}" ] || continue
   [ "$local_sha" = "$zero" ] && continue
-  set -- "$local_sha" --not
+  printf '%s\n' "$local_sha" > "$revisions"
+  cat "$held" >> "$revisions"
+  # Git read this value from the destination itself, so it is safe to skip when present here.
   if [ -n "${remote_sha:-}" ] && [ "$remote_sha" != "$zero" ] && git cat-file -e "$remote_sha^{commit}" 2>/dev/null; then
-    set -- "$@" "$remote_sha"
+    printf '^%s\n' "$remote_sha" >> "$revisions"
   fi
-  if [ -n "$remote" ]; then set -- "$@" "--remotes=$remote"; fi
-  git rev-list --objects "$@" > "$objects" 2>/dev/null || blocked "YouCloned's key check could not list the commits being pushed."
+  git rev-list --objects --stdin < "$revisions" > "$objects" 2>/dev/null || blocked "YouCloned's key check could not list the commits being pushed."
   cut -d' ' -f1 < "$objects" | git cat-file --batch-check='%(objecttype) %(objectname)' > "$wanted" || blocked "YouCloned's key check could not read the commits being pushed."
   awk '$1 == "blob" || $1 == "commit" || $1 == "tag" { print $2 }' "$wanted" >> "$list"
 done
