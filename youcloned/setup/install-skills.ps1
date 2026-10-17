@@ -80,11 +80,22 @@ try {
     Write-Host 'Moved the old YouCloned setup skill aside (it clashes with this setup).'
   }
 
-  $New = 0; $Updated = 0
+  $New = 0; $Updated = 0; $Kept = 0
   foreach ($d in Get-ChildItem -LiteralPath $From -Directory) {
     if ($d.Name.StartsWith('.') -or $d.Name -eq 'youcloned-setup') { continue }
     $Target = Join-Path $Skills $d.Name
-    if (Test-Path -LiteralPath $Target) { $Updated++ } else { $New++ }
+    if (Test-Path -LiteralPath $Target) {
+      $Updated++
+      # A pack skill the owner changed is kept: the old copy goes to .youcloned\skills-backup before the refresh.
+      $old = @(Get-ChildItem -LiteralPath $Target -Recurse -File | ForEach-Object { $_.FullName.Substring($Target.Length) + ':' + $_.Length + ':' + (Get-Sha256 $_.FullName) }) | Sort-Object
+      $neu = @(Get-ChildItem -LiteralPath $d.FullName -Recurse -File | ForEach-Object { $_.FullName.Substring($d.FullName.Length) + ':' + $_.Length + ':' + (Get-Sha256 $_.FullName) }) | Sort-Object
+      if (($old -join '|') -ne ($neu -join '|')) {
+        $Keep = Join-Path $env:USERPROFILE ('.youcloned\skills-backup\' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+        New-Item -ItemType Directory -Force -Path $Keep | Out-Null
+        Copy-Item -LiteralPath $Target -Destination (Join-Path $Keep $d.Name) -Recurse
+        $Kept++
+      }
+    } else { $New++ }
     $Tmp = $Target + '.youcloned-new'
     if (Test-Path -LiteralPath $Tmp) { Remove-Item -LiteralPath $Tmp -Recurse -Force }
     Copy-Item -LiteralPath $d.FullName -Destination $Tmp -Recurse
@@ -92,6 +103,7 @@ try {
     Move-Item -LiteralPath $Tmp -Destination $Target
   }
   Write-Host "Installed $New new skills and refreshed $Updated. Your own skills were left as they were."
+  if ($Kept -gt 0) { Write-Host "You had changed $Kept of the pack's skills, so a copy of each is saved in .youcloned\skills-backup in your user folder before the refresh." }
   if (Test-Pack) { Write-Host 'ALL SKILLS READY'; exit 0 }
   Write-Host 'Some skills from the list are still missing (above). Run this again.'
   exit 1

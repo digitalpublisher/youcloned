@@ -74,7 +74,10 @@ export function stepText(step, ctx) {
     case 'skillkey':
       return ctx.needsSkillKey + ' Walk them through it one click at a time and wait for each. Then call setup_next; a new connector can take up to a minute to show up, so if the step still shows not done, wait a moment and call setup_next again.'
     case 'interview':
-      return 'Start the interview now: call load_setup and follow what it returns exactly, then save with save_setup. Leave folder out of save_setup: it is ' + ctx.folder + '. When save_setup says Saved, call setup_next.'
+      // Jon, Oct 17: every step works for someone who already has part of it. A buyer from the first YouCloned (or
+      // anyone with notes about their business in this folder) never answers what their files already say.
+      return 'Start the interview now: call load_setup and follow what it returns exactly, then save with save_setup. Leave folder out of save_setup: it is ' + ctx.folder + '. ' +
+        'Before the first question, look in that folder for what they already wrote about themselves (a CLAUDE.md or YOUCLONED.md, an "about me" or business note, writing samples). If you find any, tell them in one sentence what you found, fill in every answer it already gives, and ask only what is missing; never delete or rewrite their CLAUDE.md. When save_setup says Saved, call setup_next.'
     case 'skills':
       return 'Run with Bash: ' + sh('install-skills') + '. It downloads Jon\'s starter skills pack from YouCloned, checks it, and puts each skill where Claude finds it. ' +
         'Tell them how many skills it installed, then call setup_next.'
@@ -124,6 +127,7 @@ export function setupText(status, skipped, ctx) {
   const n = STEPS.indexOf(next) + 1
   return 'YouCloned setup: ' + p.done + ' of ' + p.total + ' steps done.\n' + list +
     '\n\nNext is step ' + n + ', ' + next.title + ': ' + next.why + '\n' +
+    (p.done > 0 && p.done < p.total ? 'If this is the first setup_next of this chat, start by telling them in one or two sentences which steps they already have (the ones marked done), that you keep everything they already set up and skip those, and that you only do what is missing.\n' : '') +
     'Tell them in one short sentence which step this is and why it matters, then do it:\n' + stepText(next, ctx) +
     '\n\nDo only this step now. Never skip ahead, and never call a step done yourself: setup_next checks it on this computer.'
 }
