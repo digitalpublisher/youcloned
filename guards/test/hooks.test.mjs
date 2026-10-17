@@ -209,3 +209,139 @@ test('--verify on a protected repository proves it without committing or staging
   const throwaway = spawnSync(process.execPath, [installGitHooks, '--verify'], { env, encoding: 'utf8' });
   assert.equal(throwaway.status, 0, throwaway.stdout + throwaway.stderr);
 });
+
+test('pre-push scans history the push URL lacks even when the fetch remote already has it', () => {
+  const { env } = sandbox();
+  const root = repository(env, packHooks);
+  const fetchSide = bareRemote(env);
+  const pushSide = bareRemote(env);
+  git(root, ['remote', 'add', 'origin', fetchSide], env);
+  commit(root, 'leak.txt', fakeKey(), env, ['--no-verify']);
+  remove(root, 'leak.txt', env);
+  assert.equal(git(root, ['push', '-q', '--no-verify', 'origin', 'HEAD:main'], env).status, 0);
+  git(root, ['fetch', '-q', 'origin'], env);
+  git(root, ['remote', 'set-url', '--push', 'origin', pushSide], env);
+  commit(root, 'more.txt', 'clean\n', env);
+  const pushed = git(root, ['push', '-q', 'origin', 'HEAD:fresh'], env);
+  assert.notEqual(pushed.status, 0);
+  assert.match(pushed.stderr, /secret-shaped value/);
+  assert.ok(!(pushed.stdout + pushed.stderr).includes(fakeKey()));
+  assert.notEqual(git(pushSide, ['rev-parse', '--verify', '-q', 'refs/heads/fresh'], env).status, 0);
+});
+
+test('pre-push scans the whole pushed history when the push URL cannot be asked what it holds', () => {
+  const { env } = sandbox();
+  const root = repository(env, packHooks);
+  const fetchSide = bareRemote(env);
+  git(root, ['remote', 'add', 'origin', fetchSide], env);
+  commit(root, 'leak.txt', fakeKey(), env, ['--no-verify']);
+  remove(root, 'leak.txt', env);
+  assert.equal(git(root, ['push', '-q', '--no-verify', 'origin', 'HEAD:main'], env).status, 0);
+  git(root, ['fetch', '-q', 'origin'], env);
+  const head = git(root, ['rev-parse', 'HEAD'], env).stdout.trim();
+  const zero = '0'.repeat(40);
+  const unreachable = path.join(temporary(), 'missing.git');
+  const input = `refs/heads/main ${head} refs/heads/main ${zero}\n`;
+  const run = spawnSync('sh', [path.join(packHooks, 'pre-push'), 'origin', unreachable], { cwd: root, env, encoding: 'utf8', input });
+  assert.notEqual(run.status, 0);
+  assert.match(run.stderr, /secret-shaped value/);
+  assert.ok(!(run.stdout + run.stderr).includes(fakeKey()));
+  assert.ok(!(run.stdout + run.stderr).includes(unreachable), 'the push URL is never printed');
+
+  const clean = repository(env, packHooks);
+  commit(clean, 'notes.txt', 'clean\n', env);
+  const cleanHead = git(clean, ['rev-parse', 'HEAD'], env).stdout.trim();
+  const ok = spawnSync('sh', [path.join(packHooks, 'pre-push'), 'origin', unreachable], { cwd: clean, env, encoding: 'utf8', input: `refs/heads/main ${cleanHead} refs/heads/main ${zero}\n` });
+  assert.equal(ok.status, 0, ok.stderr);
+});
+
+test('--verify fails when only the push check is missing, and says so', () => {
+  const { home, env } = sandbox();
+  assert.equal(spawnSync(process.execPath, [installGitHooks, '--install'], { env, encoding: 'utf8' }).status, 0);
+  fs.writeFileSync(path.join(home, '.youcloned', 'git-hooks', 'pre-push'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  const verified = spawnSync(process.execPath, [installGitHooks, '--verify'], { env, encoding: 'utf8' });
+  assert.equal(verified.status, 1);
+  assert.match(verified.stdout, /PROTECTION NOT PROVEN/);
+  assert.match(verified.stdout, /in a push/);
+  assert.doesNotMatch(verified.stdout, /a commit and/);
+  assert.ok(!verified.stdout.includes('xoxb-youcloned'));
+});
+
+test('--verify on a repository uses its own hooks folder and leaves no objects, refs or worktrees behind', () => {
+  const { home, env } = sandbox();
+  assert.equal(spawnSync(process.execPath, [installGitHooks, '--install'], { env, encoding: 'utf8' }).status, 0);
+  const root = repository(env);
+  commit(root, 'notes.txt', 'clean\n', env);
+  const before = {
+    refs: git(root, ['for-each-ref'], env).stdout,
+    objects: git(root, ['count-objects', '-v'], env).stdout,
+    worktrees: git(root, ['worktree', 'list', '--porcelain'], env).stdout,
+  };
+  const proven = spawnSync(process.execPath, [installGitHooks, '--verify', root], { env, encoding: 'utf8' });
+  assert.equal(proven.status, 0, proven.stdout + proven.stderr);
+  assert.match(proven.stdout, /in a commit, and refused a push/);
+  assert.deepEqual({
+    refs: git(root, ['for-each-ref'], env).stdout,
+    objects: git(root, ['count-objects', '-v'], env).stdout,
+    worktrees: git(root, ['worktree', 'list', '--porcelain'], env).stdout,
+  }, before);
+  assert.equal(git(root, ['status', '--porcelain'], env).stdout, '');
+
+  // A repository-local hooks folder replaces the computer-wide one: the global check passes, this one fails.
+  const own = path.join(home, 'repo-hooks');
+  fs.mkdirSync(own);
+  fs.writeFileSync(path.join(own, 'pre-commit'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  git(root, ['config', 'core.hooksPath', own], env);
+  assert.equal(spawnSync(process.execPath, [installGitHooks, '--verify'], { env, encoding: 'utf8' }).status, 0);
+  const bypassed = spawnSync(process.execPath, [installGitHooks, '--verify', root], { env, encoding: 'utf8' });
+  assert.equal(bypassed.status, 1);
+  assert.match(bypassed.stdout, /PROTECTION NOT PROVEN/);
+  assert.match(bypassed.stdout, /sets its own hooks folder/);
+  assert.match(bypassed.stdout, /skips the computer-wide YouCloned check/);
+
+  // Pointing that setting at the YouCloned folder is protected, and the note says the check still runs.
+  git(root, ['config', 'core.hooksPath', path.join(home, '.youcloned', 'git-hooks')], env);
+  const pointed = spawnSync(process.execPath, [installGitHooks, '--verify', root], { env, encoding: 'utf8' });
+  assert.equal(pointed.status, 0, pointed.stdout + pointed.stderr);
+  assert.match(pointed.stdout, /check still runs there/);
+});
+
+test('--install repairs protection after another tool changes or removes the global hooks path', () => {
+  const { home, env } = sandbox();
+  const target = path.join(home, '.youcloned', 'git-hooks');
+  assert.equal(spawnSync(process.execPath, [installGitHooks, '--install'], { env, encoding: 'utf8' }).status, 0);
+
+  // Another tool points Git at its own folder.
+  const other = path.join(home, 'other-tool-hooks');
+  fs.mkdirSync(other);
+  const ran = path.join(home, 'ran');
+  const otherCommit = `#!/bin/sh\necho other >> "${ran}"\nexit 0\n`;
+  fs.writeFileSync(path.join(other, 'pre-commit'), otherCommit, { mode: 0o755 });
+  git(home, ['config', '--global', 'core.hooksPath', other], env);
+  assert.equal(spawnSync(process.execPath, [installGitHooks, '--verify'], { env, encoding: 'utf8' }).status, 1);
+
+  const repaired = spawnSync(process.execPath, [installGitHooks, '--install'], { env, encoding: 'utf8' });
+  assert.equal(repaired.status, 0, repaired.stderr);
+  const verified = spawnSync(process.execPath, [installGitHooks, '--verify'], { env, encoding: 'utf8' });
+  assert.equal(verified.status, 0, verified.stdout + verified.stderr);
+  const root = repository(env);
+  assert.equal(commit(root, 'notes.txt', 'clean\n', env).status, 0);
+  assert.match(fs.readFileSync(ran, 'utf8'), /other/, 'the other tool\'s hook still runs after the YouCloned check');
+
+  // The other tool removes the setting: --install points Git back at the YouCloned folder.
+  git(home, ['config', '--global', '--unset-all', 'core.hooksPath'], env);
+  assert.equal(spawnSync(process.execPath, [installGitHooks, '--verify'], { env, encoding: 'utf8' }).status, 1);
+  assert.equal(spawnSync(process.execPath, [installGitHooks, '--install'], { env, encoding: 'utf8' }).status, 0);
+  assert.equal(git(home, ['config', '--global', '--get', 'core.hooksPath'], env).stdout.trim(), target);
+  assert.equal(fs.readFileSync(path.join(other, 'pre-commit'), 'utf8'), otherCommit, 'the folder that was left is put back');
+  assert.deepEqual(fs.readdirSync(other), ['pre-commit']);
+  assert.equal(spawnSync(process.execPath, [installGitHooks, '--verify'], { env, encoding: 'utf8' }).status, 0);
+
+  // A hook file deleted by hand is copied back too.
+  fs.rmSync(path.join(target, 'pre-push'));
+  assert.equal(spawnSync(process.execPath, [installGitHooks, '--install'], { env, encoding: 'utf8' }).status, 0);
+  assert.equal(spawnSync(process.execPath, [installGitHooks, '--verify'], { env, encoding: 'utf8' }).status, 0);
+
+  assert.equal(spawnSync(process.execPath, [installGitHooks, '--uninstall'], { env, encoding: 'utf8' }).status, 0);
+  assert.notEqual(git(home, ['config', '--global', '--get', 'core.hooksPath'], env).status, 0);
+});

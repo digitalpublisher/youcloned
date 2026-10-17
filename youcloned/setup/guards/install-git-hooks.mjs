@@ -2,9 +2,10 @@
 // Installs YouCloned's Git key check for every repository on this computer.
 //   --install            put the hooks in place (safe to run again; it also refreshes the hook files)
 //   --uninstall          put everything back the way it was
-//   --verify [repo]      prove the check fires: a planted test key must be refused. With no repo it uses
-//                        a throwaway one; with a repo it tests that repo without committing anything.
-//                        Exit 0 only when proven. Any repository-local core.hooksPath is reported.
+//   --verify [repo]      prove the check fires: a planted test key must be refused on commit, and a push
+//                        whose older commit held one must be refused. With a repo it uses the hooks Git
+//                        runs there (its own core.hooksPath included) inside a scratch repository, so
+//                        nothing is committed or pushed in it. Exit 0 only when both are proven.
 // With no global hooks folder, Git is pointed at ~/.youcloned/git-hooks. When the computer already has a
 // global hooks folder, each hook there is moved to <name>.youcloned-chained and replaced by a small
 // wrapper that runs the YouCloned check FIRST and then the original hook with the same input.
@@ -153,6 +154,8 @@ function undoPlacement(state) {
   }
 }
 
+// Every --install re-asserts the placement against what Git's global hooks path is NOW, so a tool that
+// changed or removed it after an earlier install is repaired instead of trusted.
 function install() {
   let state = readState();
   if (state && state.version !== stateVersion) {
@@ -160,21 +163,24 @@ function install() {
     state = null;
   }
   copyHooks();
-  if (state) {
-    if (state.mode === 'chain') {
-      const chains = hookNames.map((name) => wrapHook(state.originalHooksPath, name));
-      writeState({ ...state, chains });
-    }
+  const existing = globalHooksPath();
+  if (existing && !samePath(existing, targetDirectory) && !path.isAbsolute(existing)) {
+    throw new Error(`Git's global hooks folder is set to a relative path (${existing}), so the key check can't be added safely. Set core.hooksPath to a full path, then run this again.`);
+  }
+  if (state && state.mode === 'chain' && existing && samePath(existing, state.originalHooksPath)) {
+    const chains = hookNames.map((name) => wrapHook(state.originalHooksPath, name));
+    writeState({ ...state, chains });
     return;
   }
-  const existing = globalHooksPath();
+  // The earlier placement no longer matches Git's setting: put it back before placing again.
+  if (state && state.mode === 'chain') undoPlacement(state);
   if (!existing || samePath(existing, targetDirectory)) {
     const result = runGit(['config', '--global', 'core.hooksPath', targetDirectory]);
     if (result.status !== 0) throw new Error(result.stderr.trim() || 'Could not set the global hooks path.');
-    writeState({ version: stateVersion, mode: 'direct', originalHooksPath: null });
+    const originalHooksPath = existing ? (state?.originalHooksPath ?? null) : null;
+    writeState({ version: stateVersion, mode: 'direct', originalHooksPath });
     return;
   }
-  if (!path.isAbsolute(existing)) throw new Error(`Git's global hooks folder is set to a relative path (${existing}), so the key check can't be added safely. Set core.hooksPath to a full path, then run this again.`);
   const chains = hookNames.map((name) => wrapHook(existing, name));
   writeState({ version: stateVersion, mode: 'chain', originalHooksPath: existing, chains });
 }
@@ -201,58 +207,92 @@ function refusedByUs(result) {
   return result.status !== 0 && /secret-shaped value/.test(`${result.stderr}`);
 }
 
+// The hooks folder Git uses in a repository (rev-parse honours every core.hooksPath setting).
+function effectiveHooks(repository) {
+  const result = runGit(['-C', repository, 'rev-parse', '--git-path', 'hooks']);
+  return result.status === 0 && result.stdout.trim() ? path.resolve(repository, result.stdout.trim()) : null;
+}
+
+// A core.hooksPath set by the repository itself (not the computer-wide one), or null.
+function ownHooksSetting(repository) {
+  const scoped = runGit(['-C', repository, 'config', '--show-scope', '--get', 'core.hooksPath']);
+  if (scoped.status === 0) {
+    const [scope, ...rest] = scoped.stdout.trim().split('\t');
+    return ['local', 'worktree'].includes(scope) && rest.join('\t') ? rest.join('\t') : null;
+  }
+  const local = runGit(['-C', repository, 'config', '--local', '--get', 'core.hooksPath']);
+  return local.status === 0 && local.stdout.trim() ? local.stdout.trim() : null;
+}
+
+// Runs the commit check and the push check in a scratch repository wired to the hooks folder Git uses
+// in the repository being checked, so nothing is ever committed, staged or pushed in that repository.
+function prove(scratch, hooks) {
+  const work = path.join(scratch, 'work');
+  const destination = path.join(scratch, 'destination.git');
+  const planted = 'youcloned-verify-planted.txt';
+  const identity = {
+    GIT_AUTHOR_NAME: 'YouCloned check', GIT_AUTHOR_EMAIL: 'check@example.com',
+    GIT_COMMITTER_NAME: 'YouCloned check', GIT_COMMITTER_EMAIL: 'check@example.com',
+  };
+  const environment = { ...process.env, ...identity };
+  const git = (args, options = {}) => runGit(['-C', work, '-c', `core.hooksPath=${hooks}`, '-c', 'commit.gpgSign=false', ...args], { env: environment, ...options });
+  if (runGit(['init', '-q', work]).status !== 0 || runGit(['init', '-q', '--bare', destination]).status !== 0) return { error: 'Git could not make a test repository.' };
+
+  // 1. A commit holding the planted key must be refused.
+  fs.writeFileSync(path.join(work, planted), `${plantedKey()}\n`);
+  git(['add', planted]);
+  const committed = git(['commit', '-q', '-m', 'YouCloned protection check']);
+  const commitRefused = refusedByUs(committed);
+
+  // 2. A push whose OLDER commit held the key (deleted by the newest one) must be refused. The commits are
+  // built directly, so no hook is skipped to make them.
+  const make = (args, input) => { const r = git(args, input === undefined ? {} : { input }); return r.status === 0 ? r.stdout.trim() : null; };
+  const keyBlob = make(['hash-object', '-w', '--stdin'], `${plantedKey()}\n`);
+  const cleanBlob = make(['hash-object', '-w', '--stdin'], 'clean\n');
+  const keyTree = keyBlob && make(['mktree'], `100644 blob ${keyBlob}\t${planted}\n`);
+  const cleanTree = cleanBlob && make(['mktree'], `100644 blob ${cleanBlob}\tnotes.txt\n`);
+  const older = keyTree && make(['commit-tree', '--no-gpg-sign', keyTree, '-m', 'YouCloned protection check: older commit']);
+  const newer = cleanTree && older && make(['commit-tree', '--no-gpg-sign', cleanTree, '-p', older, '-m', 'YouCloned protection check: key deleted']);
+  if (!newer) return { error: 'Git could not make the test commits.' };
+  const pushed = git(['push', '-q', destination, `${newer}:refs/heads/main`]);
+  const landed = runGit(['-C', destination, 'rev-parse', '--verify', '-q', 'refs/heads/main']).status === 0;
+  return { commitRefused, pushRefused: refusedByUs(pushed) && !landed };
+}
+
 function verify(repository) {
   const lines = [];
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'youcloned-verify-'));
-  const planted = 'youcloned-verify-planted.txt';
   try {
     let where;
-    let target;
+    let hooks;
+    let own = null;
     if (repository) {
       const top = runGit(['-C', repository, 'rev-parse', '--show-toplevel']);
       if (top.status !== 0) { process.stdout.write(`PROTECTION NOT PROVEN: ${repository} is not a Git repository.\n`); return 1; }
-      target = top.stdout.trim();
+      const target = top.stdout.trim();
       where = `the repository at ${target}`;
+      hooks = effectiveHooks(target);
+      own = ownHooksSetting(target);
     } else {
-      target = path.join(scratch, 'repo');
-      fs.mkdirSync(target);
-      const init = runGit(['init', '-q', target]);
-      if (init.status !== 0) { process.stdout.write('PROTECTION NOT PROVEN: Git could not make a test repository.\n'); return 1; }
+      const probe = path.join(scratch, 'probe');
+      if (runGit(['init', '-q', probe]).status !== 0) { process.stdout.write('PROTECTION NOT PROVEN: Git could not make a test repository.\n'); return 1; }
       where = 'a throwaway test repository';
+      hooks = effectiveHooks(probe);
     }
+    if (!hooks) { process.stdout.write(`PROTECTION NOT PROVEN: Git could not say which hooks folder ${where} uses.\n`); return 1; }
 
-    const local = runGit(['-C', target, 'config', '--local', '--get-all', 'core.hooksPath']);
-    if (local.status === 0 && local.stdout.trim()) {
-      lines.push(`This repository sets its own hooks folder (core.hooksPath = ${local.stdout.trim()}), which replaces the computer-wide one here.`);
-    }
-
-    let result;
-    if (repository) {
-      // A separate index holds the planted file, so nothing is committed and the owner's staging area is untouched.
-      const index = path.join(scratch, 'index');
-      const environment = { ...process.env, GIT_INDEX_FILE: index };
-      const head = runGit(['-C', target, 'rev-parse', '--verify', '-q', 'HEAD']);
-      if (head.status === 0) runGit(['-C', target, 'read-tree', 'HEAD'], { env: environment });
-      const blob = runGit(['-C', target, 'hash-object', '-w', '--stdin'], { input: `${plantedKey()}\n` });
-      if (blob.status !== 0) { process.stdout.write('PROTECTION NOT PROVEN: Git could not stage the test file.\n'); return 1; }
-      const staged = runGit(['-C', target, 'update-index', '--add', '--cacheinfo', `100644,${blob.stdout.trim()},${planted}`], { env: environment });
-      if (staged.status !== 0) { process.stdout.write('PROTECTION NOT PROVEN: Git could not stage the test file.\n'); return 1; }
-      result = runGit(['-C', target, 'hook', 'run', 'pre-commit'], { env: environment });
-      if (result.status === 129) {
-        // Older Git without "git hook run": run the hook Git would pick (rev-parse honours core.hooksPath).
-        const hookPath = runGit(['-C', target, 'rev-parse', '--git-path', 'hooks/pre-commit']);
-        const file = path.resolve(target, hookPath.stdout.trim());
-        result = fs.existsSync(file) ? spawnSync('sh', [file], { cwd: target, env: environment, encoding: 'utf8' }) : { status: 0, stderr: '' };
-      }
+    const result = prove(scratch, hooks);
+    if (result.error) { process.stdout.write(`PROTECTION NOT PROVEN: ${result.error}\n`); return 1; }
+    const proven = result.commitRefused && result.pushRefused;
+    if (proven) {
+      lines.push(`PROTECTION PROVEN: the YouCloned key check refused a planted test key in a commit, and refused a push whose older commit held one, using the hooks Git runs in ${where}.`);
+      if (own) lines.push(`This repository sets its own hooks folder (core.hooksPath = ${own}), and the check still runs there.`);
     } else {
-      fs.writeFileSync(path.join(target, planted), `${plantedKey()}\n`);
-      runGit(['-C', target, 'add', planted]);
-      result = runGit(['-C', target, '-c', 'user.name=YouCloned check', '-c', 'user.email=check@example.com', 'commit', '-q', '-m', 'YouCloned protection check']);
+      const missed = [!result.commitRefused && 'a commit', !result.pushRefused && 'a push'].filter(Boolean).join(' and ');
+      lines.push(`PROTECTION NOT PROVEN: the YouCloned key check did NOT refuse a planted test key in ${missed}, using the hooks Git runs in ${where}.`);
+      if (own) lines.push(`This repository sets its own hooks folder (core.hooksPath = ${own}), so Git skips the computer-wide YouCloned check here. Remove that setting from this repository, or ask for help adding the check to that folder, then check again.`);
+      else lines.push('Run node install-git-hooks.mjs --install, then check again.');
     }
-
-    const proven = refusedByUs(result);
-    if (proven) lines.unshift(`PROTECTION PROVEN: a planted test key was refused by the YouCloned key check in ${where}.`);
-    else lines.unshift(`PROTECTION NOT PROVEN: a planted test key was NOT refused by the YouCloned key check in ${where}. Run node install-git-hooks.mjs --install, then check again.`);
     process.stdout.write(`${lines.join('\n')}\n`);
     return proven ? 0 : 1;
   } finally {

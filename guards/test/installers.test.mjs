@@ -65,26 +65,28 @@ test('git hook installer is idempotent and reversible', () => {
 });
 
 test('pre-commit blocks staged secrets and allows a clean commit', () => {
+  const home = temporary();
+  const isolated = { ...process.env, HOME: home, USERPROFILE: home, GIT_CONFIG_GLOBAL: path.join(home, 'gitconfig'), GIT_CONFIG_NOSYSTEM: '1' };
   const blockedRepository = temporary();
-  spawnSync('git', ['init', '-q'], { cwd: blockedRepository });
-  spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: blockedRepository });
-  spawnSync('git', ['config', 'user.name', 'Test User'], { cwd: blockedRepository });
-  spawnSync('git', ['config', 'core.hooksPath', path.join(guards, 'git-hooks')], { cwd: blockedRepository });
+  spawnSync('git', ['init', '-q'], { cwd: blockedRepository, env: isolated });
+  spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: blockedRepository, env: isolated });
+  spawnSync('git', ['config', 'user.name', 'Test User'], { cwd: blockedRepository, env: isolated });
+  spawnSync('git', ['config', 'core.hooksPath', path.join(guards, 'git-hooks')], { cwd: blockedRepository, env: isolated });
   const key = 'xoxb-' + 'M'.repeat(20);
   fs.writeFileSync(path.join(blockedRepository, 'fixture.txt'), key);
-  spawnSync('git', ['add', 'fixture.txt'], { cwd: blockedRepository });
-  const blocked = spawnSync('git', ['commit', '-m', 'blocked'], { cwd: blockedRepository, encoding: 'utf8' });
+  spawnSync('git', ['add', 'fixture.txt'], { cwd: blockedRepository, env: isolated });
+  const blocked = spawnSync('git', ['commit', '-m', 'blocked'], { cwd: blockedRepository, env: isolated, encoding: 'utf8' });
   assert.notEqual(blocked.status, 0);
   assert.ok(!(blocked.stdout + blocked.stderr).includes(key));
 
   const cleanRepository = temporary();
-  spawnSync('git', ['init', '-q'], { cwd: cleanRepository });
-  spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: cleanRepository });
-  spawnSync('git', ['config', 'user.name', 'Test User'], { cwd: cleanRepository });
-  spawnSync('git', ['config', 'core.hooksPath', path.join(guards, 'git-hooks')], { cwd: cleanRepository });
+  spawnSync('git', ['init', '-q'], { cwd: cleanRepository, env: isolated });
+  spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: cleanRepository, env: isolated });
+  spawnSync('git', ['config', 'user.name', 'Test User'], { cwd: cleanRepository, env: isolated });
+  spawnSync('git', ['config', 'core.hooksPath', path.join(guards, 'git-hooks')], { cwd: cleanRepository, env: isolated });
   fs.writeFileSync(path.join(cleanRepository, 'fixture.txt'), 'clean staged content\n');
-  spawnSync('git', ['add', 'fixture.txt'], { cwd: cleanRepository });
-  const clean = spawnSync('git', ['commit', '-m', 'clean'], { cwd: cleanRepository, encoding: 'utf8' });
+  spawnSync('git', ['add', 'fixture.txt'], { cwd: cleanRepository, env: isolated });
+  const clean = spawnSync('git', ['commit', '-m', 'clean'], { cwd: cleanRepository, env: isolated, encoding: 'utf8' });
   assert.equal(clean.status, 0, clean.stderr);
   assert.equal(fs.existsSync(preCommit), true);
 });
