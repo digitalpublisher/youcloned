@@ -219,11 +219,15 @@
       "fix": "Nothing sends that we didn't write and okay (send gate)",
       "jon_file": null,
       "card": "bnsnstack#207",
-      "buyer_file": "any clone that sends email for a buyer",
+      "buyer_file": "hooks/gate.js (the crew reads and drafts only: every connector call that sends, posts or replies is refused) + the Review drafts prompt in hooks/register.js (shows exactly what goes where and waits for the buyer's yes)",
       "buyers": "yes",
-      "mac": "to-port",
-      "pc": "to-port",
-      "check": null
+      "mac": "shipped",
+      "pc": "shipped",
+      "check": {
+        "mac": "grep -q \"'send', 'post', 'reply'\" hooks/gate.js && grep -q \"wait for my yes\" hooks/register.js",
+        "pc": "if ((Select-String -Quiet -SimpleMatch -Path hooks\\gate.js -Pattern \"'send', 'post', 'reply'\") -and (Select-String -Quiet -Path hooks\\register.js -Pattern 'wait for my yes')) { exit 0 } else { exit 1 }"
+      },
+      "note": "Oct 17: already in the add-on. A crew member can't send anything (gate.js refuses send, post, reply and every other change tool), and nothing goes out until the buyer says yes on the Review drafts step. The Zoom lesson's own sender (agent-g) gets its row checked with that lesson."
     },
     {
       "id": "agent-b",
@@ -231,11 +235,15 @@
       "fix": "No income claims or promises in any answer (claim gate)",
       "jon_file": "claim_gate.py",
       "card": null,
-      "buyer_file": "every crew member that writes to customers",
-      "buyers": "yes",
-      "mac": "to-port",
-      "pc": "to-port",
-      "check": null
+      "buyer_file": "hooks/claims.js, called by hooks/gate.js on every crew draft (anything written under crew/<name>/drafts)",
+      "buyers": "adapt",
+      "mac": "in-pr",
+      "pc": "in-pr",
+      "check": {
+        "mac": "grep -q \"claimProblems(call.content)\" hooks/gate.js && grep -q \"results or timeframe promise\" hooks/claims.js",
+        "pc": "if ((Select-String -Quiet -SimpleMatch -Path hooks\\gate.js -Pattern 'claimProblems(call.content)') -and (Select-String -Quiet -Path hooks\\claims.js -Pattern 'results or timeframe promise')) { exit 0 } else { exit 1 }"
+      },
+      "note": "Oct 17 (adapted): the support mode of Jon's claim gate, ported to hooks/claims.js. A crew draft with an earnings figure, an earnings or results claim, a results or timeframe promise, or a refund, price or discount promise is refused and the crew rewrites it. Stated prices and a stated money-back policy still pass. Left out for buyers: Jon's hold-off rule (it is about his own Command sale) and his no-stall wording rule (his voice). Notes outside drafts/ are not checked, so the crew can still write down what a customer said. Test: tests/youcloned.test.ts, fails without the gate change."
     },
     {
       "id": "agent-c",
