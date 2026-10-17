@@ -294,6 +294,8 @@ async function refreshLive($, withWords) {
       live.claudeAt = await $.clock.now()
     }
   } catch {}
+  // Codex's plan comes from its own log on this computer (no SkillKey call), so the slow tick still reads it.
+  if (withWords && codexReady) { try { await readCodexPlan($) } catch {} }
   withWords = false // same reason: no unasked SkillKey calls; the words gauge updates from SkillKey's own replies
   if (withWords) {
     try {
@@ -580,6 +582,7 @@ function nightFolder() {
 // Every YouCloned chat writes the numbers, but only a session in Claude's desktop app names itself as
 // the one the dashboard's talk button reaches (the dashboard lives in that app's browser pane).
 async function writeState($) {
+  await liveCards($)
   try {
     let mine = { session: await $.session.id(), listening }
     if (!deskSession) {
@@ -587,6 +590,27 @@ async function writeState($) {
     }
     await $.fs.write(dataDir() + '/state.json', JSON.stringify({ ...live, name: lastName, skillKey: !!skillKeyServer, ...mine, at: await $.clock.now() }))
   } catch {}
+}
+
+// The dashboard's crew, library and Codex cards: only what this computer has, never a sample. A card with
+// nothing here stays hidden on the dashboard.
+async function liveCards($) {
+  try { await refreshDrafts($) } catch {}
+  live.crewOn = !!project
+  live.crew = CREW.map(c => {
+    const s = crew[c.name] || {}
+    return { name: c.name, title: c.title, what: c.what, drafts: (s.drafts || []).length, running: !!s.running, lastRun: s.lastRun || 0, review: project ? reviewJob(c).text : '' }
+  })
+  live.codexReady = codexReady
+  let sources = null
+  try { // the sources the librarian recorded as fed (feed.py keeps them in Library/.fed.json)
+    const folder = await cloneFolder($)
+    if (folder) {
+      const fed = JSON.parse(await $.fs.read(folder + '/Library/.fed.json'))
+      sources = new Set(['hashes', 'files'].flatMap(k => (fed && fed[k] && typeof fed[k] === 'object' ? Object.keys(fed[k]) : []))).size
+    }
+  } catch {}
+  live.library = { sources }
 }
 
 // Talk is a toggle: a press while the clone listens stops it, otherwise it starts it.

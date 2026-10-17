@@ -4,10 +4,11 @@
 GET  /            the dashboard
 GET  /state.json  live numbers the YouCloned add-on writes (plan usage, words, name)
 POST /do          {"text": "..."} queues a job; the add-on puts it into Claude's chat
+POST /open        {"url": "https://..."} opens a BNSN, YouTube or OpenAI address in this computer's web browser
 POST /talk        starts a voice conversation in the owner's YouCloned chat: through Jon's voice relay where
                   one runs, otherwise queued like /do so the add-on types it into the chat
 """
-import json, os, sys, time, urllib.request
+import json, os, subprocess, sys, time, urllib.parse, urllib.request
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -15,6 +16,26 @@ DATA = os.path.join(os.path.expanduser("~"), ".youcloned")
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 4600
 RELAY = "http://127.0.0.1:8771/say"
 TALK = "Talk was pressed in YouCloned. Start a voice conversation now: call converse with a short hello and listen (listen_duration_min 8, listen_duration_max 600, so a short pause never ends their turn)."
+# The dashboard's links (the BNSN apps, Jon's video, the course, Codex) open only on these sites.
+OPEN_SITES = ("bnsn.ai", "youtube.com", "youtu.be", "openai.com")
+
+
+def can_open(url):
+    try:
+        u = urllib.parse.urlparse(url)
+    except Exception:
+        return False
+    host = (u.hostname or "").lower()
+    return u.scheme == "https" and any(host == d or host.endswith("." + d) for d in OPEN_SITES)
+
+
+def open_in_browser(url):
+    if sys.platform == "darwin":
+        subprocess.Popen(["/usr/bin/open", url])
+    elif os.name == "nt":
+        os.startfile(url)
+    else:
+        subprocess.Popen(["xdg-open", url])
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -70,6 +91,22 @@ class Handler(SimpleHTTPRequestHandler):
                     self.send_response(204)
                 except Exception:
                     self.send_response(502)
+            self.end_headers()
+            return
+        if self.path == "/open":
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                url = str(json.loads(self.rfile.read(min(n, 20000)) or b"{}").get("url", "")).strip()
+            except Exception:
+                url = ""
+            if not can_open(url):
+                self.send_error(400)
+                return
+            try:
+                open_in_browser(url)
+                self.send_response(204)
+            except Exception:
+                self.send_response(502)
             self.end_headers()
             return
         if self.path != "/do":

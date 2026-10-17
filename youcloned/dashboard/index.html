@@ -162,6 +162,8 @@ p{margin:0}
 .wave{animation:drift 6s linear infinite}
 @keyframes drift{to{transform:translateX(-120px)}}
 .duo{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}
+.duo.n1{grid-template-columns:minmax(0,1fr)}
+.duo.n3 > :first-child{grid-column:1/-1}
 .big{font-size:38px}
 .mini-split{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12.5px;color:var(--ink-2);margin-top:8px}
 .mini-split span{display:flex;align-items:center;gap:6px}
@@ -183,37 +185,6 @@ p{margin:0}
 .vid .th{aspect-ratio:16/9;border-radius:8px;background:url(assets/latest-video.jpg) center/cover;max-width:100%}
 .vid b{font-family:var(--display);font-size:14.5px;display:block}
 .vid p{font-size:12.5px;color:var(--ink-2);margin:4px 0 8px}
-
-/* job view */
-.jobhead{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
-.jobhead h2{font-size:22px;letter-spacing:-.01em}
-.jobhead p{color:var(--ink-2);font-size:13.5px}
-.jobhead .sp{flex:1}
-.track{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
-.stp{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--surface);display:flex;flex-direction:column;gap:3px;font-size:12.5px;color:var(--ink-2)}
-.stp b{color:var(--ink);font-size:13px}
-.stp .who2{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--accent-ink)}
-.stp.cl .who2{color:var(--claude-o)}
-.stp.done{border-color:color-mix(in oklab,var(--accent),transparent 55%)}
-.stp.now{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
-.doc{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:22px 26px;font:16px/1.7 Georgia,"Times New Roman",serif;color:var(--ink);max-width:68ch}
-.doc .lbl{font:600 12px var(--body);color:var(--ink-3);margin-bottom:10px;display:flex;gap:8px;align-items:center}
-.doc mark{background:var(--accent-soft);color:inherit;border-radius:3px;padding:0 2px}
-.next{display:flex;flex-wrap:wrap;gap:8px}
-.next .btn .tag{font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:999px;background:var(--amber-soft);color:var(--amber)}
-.stats{display:flex;gap:18px;flex-wrap:wrap;font-size:13px;color:var(--ink-2)}
-.stats b{color:var(--ink);font-family:var(--display);font-size:18px;display:block}
-
-/* money view */
-.chart svg{display:block;width:100%;height:auto}
-.barrow{display:grid;grid-template-columns:150px 1fr 60px;gap:10px;align-items:center;padding:7px 0;font-size:13px}
-.barrow .tr{height:11px;background:var(--sunk);border-radius:0 4px 4px 0}
-.barrow .fl{height:100%;background:var(--accent);border-radius:0 4px 4px 0}
-.barrow .v{text-align:right;color:var(--ink-2)}
-.find{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:9px 0;border-top:1px solid var(--line);font-size:13.5px}
-.find:first-child{border-top:0;padding-top:0}
-.find .amt{font-weight:700;color:var(--amber);text-align:right}
-.find small{color:var(--ink-3);font-size:12px}
 
 /* explainer */
 .rules{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
@@ -288,304 +259,357 @@ body{padding:0;background:var(--ground)}
 .sample{display:inline-block;font:600 11px var(--body);color:var(--ink-3);background:var(--sunk);border-radius:5px;padding:2px 7px;margin-left:8px}
 .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--ink);color:var(--surface);border-radius:10px;padding:9px 14px;font:600 13px var(--body);opacity:0;transition:opacity .2s;pointer-events:none;z-index:9}
 .toast.on{opacity:1}
+.acts{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}
+.need .btn{margin-left:auto}
+.lessons.plain{counter-reset:les}
+.lessons.plain .lw::before{display:none}
+.lessons.plain .lw{counter-increment:les}
+.lessons.plain .lw span{flex:none;width:22px;color:var(--ink-3);font:700 12px var(--display)}
+.libn{display:flex;align-items:baseline;gap:8px}
+.libn small{color:var(--ink-3);font-size:13px}
+.pb > p.note{color:var(--ink-2);font-size:13.5px}
+@media (max-width:560px){.vbar .logo{display:none}.crumbs{margin-left:0}.crumbs button{padding:5px 8px}}
+@media (max-width:900px){.duo[class]{grid-template-columns:minmax(0,1fr)}.duo.n3 > :first-child{grid-column:auto}}
 </style></head><body>
     <section class="view app" aria-label="YouCloned view">
       <div class="vbar">
         <button class="logo" type="button" data-m="home" aria-label="YouCloned home"><img class="lg-lt" src="assets/youcloned-logo-blue.png" alt="YouCloned"><img class="lg-dk" src="assets/youcloned-logo-blue-dark.png" alt="YouCloned"></button>
-        <div class="crumbs" role="tablist"><button type="button" data-m="home" class="on">Dashboard</button><button type="button" data-m="money">Money</button><button type="button" data-m="crew">Crew</button><button type="button" data-m="codex">Codex</button><button type="button" data-m="setup">Setup</button><button type="button" data-m="learn">Learn</button></div>
+        <div class="crumbs" role="tablist"><button type="button" data-m="home" class="on">Dashboard</button><button type="button" data-m="crew">Crew</button><button type="button" data-m="codex">Codex</button><button type="button" data-m="setup">Setup</button><button type="button" data-m="learn">Learn</button></div>
         <span class="sp"></span>
       </div>
 
-      <!-- HOME -->
+      <!-- HOME: every line and card here comes from this computer (state.json) or Jon's feed, never a sample -->
       <div class="vbody" data-v="home">
         <div class="hero" id="hero">
           <div>
             <div class="who">
               <button class="mark" type="button" id="talk" aria-label="Talk to your clone"><span class="ring"></span><span class="ring"></span><span class="ring"></span><img src="assets/youcloned-mark-white.png" alt=""></button>
-              <div><h2><span id="hello">Hello</span>, <span id="who">there</span></h2><div class="sub" id="talkhint">Type in Claude, or tap a job</div></div>
+              <div><h2><span id="hello">Hello</span><span id="whoW" hidden>, <span id="who"></span></span></h2><div class="sub" id="talkhint">Tap the logo to talk, or type in Claude</div></div>
             </div>
-            <div class="today">
-              <div><i></i>Three emails need you</div>
-              <div><i></i>Four support drafts are ready</div>
-              <div><i></i>Garden Course launch: VSL lead is next</div>
-            </div>
+            <div class="today" id="today" hidden></div>
           </div>
           <div class="meters">
-            <div class="meter"><svg class="g" viewBox="0 0 100 100" aria-hidden="true"><defs><clipPath id="c1"><circle cx="50" cy="50" r="44"/></clipPath></defs><circle cx="50" cy="50" r="44" fill="rgba(255,255,255,.1)"/><g clip-path="url(#c1)"><g id="claudeFill"><g class="wave"><path d="M0 64 Q15 58 30 64 T60 64 T90 64 T120 64 T150 64 T180 64 T210 64 T240 64 V220 H0 Z" fill="#e59672"/></g></g></g></svg><div><div class="num"><span id="claudePct">...</span><small>% left</small></div><div class="l" id="claudeL">Claude plan · this 5 hours</div></div></div>
-            <div class="meter"><svg class="g" viewBox="0 0 100 100" aria-hidden="true"><defs><clipPath id="c2"><circle cx="50" cy="50" r="44"/></clipPath></defs><circle cx="50" cy="50" r="44" fill="rgba(255,255,255,.1)"/><g clip-path="url(#c2)"><g id="codexFill" transform="translate(0,-23)"><g class="wave" style="animation-duration:7.5s"><path d="M0 62 Q15 56 30 62 T60 62 T90 62 T120 62 T150 62 T180 62 T210 62 T240 62 V220 H0 Z" fill="#8fb6f4"/></g></g></g></svg><div><div class="num"><span id="codexPct">...</span><small>% left</small></div><div class="l" id="codexL">Codex plan</div></div></div>
+            <div class="meter"><svg class="g" viewBox="0 0 100 100" aria-hidden="true"><defs><clipPath id="c1"><circle cx="50" cy="50" r="44"/></clipPath></defs><circle cx="50" cy="50" r="44" fill="rgba(255,255,255,.1)"/><g clip-path="url(#c1)"><g id="claudeFill" transform="translate(0,30)"><g class="wave"><path d="M0 64 Q15 58 30 64 T60 64 T90 64 T120 64 T150 64 T180 64 T210 64 T240 64 V220 H0 Z" fill="#e59672"/></g></g></g></svg><div><div class="num"><span id="claudePct">...</span><small id="claudeU" hidden>% left</small></div><div class="l" id="claudeL">Claude plan</div></div></div>
+            <div class="meter"><svg class="g" viewBox="0 0 100 100" aria-hidden="true"><defs><clipPath id="c2"><circle cx="50" cy="50" r="44"/></clipPath></defs><circle cx="50" cy="50" r="44" fill="rgba(255,255,255,.1)"/><g clip-path="url(#c2)"><g id="codexFill" transform="translate(0,32)"><g class="wave" style="animation-duration:7.5s"><path d="M0 62 Q15 56 30 62 T60 62 T90 62 T120 62 T150 62 T180 62 T210 62 T240 62 V220 H0 Z" fill="#8fb6f4"/></g></g></g></svg><div><div class="num"><span id="codexPct">...</span><small id="codexU" hidden>% left</small></div><div class="l" id="codexL">Codex plan</div></div></div>
             <div class="meter"><span class="wl" aria-hidden="true"><svg viewBox="0 0 96 96"><rect x="12" y="24" width="72" height="54" rx="12" fill="none" stroke="#fff" stroke-width="6"/><path d="M20 24l38-10c4-1 8 2 8 6v4" fill="none" stroke="#fff" stroke-width="6" stroke-linejoin="round"/><g stroke="#fff" stroke-width="6" stroke-linecap="round"><path d="M25 43h26"/><path d="M25 56h18"/></g><rect x="60" y="44" width="24" height="18" rx="6" fill="#fff"/></svg></span><div><div class="num" id="words">...</div><div class="l" id="wordsL">BNSN words</div></div></div>
           </div>
         </div>
 
-        <div class="duo">
-          <div class="panel"><div class="ph"><span class="hic" style="--hc:var(--accent)"><svg viewBox="0 0 24 24"><path d="M12 3v18M16 7.5c0-1.9-1.8-3-4-3s-4 1.1-4 3 1.8 2.6 4 3 4 1.2 4 3.2-1.8 3.3-4 3.3-4-1.2-4-3.1"/></svg></span><h2>Made or saved this week</h2><span class="sample">Sample</span></div>
-            <div class="pb"><div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><span class="num big">$7,514</span><span class="pill">Up 17%</span></div>
-              <div class="mini-split"><span><i style="background:var(--accent)"></i>Sales $4,120</span><span><i style="background:var(--violet)"></i>Time $3,180</span><span><i style="background:var(--amber)"></i>Bills $214</span></div></div></div>
-          <div class="panel"><div class="ph"><span class="hic" style="--hc:var(--amber)"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.4"/><path d="M3.5 19c.7-3 2.8-4.5 5.5-4.5s4.8 1.5 5.5 4.5M15 14.3c2.4 0 4.2 1.3 5 3.7"/></svg></span><h2>Your crew</h2><span class="sample">Sample</span><span class="meta">4 need you</span></div>
-            <div class="pb">
-              <div class="need"><div><b>Inbox helper</b><small>Sorted 38 emails</small></div><span class="pill warn">3 need you</span></div>
-              <div class="need"><div><b>Support helper</b><small>Answers from your rules</small></div><span class="pill">4 drafts</span></div>
-              <div class="need"><div><b>Comment helper</b><small>Skipped two trolls</small></div><span class="pill">12 drafts</span></div>
-            </div></div>
+        <div class="duo" id="homecards" hidden>
+          <div class="panel" id="hc-setup" hidden><div class="ph"><span class="hic" style="--hc:var(--accent)"><svg viewBox="0 0 24 24"><path d="M5 12l4 4L19 6"/></svg></span><h2>Set up your clone</h2><span class="meta" id="hs-count"></span></div>
+            <div class="pb"><b id="hs-title"></b><p class="note" id="hs-why"></p>
+              <div class="acts"><button class="btn sm primary" type="button" data-job="setup">Do it for me</button><button class="btn sm" type="button" data-m="setup">See every step</button></div></div></div>
+          <div class="panel" id="hc-crew" hidden><div class="ph"><span class="hic" style="--hc:var(--amber)"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.4"/><path d="M3.5 19c.7-3 2.8-4.5 5.5-4.5s4.8 1.5 5.5 4.5M15 14.3c2.4 0 4.2 1.3 5 3.7"/></svg></span><h2>Your crew</h2><span class="meta" id="hcr-meta"></span></div>
+            <div class="pb" id="hcr-list"></div></div>
+          <div class="panel" id="hc-lib" hidden><div class="ph"><span class="hic" style="--hc:var(--violet)"><svg viewBox="0 0 24 24"><path d="M5 4h4v16H5zM10 4h4v16h-4zM15.5 5l3.6-.8 3 15.6-3.6.8z"/></svg></span><h2>Your library</h2></div>
+            <div class="pb"><div class="libn"><span class="num big" id="hl-n"></span><small id="hl-l">sources</small></div><p class="note" style="margin-top:6px">Your clone searches these first when you ask about your business.</p>
+              <div class="acts"><button class="btn sm" type="button" data-job="library">What’s in my library?</button></div></div></div>
         </div>
 
-        <div class="panel"><div class="ph"><span class="hic" style="--hc:var(--accent)"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span><h2>Your BNSN apps</h2></div>
+        <div class="panel"><div class="ph"><span class="hic" style="--hc:var(--accent)"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span><h2>BNSN apps</h2></div>
           <div class="pb"><div class="apps">
-            <div class="app"><div class="plate"><img src="assets/logo-bnsn-white.png" alt="BNSN"></div><button class="btn" type="button">Open</button></div>
-            <div class="app"><div class="plate"><img src="assets/logo-bookbuilder-white.png" alt="BookBuilder"></div><button class="btn" type="button">Open</button></div>
-            <div class="app"><div class="plate"><img src="assets/logo-improver-white.png" alt="Improver"></div><button class="btn" type="button">Open</button></div>
-            <div class="app"><div class="plate"><img src="assets/logo-coursebuilder-white.png" alt="CourseBuilder"></div><button class="btn primary" type="button">Get it</button></div>
-            <div class="app"><div class="plate"><span class="ob"><span><svg viewBox="0 0 24 24"><circle cx="7" cy="12" r="3"/><circle cx="17" cy="12" r="3"/><path d="M10 12h4"/></svg></span>OfferBuilder</span></div><button class="btn primary" type="button">Get it</button></div>
-            <div class="app"><div class="plate"><img src="assets/logo-aic-white.png" alt="AI Collective"></div><button class="btn primary" type="button">Join</button></div>
+            <div class="app"><div class="plate"><img src="assets/logo-bnsn-white.png" alt="BNSN"></div><button class="btn" type="button" data-open="https://app.bnsn.ai">Open</button></div>
+            <div class="app"><div class="plate"><img src="assets/logo-bookbuilder-white.png" alt="BookBuilder"></div><button class="btn" type="button" data-open="https://bookbuilder.bnsn.ai">Open</button></div>
+            <div class="app"><div class="plate"><img src="assets/logo-improver-white.png" alt="Improver"></div><button class="btn" type="button" data-open="https://improver.bnsn.ai">Open</button></div>
+            <div class="app"><div class="plate"><img src="assets/logo-coursebuilder-white.png" alt="CourseBuilder"></div><button class="btn" type="button" data-open="https://coursebuilder.bnsn.ai">Open</button></div>
+            <div class="app"><div class="plate"><img src="assets/logo-aic-white.png" alt="AI Collective"></div><button class="btn" type="button" data-open="https://collective.bnsn.ai">Open</button></div>
           </div></div></div>
 
         <div class="panel"><div class="ph"><span class="hic" style="--hc:var(--rose)"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></span><h2>New from Jon</h2></div>
-          <div class="pb vid"><div class="th" aria-hidden="true"></div><div><b>How To Write The Story In A Video Sales Letter (VSL) With AI: Step 2 of 9</b><p>The skill that writes your story section is ready.</p><button class="btn sm primary" type="button">Write my story section</button></div></div></div>
+          <div class="pb vid"><div class="th" aria-hidden="true"></div><div><b>How To Write The Story In A Video Sales Letter (VSL) With AI: Step 2 of 9</b><p>The skill that writes your story section is ready.</p><div class="acts" style="margin-top:0"><button class="btn sm primary" type="button" data-feedjob="Write the story section of my VSL with Jon's VSL Story Writer skill.">Write my story section</button><button class="btn sm" type="button" data-watch data-open="https://www.youtube.com/watch?v=j058ugnLtUE">Watch the video</button></div></div></div></div>
       </div>
 
-      <!-- JOB -->
-      <div class="vbody" data-v="job" hidden>
-        <button class="back" type="button" data-m="home">‹ Back to your day</button>
-        <div class="jobhead"><div><h2>VSL lead</h2><p>Backyard Garden Course · started from Claude a minute ago</p></div><span class="sp"></span><span class="pill">Passed every check</span></div>
-        <div class="track">
-          <div class="stp done"><span class="who2">SkillKey</span><b>Brief</b>Jon's method, for this job</div>
-          <div class="stp done cl"><span class="who2">Your Claude</span><b>Draft</b>Written on your plan</div>
-          <div class="stp done"><span class="who2">SkillKey</span><b>Jon's checklist</b>Two fixes made</div>
-          <div class="stp done"><span class="who2">Codex</span><b>Second opinion</b>No problems found</div>
-        </div>
-        <div class="doc">
-          <div class="lbl">Your lead · draft 2</div>
-          <p>If you've ever planted tomatoes in May and pulled up nothing but leaves in August, the problem was never your thumb, and I can prove it in the next four minutes.</p>
-          <p style="margin-top:12px">Because the reason most backyard gardens fail has nothing to do with sun, water or seeds. It's <mark>one mistake you make before you plant anything</mark>, and once you see it, you'll never lose another season.</p>
-        </div>
-        <div class="stats"><span><b>1,850</b>words from your wallet</span><span><b>1.5 hours</b>saved</span><span><b>$180</b>at your rate</span></div>
-        <div class="next">
-          <button class="btn primary" type="button">Write the story section next</button>
-          <button class="btn" type="button">Save to my project</button>
-          <button class="btn" type="button">Make it sell harder with Improver</button>
-          <button class="btn" type="button">Turn it into a course <span class="tag">Get CourseBuilder</span></button>
-        </div>
-      </div>
-
-      <!-- MONEY -->
-      <div class="vbody" data-v="money" hidden>
-        <div class="panel"><div class="ph"><span class="hic" style="--hc:var(--accent)"><svg viewBox="0 0 24 24"><path d="M12 3v18M16 7.5c0-1.9-1.8-3-4-3s-4 1.1-4 3 1.8 2.6 4 3 4 1.2 4 3.2-1.8 3.3-4 3.3-4-1.2-4-3.1"/></svg></span><h2>Made or saved this week</h2><span class="sample">Sample</span><span class="meta">Sales from Stripe · hours from your jobs</span></div>
-          <div class="pb"><div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><span class="num big">$7,514</span><span class="pill">Up 17% on last week</span></div>
-            <div class="mini-split"><span><i style="background:var(--accent)"></i>Sales $4,120</span><span><i style="background:var(--violet)"></i>Time saved $3,180 (26.5 hours at $120)</span><span><i style="background:var(--amber)"></i>Bills found $214</span></div>
-            <div class="chart" id="trend" style="margin-top:12px"></div></div></div>
-        <div class="duo">
-          <div class="panel"><div class="ph"><span class="hic" style="--hc:var(--accent)"><svg viewBox="0 0 24 24"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></svg></span><h2>Sales by product</h2><span class="sample">Sample</span></div><div class="pb" id="bars"></div></div>
-          <div class="panel"><div class="ph"><span class="hic" style="--hc:var(--amber)"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></svg></span><h2>Money finder</h2><span class="sample">Sample</span></div>
-            <div class="pb">
-              <div class="find"><b>Old email tool</b><span class="amt">$183/mo</span><small>Your list moved in June</small></div>
-              <div class="find"><b>Zoom Pro</b><span class="amt">$16/mo</span><small>No meetings in 60 days</small></div>
-              <div class="find"><b>Canva Pro</b><span class="amt">$15/mo</span><small>Last used 94 days ago</small></div>
-            </div></div>
-        </div>
-      </div>
-      <!-- CREW -->
+      <!-- CREW: the helpers this add-on has, with the drafts waiting in their folders -->
       <div class="vbody" data-v="crew" hidden>
-        <div class="vhead"><h2>Your crew</h2><span class="sample">Sample</span><p>Each helper has one job, a playbook and a passed test. None of them can send, post or spend without your OK.</p></div>
-        <div class="crewgrid">
-          <div class="panel bot"><div class="bt"><b>Inbox helper</b><span class="pill warn">3 need you</span></div><p>Sorts Gmail every 30 minutes and drafts replies in your voice.</p><div class="score"><span class="sb"><i style="width:99%"></i></span>412 of 416 test questions</div><button class="btn sm primary" type="button">Review 3 emails</button></div>
-          <div class="panel bot"><div class="bt"><b>Support helper</b><span class="pill">4 drafts</span></div><p>Answers customer questions from your rules. Hands refunds to you.</p><div class="score"><span class="sb"><i style="width:99.7%"></i></span>1,212 of 1,216 test questions</div><button class="btn sm primary" type="button">Review 4 drafts</button></div>
-          <div class="panel bot"><div class="bt"><b>Comment helper</b><span class="pill">12 drafts</span></div><p>Drafts YouTube replies, skips trolls and arguments.</p><div class="score"><span class="sb"><i style="width:98%"></i></span>196 of 200 test questions</div><button class="btn sm" type="button">Review 12 replies</button></div>
-          <div class="panel bot"><div class="bt"><b>Clip cutter</b><span class="pill">Waiting</span></div><p>Cuts 20 clips from every new video for Shorts and Reels.</p><div class="score"><span class="sb"><i style="width:100%"></i></span>40 of 40 test clips</div></div>
-          <div class="panel bot"><div class="bt"><b>Watchdog</b><span class="pill">All on time</span></div><p>Checks every helper ran and tells you when one didn't.</p><div class="score"><span class="sb"><i style="width:100%"></i></span>25 of 25 test checks</div></div>
-          <div class="panel bot add"><b>Add a helper</b><p>Pick one job. Your clone writes the playbook and the hardest test it can.</p><button class="btn sm" type="button">Add a helper</button></div>
-        </div>
+        <div class="vhead"><h2>Your crew</h2><p>Your crew reads and drafts. The safety gate stops every post, send, purchase, refund, cancel and delete in code, so nothing goes out without you.</p></div>
+        <div class="crewgrid" id="crewgrid"></div>
+        <div class="panel bot add" id="crew-empty"><b>Your crew starts after setup</b><p>Once your clone knows you and your business, your Support and Inbox helpers can start drafting for you.</p><button class="btn sm primary" type="button" data-job="setup">Set me up</button></div>
       </div>
 
       <!-- CODEX -->
       <div class="vbody" data-v="codex" hidden>
-        <div class="vhead"><h2>Codex</h2><p>A second AI that checks Claude's work before you use it. It runs on your own ChatGPT plan.</p></div>
-        <div class="duo">
-          <div class="panel"><div class="ph"><h2>Recent second opinions</h2><span class="sample">Sample</span><span class="meta">This week</span></div>
-            <div class="pb">
-              <div class="need"><div><b>VSL lead, Garden Course</b><small>No problems found</small></div><span class="pill">Passed</span></div>
-              <div class="need"><div><b>Sales page, Seed Starter Kit</b><small>Refund said 30 days in one place, 60 in another</small></div><span class="pill warn">Fixed</span></div>
-              <div class="need"><div><b>Welcome email 3</b><small>A link pointed to the old checkout</small></div><span class="pill warn">Fixed</span></div>
-            </div></div>
-          <div class="panel"><div class="ph"><h2>Check anything</h2></div>
-            <div class="pb" style="display:flex;flex-direction:column;gap:12px">
-              <p style="color:var(--ink-2);font-size:13.5px">Pick a page, an email or a file, and Codex reads it for mistakes, contradictions and broken links.</p>
-              <button class="btn primary" type="button">Check something with Codex</button>
-              <div class="meterline"><span>Codex plan this week</span><span class="sb"><i style="width:38%"></i></span><b>38%</b></div>
-            </div></div>
-        </div>
+        <div class="vhead"><h2>Codex</h2><p>A second AI that checks Claude’s work before you use it. It runs on your own ChatGPT plan.</p></div>
+        <div class="panel"><div class="ph"><h2>Check Claude’s work</h2></div>
+          <div class="pb" style="display:flex;flex-direction:column;gap:12px;align-items:flex-start">
+            <p class="note" id="cx-text">Codex reads what Claude just did in your chat, and any files it changed, for mistakes, contradictions and broken links. Its answer comes back to the chat.</p>
+            <button class="btn primary" type="button" id="cx-go" data-job="codex">Check with Codex</button>
+            <button class="btn primary" type="button" id="cx-get" data-open="https://openai.com/codex" hidden>Get Codex</button>
+            <div class="meterline" id="cx-meter" hidden><span id="cx-ml">Codex plan</span><span class="sb"><i id="cx-bar" style="width:0%"></i></span><b id="cx-pct"></b></div>
+          </div></div>
       </div>
 
       <!-- SETUP -->
       <div class="vbody" data-v="setup" hidden>
-        <div class="vhead row"><div><h2>Set up your clone</h2><p>One evening. Your clone does each step with you in the chat, in the order that works, and checks each one on this computer.</p></div><div class="prog"><b id="st-count">0 of 10 done</b><span class="sb"><i id="st-bar" style="width:0%"></i></span></div></div>
-        <div class="one" id="st-one">
+        <div class="vhead row"><div><h2>Set up your clone</h2><p>One evening. Your clone does each step with you in the chat, in the order that works, and checks each one on this computer.</p></div><div class="prog" id="st-prog" hidden><b id="st-count"></b><span class="sb"><i id="st-bar" style="width:0%"></i></span></div></div>
+        <p class="extras" id="st-wait">Your steps show here once YouCloned has checked this computer. Open a chat in Claude to start it.</p>
+        <div class="one" id="st-one" hidden>
           <div class="dots" id="st-dots"></div>
-          <span class="stepof" id="st-of">Step 1 of 10</span>
-          <h3 id="st-title">Your tools</h3>
-          <p id="st-why">Installs Git, Node, Python, the video tools, Obsidian and GitHub's tool. Skips anything you already have.</p>
-          <div class="acts"><button class="btn primary" type="button" id="st-go">Do it for me</button></div>
+          <span class="stepof" id="st-of"></span>
+          <h3 id="st-title"></h3>
+          <p id="st-why"></p>
+          <div class="acts"><button class="btn primary" type="button" id="st-go" data-job="setup">Do it for me</button></div>
         </div>
-        <button class="back" type="button" id="allsteps">See all 10 steps</button>
+        <button class="back" type="button" id="allsteps" hidden>See every step</button>
         <ol class="ss" id="steplist" hidden></ol>
-        <p class="extras">After setup: Codex, BNSN, Slack, your crew and Zoom, each with its lesson, from Learn.</p>
       </div>
 
       <!-- LEARN -->
       <div class="vbody" data-v="learn" hidden>
-        <div class="vhead"><h2>Learn</h2><p>Every lesson comes with a "Set it up for me" button, so you never have to do it by hand.</p></div>
+        <div class="vhead"><h2>Learn</h2><p>Jon’s newest video, the YouCloned course and the clone guide.</p></div>
         <div class="panel"><div class="ph"><h2>New from Jon</h2></div>
-          <div class="pb vid"><div class="th" aria-hidden="true"></div><div><b>How To Write The Story In A Video Sales Letter (VSL) With AI: Step 2 of 9</b><p>The skill that writes your story section is ready.</p><button class="btn sm primary" type="button">Write my story section</button></div></div></div>
-        <div class="duo">
-          <div class="panel"><div class="ph"><h2>The YouCloned course</h2><span class="meta">7 of 9 watched</span></div>
-            <div class="pb lessons"><div class="lw">Intro and the AI Clone Guide</div><div class="lw">Obsidian</div><div class="lw">Claude Code</div><div class="lw">Git and GitHub</div><div class="lw">Workflow Integration</div><div class="lw">Supabase</div><div class="lw">The AI Stack</div><div class="lw no">Cursor</div><div class="lw no">NotebookLM</div></div></div>
-          <div class="panel"><div class="ph"><h2>More from Jon</h2></div>
-            <div class="pb" style="display:flex;flex-direction:column;gap:8px">
-              <button class="btn" type="button">AI Clone Guide PDF</button>
-              <button class="btn" type="button">Over My Shoulder</button>
-              <button class="btn" type="button">YouCloned community</button>
-            </div></div>
-        </div>
+          <div class="pb vid"><div class="th" aria-hidden="true"></div><div><b>How To Write The Story In A Video Sales Letter (VSL) With AI: Step 2 of 9</b><p>The skill that writes your story section is ready.</p><div class="acts" style="margin-top:0"><button class="btn sm primary" type="button" data-feedjob="Write the story section of my VSL with Jon's VSL Story Writer skill.">Write my story section</button><button class="btn sm" type="button" data-watch data-open="https://www.youtube.com/watch?v=j058ugnLtUE">Watch the video</button></div></div></div></div>
+        <div class="panel"><div class="ph"><h2>The YouCloned course</h2><span class="meta">9 lessons</span></div>
+          <div class="pb"><div class="lessons plain"><div class="lw"><span>1</span>Intro and the PDF Course Guide</div><div class="lw"><span>2</span>Obsidian</div><div class="lw"><span>3</span>Cursor</div><div class="lw"><span>4</span>Claude Code</div><div class="lw"><span>5</span>Git and GitHub</div><div class="lw"><span>6</span>Workflow Integration</div><div class="lw"><span>7</span>NotebookLM</div><div class="lw"><span>8</span>Supabase</div><div class="lw"><span>9</span>The AI Stack</div></div>
+            <div class="acts"><button class="btn sm primary" type="button" data-open="https://community.bnsn.ai/c/ai-collective-training/">Watch the course</button><button class="btn sm" type="button" data-open="https://bnsn.ai/pdfs/youcloned-course-guide.pdf">Clone Guide PDF</button></div></div></div>
       </div>
     </section>
 <script>
 (function () {
   var hero = document.getElementById("hero");
+  var $ = function (id) { return document.getElementById(id); };
+  var state = {};
   function show(m) {
     document.querySelectorAll(".crumbs [data-m]").forEach(function (b) { b.classList.toggle("on", b.dataset.m === m); });
     document.querySelectorAll("[data-v]").forEach(function (v) { v.hidden = v.dataset.v !== m; });
     if (m !== "home") hero.classList.remove("live");
   }
-  document.querySelectorAll("[data-m]").forEach(function (b) { b.addEventListener("click", function () { show(b.dataset.m); }); });
-  var all = document.getElementById("allsteps");
-  if (all) all.addEventListener("click", function () { var l = document.getElementById("steplist"); l.hidden = !l.hidden; all.textContent = l.hidden ? "See all 9 steps" : "Hide the list"; });
-  // The mark starts the clone's voice; it glows while the clone is in the conversation.
-  var talkAt = 0;
-  document.getElementById("talk").addEventListener("click", function () {
-    talkAt = Date.now(); hero.classList.add("live");
-    fetch("/talk", { method: "POST" }).then(function (r) { say(r.ok ? "Your clone is listening" : "Your clone's voice isn't set up yet. Type \"set up my voice\" in the chat."); if (!r.ok) { talkAt = 0; hero.classList.remove("live"); } })
-      .catch(function () { talkAt = 0; hero.classList.remove("live"); say("Could not reach YouCloned"); });
-  });
 
-  // Buttons that start work send it to Claude's chat through the YouCloned add-on.
   var toast = document.createElement("div"); toast.className = "toast"; document.body.appendChild(toast);
-  function say(t) { toast.textContent = t; toast.classList.add("on"); setTimeout(function () { toast.classList.remove("on"); }, 2600); }
+  var toastT = 0;
+  function say(t) { toast.textContent = t; toast.classList.add("on"); clearTimeout(toastT); toastT = setTimeout(function () { toast.classList.remove("on"); }, 2600); }
+  // Jobs go to Claude's chat through the YouCloned add-on (server.py queues them, the add-on types them in).
   function send(text) {
     fetch("/do", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: text }) })
       .then(function (r) { say(r.ok ? "Sent to your Claude chat" : "Could not reach YouCloned"); })
       .catch(function () { say("Could not reach YouCloned"); });
   }
-  document.querySelectorAll("button").forEach(function (b) {
-    var t = b.textContent.trim();
-    var map = {
-      "Write my story section": "Write the story section of my VSL with Jon's VSL Story Writer skill.",
-      "Check something with Codex": "/youcloned codex",
-      "Review 3 emails": "/youcloned crew inbox",
-      "Review 4 drafts": "/youcloned crew support",
-      "Do it for me": "Set me up with YouCloned. Use the youcloned:setup skill."
-    };
-    if (map[t]) b.addEventListener("click", function () { send(map[t]); });
+  // Links open in this computer's own web browser (server.py opens only BNSN, YouTube and OpenAI addresses).
+  function openUrl(url) {
+    fetch("/open", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: url }) })
+      .then(function (r) { if (r.ok) say("Opening in your browser"); else window.open(url, "_blank", "noopener"); })
+      .catch(function () { window.open(url, "_blank", "noopener"); });
+  }
+  var JOBS = {
+    setup: "Set me up with YouCloned. Use the youcloned:setup skill.",
+    codex: "/youcloned codex",
+    library: "What is in my library?",
+    voice: "Set up my clone's voice with YouCloned: call setup_next with only set to voice, and walk me through it."
+  };
+  // One click handler for every control, so a button the page draws later works the same way.
+  document.addEventListener("click", function (ev) {
+    var b = ev.target.closest("button");
+    if (!b || b.disabled) return;
+    if (b.dataset.m) show(b.dataset.m);
+    else if (b.dataset.job && JOBS[b.dataset.job]) send(JOBS[b.dataset.job]);
+    else if (b.dataset.text) send(b.dataset.text);
+    else if (b.dataset.feedjob) send(b.dataset.feedjob);
+    else if (b.dataset.open) openUrl(b.dataset.open);
+  });
+  $("allsteps").addEventListener("click", function () { var l = $("steplist"); l.hidden = !l.hidden; renderSetup(); });
+
+  // The logo starts the clone's voice once voice is set up; before that it starts the voice setup.
+  var talkAt = 0;
+  function voiceReady() {
+    var su = state.setup;
+    if (!su || !su.steps) return true;
+    var v = su.steps.filter(function (x) { return x.id === "voice"; })[0];
+    return !v || v.done;
+  }
+  $("talk").addEventListener("click", function () {
+    if (!voiceReady()) { send(JOBS.voice); return; }
+    talkAt = Date.now(); hero.classList.add("live");
+    fetch("/talk", { method: "POST" }).then(function (r) { say(r.ok ? "Your clone is listening" : "Your clone’s voice isn’t set up yet. Type “set up my voice” in the chat."); if (!r.ok) { talkAt = 0; hero.classList.remove("live"); } })
+      .catch(function () { talkAt = 0; hero.classList.remove("live"); say("Could not reach YouCloned"); });
   });
 
-  // Live numbers from the add-on: plan usage, words, name.
   function fmt(n) { return Number(n).toLocaleString("en-US"); }
-  function renderSetup(su) {
-    var steps = su.steps, n = 0, total = steps.length, list = document.getElementById("steplist"), dots = document.getElementById("st-dots");
+  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  function ago(ms) {
+    var m = Math.round((Date.now() - ms) / 60000);
+    if (m < 1) return "just now";
+    if (m < 60) return m + (m === 1 ? " minute ago" : " minutes ago");
+    var h = Math.round(m / 60);
+    if (h < 48) return h + (h === 1 ? " hour ago" : " hours ago");
+    return Math.round(h / 24) + " days ago";
+  }
+  function crewStatus(c) {
+    if (c.running) return "Working";
+    if (c.drafts) return c.drafts + (c.drafts === 1 ? " draft waiting" : " drafts waiting");
+    return c.lastRun ? "Caught up, ran " + ago(c.lastRun) : "Not run yet";
+  }
+  function reviewBtn(c) {
+    var b = el("button", "btn sm primary", "Review " + c.drafts + (c.drafts === 1 ? " draft" : " drafts"));
+    b.type = "button"; b.dataset.text = c.review; return b;
+  }
+  function setupDone(su) { return su && su.steps ? su.steps.filter(function (x) { return x.done; }).length : 0; }
+
+  function renderSetup() {
+    var su = state.setup;
+    if (!su || !su.steps || !su.steps.length) return;
+    var steps = su.steps, n = setupDone(su), total = steps.length, list = $("steplist"), dots = $("st-dots");
+    $("st-wait").hidden = true; $("st-prog").hidden = false; $("st-one").hidden = false; $("allsteps").hidden = false;
     list.textContent = ""; dots.textContent = "";
     steps.forEach(function (st, i) {
-      if (st.done) n++;
-      var li = document.createElement("li");
-      if (st.done) li.className = "done"; else if (st.id === su.next) li.className = "now";
-      var sn = document.createElement("span"); sn.className = "sn"; sn.textContent = String(i + 1);
-      var d = document.createElement("div"), b = document.createElement("b"), p = document.createElement("p");
-      b.textContent = st.title; p.textContent = st.why; d.appendChild(b); d.appendChild(p);
-      var pill = document.createElement("span"); pill.className = "pill";
-      pill.textContent = st.done ? "Done" : st.skipped ? "Later" : st.id === su.next ? "Next" : "Not yet";
-      li.appendChild(sn); li.appendChild(d); li.appendChild(pill); list.appendChild(li);
-      var dot = document.createElement("i"); dot.className = st.done ? "d" : st.id === su.next ? "c" : ""; dots.appendChild(dot);
+      var li = el("li", st.done ? "done" : st.id === su.next ? "now" : "");
+      var d = el("div"); d.appendChild(el("b", "", st.title)); d.appendChild(el("p", "", st.why));
+      li.appendChild(el("span", "sn", String(i + 1))); li.appendChild(d);
+      li.appendChild(el("span", "pill", st.done ? "Done" : st.skipped ? "Later" : st.id === su.next ? "Next" : "Not yet"));
+      list.appendChild(li);
+      dots.appendChild(el("i", st.done ? "d" : st.id === su.next ? "c" : ""));
     });
-    document.getElementById("st-count").textContent = n + " of " + total + " done";
-    document.getElementById("st-bar").style.width = Math.round(n * 100 / total) + "%";
-    document.getElementById("allsteps").textContent = "See all " + total + " steps";
+    $("st-count").textContent = n + " of " + total + " done";
+    $("st-bar").style.width = Math.round(n * 100 / total) + "%";
+    $("allsteps").textContent = list.hidden ? "See all " + total + " steps" : "Hide the list";
     var cur = steps.filter(function (x) { return x.id === su.next; })[0];
     if (cur) {
-      document.getElementById("st-of").textContent = "Step " + (steps.indexOf(cur) + 1) + " of " + total;
-      document.getElementById("st-title").textContent = cur.title;
-      document.getElementById("st-why").textContent = cur.why;
-      document.getElementById("st-go").textContent = "Do it for me";
+      $("st-of").textContent = "Step " + (steps.indexOf(cur) + 1) + " of " + total;
+      $("st-title").textContent = cur.title;
+      $("st-why").textContent = cur.why;
+      $("st-go").textContent = "Do it for me";
     } else {
-      document.getElementById("st-of").textContent = "All set";
-      document.getElementById("st-title").textContent = "Your clone is set up";
-      document.getElementById("st-why").textContent = "Every step is done" + (steps.some(function (x) { return x.skipped; }) ? ", and the ones you put off are waiting for you. Say \"finish my setup\" any time." : ".");
-      document.getElementById("st-go").textContent = "Check my setup again";
+      $("st-of").textContent = "All set";
+      $("st-title").textContent = "Your clone is set up";
+      $("st-why").textContent = "Every step is done" + (steps.some(function (x) { return x.skipped; }) ? ", and the ones you put off are waiting for you. Say “finish my setup” any time." : ".");
+      $("st-go").textContent = "Check my setup again";
     }
   }
+
+  function renderHome() {
+    var s = state, su = s.setup, cur = su && su.steps ? su.steps.filter(function (x) { return x.id === su.next; })[0] : null;
+    var crew = s.crewOn && Array.isArray(s.crew) ? s.crew : [];
+    var sources = s.library && typeof s.library.sources === "number" ? s.library.sources : 0;
+    var libDone = su && su.steps && su.steps.some(function (x) { return x.id === "library" && x.done; });
+
+    // Today: the next setup step, drafts waiting, the library, Jon's newest. Only what is true right now.
+    var lines = [];
+    if (cur) lines.push("Next setup step: " + cur.title + " (" + setupDone(su) + " of " + su.steps.length + " done)");
+    crew.forEach(function (c) { if (c.running) lines.push(c.title + " helper is working"); else if (c.drafts) lines.push(c.title + " helper: " + c.drafts + (c.drafts === 1 ? " draft" : " drafts") + " waiting for you"); });
+    if (crew.length && !crew.some(function (c) { return c.drafts || c.running; })) lines.push("Your crew is caught up");
+    if (sources) lines.push("Your library holds " + fmt(sources) + (sources === 1 ? " source" : " sources"));
+    if (feedTitle) lines.push("New from Jon: " + feedTitle);
+    var today = $("today"); today.textContent = "";
+    lines.forEach(function (t) { var d = el("div"); d.appendChild(el("i")); d.appendChild(document.createTextNode(t)); today.appendChild(d); });
+    today.hidden = !lines.length;
+    $("talkhint").textContent = voiceReady() ? "Tap the logo to talk, or type in Claude" : "Tap the logo to set up your voice, or type in Claude";
+
+    // Cards: setup while it is unfinished, the crew once the clone knows you, the library once it has sources.
+    $("hc-setup").hidden = !cur;
+    if (cur) { $("hs-count").textContent = setupDone(su) + " of " + su.steps.length + " done"; $("hs-title").textContent = "Next: " + cur.title; $("hs-why").textContent = cur.why; }
+    $("hc-crew").hidden = !crew.length;
+    if (crew.length) {
+      var need = crew.filter(function (c) { return c.drafts; }).length;
+      $("hcr-meta").textContent = need ? need + (need === 1 ? " needs you" : " need you") : "All caught up";
+      var list = $("hcr-list"); list.textContent = "";
+      crew.forEach(function (c) {
+        var row = el("div", "need"), d = el("div");
+        d.appendChild(el("b", "", c.title + " helper")); d.appendChild(el("small", "", crewStatus(c)));
+        row.appendChild(d);
+        row.appendChild(c.drafts && c.review ? reviewBtn(c) : el("span", "pill", c.running ? "Working" : "Caught up"));
+        list.appendChild(row);
+      });
+    }
+    $("hc-lib").hidden = !(sources || libDone);
+    $("hl-n").textContent = fmt(sources); $("hl-l").textContent = sources === 1 ? "source" : "sources";
+    var cards = ["hc-setup", "hc-crew", "hc-lib"].filter(function (id) { return !$(id).hidden; }).length;
+    var duo = $("homecards"); duo.hidden = !cards; duo.className = "duo n" + cards;
+  }
+
+  function renderCrew() {
+    var crew = state.crewOn && Array.isArray(state.crew) ? state.crew : [];
+    var grid = $("crewgrid"); grid.textContent = "";
+    $("crew-empty").hidden = !!crew.length;
+    crew.forEach(function (c) {
+      var p = el("div", "panel bot"), top = el("div", "bt");
+      top.appendChild(el("b", "", c.title + " helper"));
+      top.appendChild(el("span", c.drafts ? "pill warn" : "pill", crewStatus(c)));
+      p.appendChild(top); p.appendChild(el("p", "", c.what));
+      var acts = el("div", "acts");
+      if (c.drafts && c.review) acts.appendChild(reviewBtn(c));
+      var run = el("button", c.drafts ? "btn sm" : "btn sm primary", c.running ? "Working" : "Run now");
+      run.type = "button"; run.disabled = !!c.running; run.dataset.text = "/youcloned crew " + c.name;
+      acts.appendChild(run); p.appendChild(acts); grid.appendChild(p);
+    });
+  }
+
+  function renderCodex() {
+    var off = state.codexReady === false;
+    $("cx-go").hidden = off; $("cx-get").hidden = !off;
+    $("cx-text").textContent = off
+      ? "Codex isn’t on this computer yet. Install the Codex app (or the ChatGPT desktop app) from openai.com and sign in once, then check Claude’s work from here."
+      : "Codex reads what Claude just did in your chat, and any files it changed, for mistakes, contradictions and broken links. Its answer comes back to the chat.";
+    var c = state.codex;
+    $("cx-meter").hidden = !(c && c.left != null);
+    if (c && c.left != null) {
+      $("cx-ml").textContent = c.label || "Codex plan";
+      $("cx-bar").style.width = Math.round(c.left) + "%";
+      $("cx-pct").textContent = Math.round(c.left) + "% left";
+    }
+  }
+
+  function renderMeters(s) {
+    if (s.claudePct != null) {
+      var left = Math.max(0, Math.min(100, 100 - s.claudePct));
+      $("claudePct").textContent = Math.round(left); $("claudeU").hidden = false;
+      // The wave sits at y=64; the circle runs from y=6 (full) to y=94 (empty).
+      $("claudeFill").setAttribute("transform", "translate(0," + (94 - 88 * left / 100 - 64).toFixed(1) + ")");
+    }
+    // The gauge always shows the last reading, and says when it was taken once reads stop coming (10 minutes).
+    if (s.claudeLabel) {
+      var stale = s.claudeAt && Date.now() - s.claudeAt > 600000;
+      $("claudeL").textContent = s.claudeLabel + (stale ? " · not read since " + new Date(s.claudeAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) : "");
+    }
+    $("words").textContent = s.words != null ? fmt(s.words) : "Connect";
+    // SkillKey can be connected before its first word count comes in (clean-Mac run, Oct 17).
+    $("wordsL").textContent = s.words != null ? "BNSN words" : s.skillKey ? "SkillKey connected: words show after your first skill" : "Connect SkillKey to see your words";
+    if (s.codex && s.codex.left != null) {
+      $("codexPct").textContent = Math.round(s.codex.left); $("codexU").hidden = false;
+      $("codexL").textContent = s.codex.label || "Codex plan";
+      $("codexFill").setAttribute("transform", "translate(0," + (94 - 88 * s.codex.left / 100 - 62).toFixed(1) + ")");
+    } else if (s.codexReady === false) {
+      $("codexPct").textContent = "Off"; $("codexU").hidden = true; $("codexL").textContent = "Codex isn’t on this computer yet";
+    } else if (s.codexReady) {
+      $("codexPct").textContent = "On"; $("codexU").hidden = true; $("codexL").textContent = "Codex plan: shows after its first check";
+    }
+  }
+
+  function render() { renderMeters(state); renderHome(); renderCrew(); renderCodex(); renderSetup(); }
+
   function load() {
     fetch("/state.json", { cache: "no-store" }).then(function (r) { return r.ok ? r.json() : null; }).then(function (s) {
       if (!s) return;
-      (function(){ var h = new Date().getHours(); document.getElementById("hello").textContent = h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening"; })();
-      if (s.name) document.getElementById("who").textContent = s.name;
-      if (s.claudePct != null) {
-        var left = Math.max(0, Math.min(100, 100 - s.claudePct));
-        document.getElementById("claudePct").textContent = Math.round(left);
-        // The wave sits at y=64 for 34% full; the circle runs from y=6 (full) to y=94 (empty).
-        var y = 94 - 88 * left / 100;
-        document.getElementById("claudeFill").setAttribute("transform", "translate(0," + (y - 64).toFixed(1) + ")");
-      }
-      // The gauge always shows the last reading, and says when it was taken once reads stop coming (10 minutes).
-      if (s.claudeLabel) {
-        var stale = s.claudeAt && Date.now() - s.claudeAt > 600000;
-        document.getElementById("claudeL").textContent = s.claudeLabel + (stale ? " · not read since " + new Date(s.claudeAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) : "");
-      }
-      document.getElementById("words").textContent = s.words != null ? fmt(s.words) : "Connect";
-      // SkillKey can be connected before its first word count comes in (clean-Mac run, Oct 17).
-      document.getElementById("wordsL").textContent = s.words != null ? "BNSN words" : s.skillKey ? "SkillKey connected: words show after your first skill" : "Connect SkillKey to see your words";
-      if (s.codex && s.codex.left != null) {
-        document.getElementById("codexPct").textContent = Math.round(s.codex.left);
-        document.getElementById("codexL").textContent = s.codex.label || "Codex plan";
-        document.getElementById("codexFill").setAttribute("transform", "translate(0," + (94 - 88 * s.codex.left / 100 - 62).toFixed(1) + ")");
-      }
-      // Setup: every step shows Done only when YouCloned checked it on this computer.
-      if (s.setup && s.setup.steps) renderSetup(s.setup);
+      state = s;
+      var h = new Date().getHours(); $("hello").textContent = h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
+      $("whoW").hidden = !s.name; if (s.name) $("who").textContent = s.name;
+      render();
       if ("listening" in s && Date.now() - talkAt > 8000) hero.classList.toggle("live", !!s.listening);
     }).catch(function () {});
   }
-  load(); setInterval(load, 2000);
 
   // "New from Jon" follows the promo feed the add-on keeps (online, or its saved copy offline).
+  var feedTitle = "";
   function feed() {
     fetch("/feed.json", { cache: "no-store" }).then(function (r) { return r.ok ? r.json() : null; }).then(function (f) {
       var item = f && f.items && f.items.filter(function (i) { return i && i.title && i.job; })[0];
       if (!item) return;
+      feedTitle = String(item.title);
       document.querySelectorAll(".vid").forEach(function (v) {
-        var b = v.querySelector("b"), p = v.querySelector("p"), th = v.querySelector(".th"), old = v.querySelector("button");
+        var b = v.querySelector("b"), p = v.querySelector("p"), th = v.querySelector(".th"), go = v.querySelector("[data-feedjob]"), watch = v.querySelector("[data-watch]");
         if (b) b.textContent = item.title;
         if (p) p.textContent = item.note || "";
-        if (th) th.style.backgroundImage = "url(/feed-thumb.jpg?" + encodeURIComponent(item.id || "") + ")";
-        if (old) { var btn = old.cloneNode(false); btn.textContent = item.button || "Start"; btn.addEventListener("click", function () { send(item.job); }); old.replaceWith(btn); }
+        if (th) { // the feed's own picture, or none: an old picture never sits next to a new title
+          var src = "/feed-thumb.jpg?" + encodeURIComponent(item.id || ""), img = new Image();
+          img.onload = function () { th.hidden = false; v.style.gridTemplateColumns = ""; th.style.backgroundImage = "url(" + src + ")"; };
+          img.onerror = function () { th.hidden = true; v.style.gridTemplateColumns = "minmax(0,1fr)"; };
+          img.src = src;
+        }
+        if (go) { go.textContent = item.button || "Start"; go.dataset.feedjob = item.job; }
+        if (watch) { var ok = /^https:\/\//.test(item.watch || ""); watch.hidden = !ok; if (ok) watch.dataset.open = item.watch; }
       });
+      renderHome();
     }).catch(function () {});
   }
+  load(); setInterval(load, 2000);
   feed(); setInterval(feed, 600000);
-
-  // money trend: one series (sample)
-  var weeks = ["Aug 16","Aug 23","Aug 30","Sep 6","Sep 13","Sep 20","Sep 27","This week"];
-  var vals = [3120, 4010, 3640, 5180, 4790, 6050, 6420, 7514];
-  var W = 640, H = 150, pl = 40, pr = 10, pt = 8, pb = 22, max = 8000;
-  var x = function (i) { return pl + i * (W - pl - pr) / (vals.length - 1); };
-  var y = function (v) { return pt + (1 - v / max) * (H - pt - pb); };
-  var line = vals.map(function (v, i) { return (i ? "L" : "M") + x(i).toFixed(1) + " " + y(v).toFixed(1); }).join(" ");
-  var area = line + " L" + x(vals.length - 1) + " " + y(0) + " L" + x(0) + " " + y(0) + " Z";
-  var grid = [0, 4000, 8000].map(function (g) { return '<line x1="' + pl + '" x2="' + (W - pr) + '" y1="' + y(g) + '" y2="' + y(g) + '" stroke="var(--line)"/><text x="' + (pl - 6) + '" y="' + (y(g) + 4) + '" text-anchor="end" font-size="11" fill="var(--ink-3)">$' + g / 1000 + 'k</text>'; }).join("");
-  var tr = document.getElementById("trend");
-  if (tr) tr.innerHTML = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Made or saved per week">' + grid + '<path d="' + area + '" fill="var(--accent-soft)"/><path d="' + line + '" fill="none" stroke="var(--accent)" stroke-width="2"/><circle cx="' + x(7) + '" cy="' + y(7514) + '" r="5" fill="var(--accent)" stroke="var(--surface)" stroke-width="2"/></svg>';
-  var bars = document.getElementById("bars");
-  if (bars) [["Backyard Garden Course", 2970], ["Seed Starter Kit", 780], ["Coaching call", 370]].forEach(function (p) {
-    var r = document.createElement("div"); r.className = "barrow";
-    var n = document.createElement("span"); n.textContent = p[0];
-    var t = document.createElement("div"); t.className = "tr"; var f = document.createElement("div"); f.className = "fl"; f.style.width = (p[1] / 3000 * 100) + "%"; t.appendChild(f);
-    var v = document.createElement("span"); v.className = "v"; v.textContent = "$" + fmt(p[1]);
-    r.append(n, t, v); bars.appendChild(r);
-  });
 })();
 </script>
 </body></html>
