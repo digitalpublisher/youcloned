@@ -1,5 +1,5 @@
 {
-  "about": "Every fix Isaac gets on Jon's Mac, and the buyer file it becomes. Rule (Jon, Oct 16): a buyer's YouCloned environment has every 'yes' and 'adapt' row from day one. Add a row in a PR the same day a fix ships. 'check' is the command that proves the fix on a buyer's computer; the setup check runs every row and the ship gate refuses a release while a yes/adapt row has no buyer_file or no check (both land later on youcloned#39).",
+  "about": "Every fix Isaac gets on Jon's Mac, and the buyer file it becomes. Rule (Jon, Oct 16): a buyer's YouCloned environment has every 'yes' and 'adapt' row from day one. Add a row in a PR the same day a fix ships. 'check' is {\"mac\": ..., \"pc\": ...}: the command that proves the fix on that computer, run from the add-on folder. voice/check-fixes.py runs every row and only says 'Every fix is in.' when all pass; the ship gate refuses a release while a yes/adapt row has no buyer_file, or no check for a computer it isn't n/a on.",
   "states": {
     "buyers": [
       "yes",
@@ -25,7 +25,9 @@
       "buyers": "yes",
       "mac": "in-pr",
       "pc": "in-pr",
-      "check": null,
+      "check": {
+        "mac": "cmp -s voice/clone-keys.sh \"$HOME/.youcloned-phone/clone-keys.sh\""
+      },
       "note": "Ported Oct 17: Ctrl+Opt+N / Ctrl+Opt+S send one JSON line straight to the voice control socket (0.2 to 0.4s in the fake-socket test), with the voicemode command as fallback. PC already sent straight to the socket (pc_voice.py COMMANDS)."
     },
     {
@@ -51,7 +53,9 @@
       "buyers": "yes",
       "mac": "in-pr",
       "pc": "in-pr",
-      "check": "\"$(uv tool dir)/voice-mode/bin/python\" voice/patch-voicemode.py check",
+      "check": {
+        "mac": "\"$(uv tool dir)/voice-mode/bin/python\" voice/patch-voicemode.py check"
+      },
       "note": "Ported Oct 17: ships only the diff. The patcher changes streaming.py only when it is byte-for-byte stock 8.12.0 (hash matches the wheel RECORD), keeps the original, re-applies after a reinstall, and its output is identical to Jon's live file. Tested on a fake VoiceMode copy: stock, rerun, check, changed file refused, no VoiceMode. PC line not run yet (no PowerShell on Jon's Mac): Windows run or Ben's PC."
     },
     {
@@ -77,7 +81,9 @@
       "buyers": "yes",
       "mac": "in-pr",
       "pc": "in-pr",
-      "check": null,
+      "check": {
+        "mac": "[ ! -f \"$HOME/.youcloned-phone/speechify-voice.py\" ] || cmp -s voice/speechify-voice.py \"$HOME/.youcloned-phone/speechify-voice.py\""
+      },
       "note": "Ported Oct 17 (same file runs on Mac and PC). Repo test: tools/voice/test_speechify_voice.py. Buyer check still to write with the setup check."
     },
     {
@@ -155,7 +161,9 @@
       "buyers": "yes",
       "mac": "in-pr",
       "pc": "in-pr",
-      "check": null,
+      "check": {
+        "mac": "cmp -s voice/talk-out-loud/SKILL.md \"$HOME/.claude/skills/talk-out-loud/SKILL.md\""
+      },
       "note": "Ported Oct 17: the talk skill says listen_duration_min 8 (was 4) and the Talk button prompt names 8 and 600. VoiceMode 8.12.0 has no env setting for the minimum, so it lives in the instructions."
     },
     {
@@ -168,7 +176,9 @@
       "buyers": "yes",
       "mac": "in-pr",
       "pc": "to-port",
-      "check": "bash voice/check-voice.sh loop",
+      "check": {
+        "mac": "bash voice/check-voice.sh loop"
+      },
       "note": "Ported Oct 17 (Mac): three rounds, Ctrl+Opt+N mid-sentence must stop the voice within 1s, the listen must open, and a say-voice phrase must arrive. Not run on Jon's Mac (plays sound, shares the control socket with Voice Command); first run on the clean test Mac. check-voice.sh also now checks the instant-stop fix every run. PC version to write."
     },
     {

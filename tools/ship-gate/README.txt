@@ -12,4 +12,6 @@ Put customer names or emails in ~/.config/youcloned/ship-denylist.txt.
 Private denylist matches are reported without revealing their literal.
 Add exact permitted addresses to tools/ship-gate/allow-emails.txt.
 example.com and example.org addresses are always permitted.
+A fixes.json (top level or youcloned/) blocks the gate while a yes or adapt row has no buyer_file,
+or no check for a computer it isn't n/a on. check is {"mac": "...", "pc": "..."}.
 Run node --test tools/ship-gate/ after changes.

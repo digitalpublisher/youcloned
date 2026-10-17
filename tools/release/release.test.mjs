@@ -14,6 +14,7 @@ function fixture() {
   fs.mkdirSync(path.join(root, 'youcloned', 'nested'), { recursive: true });
   fs.writeFileSync(path.join(root, 'youcloned', 'plugin.json'), '{"name":"fixture"}\n');
   fs.writeFileSync(path.join(root, 'youcloned', 'nested', 'note.txt'), 'ordinary fixture text\n');
+  fs.writeFileSync(path.join(root, 'youcloned', 'fixes.json'), '{"fixes": []}\n');
   return root;
 }
 
@@ -121,4 +122,20 @@ test('release still runs when started through a symlink to a folder with a space
   const result = spawnSync(process.execPath, [path.join(linked, 'tools', 'release', 'release.mjs'), '--version', '1.2.3', '--out', out], { cwd: root, encoding: 'utf8' });
   assert.equal(result.status, 1, result.stdout + result.stderr);
   assert.match(result.stdout, /openai-key/);
+});
+
+test('a release without the fix list, or with a buyer fix that has no check, writes no zip', () => {
+  const root = fixture();
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'release-output-'));
+  fs.rmSync(path.join(root, 'youcloned', 'fixes.json'));
+  const missing = run(root, out);
+  assert.equal(missing.status, 2);
+  assert.match(missing.stderr, /Missing fix list/);
+  fs.writeFileSync(path.join(root, 'youcloned', 'fixes.json'), JSON.stringify({ fixes: [
+    { id: 'made-up-1', buyers: 'yes', buyer_file: 'voice/x.sh', mac: 'in-pr', pc: 'n/a', check: null },
+  ] }, null, 2));
+  const unchecked = run(root, out);
+  assert.equal(unchecked.status, 1);
+  assert.match(unchecked.stdout, /fix-list-no-mac-check made-up-1/);
+  assert.ok(!fs.existsSync(path.join(out, 'youcloned-1.2.3.zip')));
 });

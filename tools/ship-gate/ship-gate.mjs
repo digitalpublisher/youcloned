@@ -163,6 +163,38 @@ function findInFile(file, root, literals, emailAllowlist) {
   return findings;
 }
 
+// Every fixes.json row buyers get (buyers yes or adapt) needs a buyer file and, for each computer it
+// isn't n/a on, a check command. A row missing either blocks the release, so no fix is left behind.
+function fixListFindings(root) {
+  const findings = [];
+  for (const relative of ['fixes.json', path.join('youcloned', 'fixes.json')]) {
+    const file = path.join(root, relative);
+    if (!fs.existsSync(file)) continue;
+    const content = fs.readFileSync(file, 'utf8');
+    let fixes;
+    try {
+      fixes = JSON.parse(content).fixes;
+      if (!Array.isArray(fixes)) throw new Error('no fixes list');
+    } catch {
+      findings.push({ file: relative, line: 1, rule: 'fix-list-unreadable', masked: 'fixes.json' });
+      continue;
+    }
+    const lineOf = (id) => {
+      const index = content.indexOf(`"id": "${id}"`);
+      return index === -1 ? 1 : content.slice(0, index).split('\n').length;
+    };
+    for (const row of fixes) {
+      if (!['yes', 'adapt'].includes(row.buyers)) continue;
+      const add = (rule) => findings.push({ file: relative, line: lineOf(row.id), rule, masked: String(row.id) });
+      if (!row.buyer_file) add('fix-list-no-buyer-file');
+      for (const where of ['mac', 'pc']) {
+        if (row[where] !== 'n/a' && !(row.check && typeof row.check === 'object' && row.check[where])) add(`fix-list-no-${where}-check`);
+      }
+    }
+  }
+  return findings;
+}
+
 export function scan(root, options = {}) {
   const absoluteRoot = path.resolve(root);
   const privateDenylist = path.join(os.homedir(), '.config/youcloned/ship-denylist.txt');
@@ -172,7 +204,10 @@ export function scan(root, options = {}) {
     ...(options.denylist ? loadLiterals(options.denylist, 'denylist:custom') : []),
   ];
   const allowlist = loadEmailAllowlist();
-  return filesUnder(absoluteRoot).flatMap((file) => findInFile(file, absoluteRoot, literals, allowlist));
+  return [
+    ...filesUnder(absoluteRoot).flatMap((file) => findInFile(file, absoluteRoot, literals, allowlist)),
+    ...fixListFindings(absoluteRoot),
+  ];
 }
 
 export function main(args = process.argv.slice(2)) {
