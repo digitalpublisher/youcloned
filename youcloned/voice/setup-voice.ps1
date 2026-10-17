@@ -92,6 +92,10 @@ if ([string]$have -eq $VoiceModeVersion) {
   $Tool = Get-VoiceTool
 }
 if (-not $Tool) { StopHere "VoiceMode isn't where it should be. Run this setup again." }
+# The instant-stop fix: the stop key cuts your clone off in under half a second and it listens to you right after.
+# A reinstall puts the stock file back, so this runs every time. If it can't apply, the voice still works, just slower to stop.
+& $Tool.Py (Join-Path $Here 'patch-voicemode.py')
+if ($LASTEXITCODE -ne 0) { Info 'The instant-stop fix was skipped. The voice still works.' }
 $HelperChanged = Copy-PhoneFiles $Here
 Ok 'VoiceMode is ready'
 

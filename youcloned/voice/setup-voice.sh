@@ -90,6 +90,9 @@ else
   "$UV" tool install --force "voice-mode==$VOICEMODE_VERSION" || say_stop "VoiceMode didn't install. Check your internet and run this setup again."
 fi
 [ -x "$VM" ] || say_stop "VoiceMode isn't where it should be ($VM). Run this setup again."
+# The instant-stop fix: the stop key cuts your clone off in under half a second and it listens to you right after.
+# A reinstall puts the stock file back, so this runs every time. If it can't apply, the voice still works, just slower to stop.
+"$("$UV" tool dir)/voice-mode/bin/python" "$HERE/patch-voicemode.py" || printf '    The instant-stop fix was skipped. The voice still works.\n'
 say_ok "VoiceMode is ready"
 
 say_step "Writing your voice settings"

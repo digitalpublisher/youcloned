@@ -47,11 +47,12 @@
       "fix": "Option interrupt stops the sound only and keeps the conversation going (VoiceMode streaming.py patch, pinned to VoiceMode 8.12.0)",
       "jon_file": "voicemode voice_mode/streaming.py",
       "card": "bnsnstack#303",
-      "buyer_file": "voice/setup-voice.sh",
+      "buyer_file": "voice/patch-voicemode.py + voice/voicemode-8.12.0-instant-stop.diff (run by setup-voice.sh / setup-voice.ps1)",
       "buyers": "yes",
-      "mac": "to-port",
-      "pc": "to-port",
-      "check": null
+      "mac": "in-pr",
+      "pc": "in-pr",
+      "check": "\"$(uv tool dir)/voice-mode/bin/python\" voice/patch-voicemode.py check",
+      "note": "Ported Oct 17: ships only the diff. The patcher changes streaming.py only when it is byte-for-byte stock 8.12.0 (hash matches the wheel RECORD), keeps the original, re-applies after a reinstall, and its output is identical to Jon's live file. Tested on a fake VoiceMode copy: stock, rerun, check, changed file refused, no VoiceMode. PC line not run yet (no PowerShell on Jon's Mac): Windows run or Ben's PC."
     },
     {
       "id": "voice-04",
