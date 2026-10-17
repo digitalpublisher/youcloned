@@ -20,7 +20,7 @@ const SK = '4a62845f-77ec-431f-8b76-2d42902a60fb'
 const skTools = (server = SK) => ['list_skills', 'start_skill', 'run_skill', 'word_balance'].map(t => ({ name: 'mcp__' + server + '__' + t, description: '', mcp: true }))
 const fromSk = (body: string) => ({ content: [{ type: 'text', text: 'You are short on words.\n\n<<<YOUCLONED>>>\n' + body + '\n<<<END YOUCLONED>>>\n\nWhen you have everything the steps ask for, call run_skill with skill "x".' }], isError: false })
 
-function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[]) => unknown, toasts?: string[], lists?: Record<string, string[]>, cwd?: string, root?: string, skillKey?: string | null, mcpCalls?: { server: string, tool: string, args: Record<string, unknown> }[], registered?: { name: string, prompt: string }[], owns?: (slug: string) => boolean, opened?: string[], browser?: string[], toolCall?: (e: any) => unknown, read?: (path: string) => string | undefined, exists?: (path: string) => boolean | undefined, mcpThrow?: string, logs?: string[], listed?: boolean, appOwned?: boolean, connected?: () => boolean } = {}) {
+function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[]) => unknown, toasts?: string[], lists?: Record<string, string[]>, cwd?: string, root?: string, skillKey?: string | null, mcpCalls?: { server: string, tool: string, args: Record<string, unknown> }[], registered?: { name: string, prompt: string }[], owns?: (slug: string) => boolean, opened?: string[], browser?: string[], toolCall?: (e: any) => unknown, read?: (path: string) => string | undefined, exists?: (path: string) => boolean | undefined, mcpThrow?: string, logs?: string[], listed?: boolean, appOwned?: boolean, connected?: () => boolean, extraTools?: () => string[] } = {}) {
   const writes = new Map<string, string>()
   const store = new Map<string, unknown>(opts.project ? [['project', opts.project]] : [])
   const clock = mock.clock(on)
@@ -33,7 +33,7 @@ function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: 
   on('fs.read', ($, e) => ({ value: opts.read?.(e.path) ?? (opts.files || {})[e.path] ?? (e.path.endsWith('SKILL.md') ? 'description: Set up YouCloned. More.' : 'crew prompt') }))
   on('fs.write', ($, e) => { writes.set(e.path, e.text); return { value: undefined } })
   const sk = opts.skillKey === undefined ? SK : opts.skillKey
-  on('tool.list', () => ({ value: sk && opts.listed !== false ? skTools(sk) : [] }))
+  on('tool.list', () => ({ value: [...(sk && opts.listed !== false ? skTools(sk) : []), ...(opts.extraTools?.() || []).map(name => ({ name, description: '', mcp: true }))] }))
   on('mcp.call', ($, e) => {
     opts.mcpCalls?.push(e)
     if (opts.mcpThrow) return { value: { content: [{ type: 'text', text: 'YouCloned MCP call: ' + opts.mcpThrow }], isError: true } }
@@ -358,6 +358,25 @@ test('a skipped draft still counts as answered, so its question is not drafted a
   await $.command.run({ command: 'youcloned', args: 'crew support' })
   expect(spawned[0]).toMatch(/inbox\/tom\.txt/)
   expect(spawned[0]).not.toMatch(/maria\.txt/)
+})
+
+test('with Gmail connected, Support reads the "YouCloned Support" label even when no question files wait; without it, it says how', async ($, on) => {
+  const spawned: string[] = []
+  let gmail = true
+  const toasts: string[] = []
+  sessionStubs(on, { project: PROJECT, toasts, files: { [PROJECT + '/crew/support/inbox']: '' }, lists: { [PROJECT + '/crew/support/inbox']: [] },
+    extraTools: () => gmail ? ['search_threads', 'get_thread', 'create_draft'].map(t => 'mcp__a1b2__' + t) : [] })
+  on('agent.spawn', ($, e) => { spawned.push(e.prompt); return { agentId: 'a1', model: 'x' } })
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  await $.command.run({ command: 'youcloned', args: 'crew support' })
+  expect(spawned.length).toBe(1)
+  expect(spawned[0]).toContain('with the a1b2 connector, search_threads for label:"YouCloned Support" newer_than:14d')
+  expect(spawned[0]).toContain('named "email <thread id>"')
+  expect(spawned[0]).not.toMatch(/Questions waiting/)
+  gmail = false
+  const out = await $.command.run({ command: 'youcloned', args: 'crew support' })
+  expect(spawned.length).toBe(1)
+  expect(String(out.text || toasts.join(' '))).toMatch(/label support emails "YouCloned Support"/)
 })
 
 test('the Bridge: waiting drafts reach the dashboard, Approve and Edit ask in the chat and wait for the yes, an unlisted draft goes nowhere', async ($, on) => {

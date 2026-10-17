@@ -27,6 +27,7 @@ let codex = { busy: false, note: '' }
 let crew = {}               // name -> { running, lastRun, note, every, drafts }
 const crewIds = new Map()   // agentId -> crew name
 const NEEDS_SHOWN = 12      // drafts per helper the dashboard's Needs You list shows
+const SUPPORT_LABEL = 'YouCloned Support' // the Gmail label the Support helper reads
 const notCrew = new Set()
 const gatePassed = new Set() // tool_use_ids of crew calls the gate allowed
 let skillKey = false        // the SkillKey connector is on in this session
@@ -664,6 +665,24 @@ async function waitingQuestions($) {
   return questions.filter(q => !answered.has(q))
 }
 
+// The owner's Gmail is the connector with both search_threads and get_thread. Like SkillKey, the desktop
+// app may name it by an id, so it is found by its tools: from the tool list, or the context breakdown
+// when the desktop app keeps connector tools behind ToolSearch.
+function emailFrom(names) {
+  const servers = new Set(names.map(n => (/^mcp__(.+)__get_thread$/.exec(n) || [])[1]).filter(Boolean))
+  for (const n of names) {
+    const m = /^mcp__(.+)__search_threads$/.exec(n)
+    if (m && servers.has(m[1])) return m[1]
+  }
+  return null
+}
+
+async function emailServer($) {
+  try { const found = emailFrom((await $.tool.list()).map(t => typeof t === 'string' ? t : t.name || '')); if (found) return found } catch {}
+  try { return emailFrom(((await $.session.usage({ breakdown: 'summary' }))?.context?.breakdown?.mcpTools || []).map(t => t.name)) } catch {}
+  return null
+}
+
 // SkillKey is the connector with both start_skill and word_balance. The desktop app names
 // connectors by an id instead of "claude.ai SkillKey", so it is found by its tools.
 function skillKeyFrom(names) {
@@ -890,14 +909,19 @@ async function runCrew($, name) {
   const today = new Date(await $.clock.now()).toISOString().slice(0, 10)
   let work = ''
   if (name === 'support') {
-    // The crew has no shell, so the plugin finds the questions that have no draft yet.
+    // The crew has no shell, so the plugin finds the questions that have no draft yet. With Gmail
+    // connected, Support also reads the owner's "YouCloned Support" label, so it runs without files too.
     const waiting = await waitingQuestions($)
-    if (!waiting.length) {
-      crew[name].note = 'No new questions in ' + crewDir(name) + '/inbox.'
+    const mail = await emailServer($)
+    if (!waiting.length && !mail) {
+      crew[name].note = 'No new questions in ' + crewDir(name) + '/inbox. Connect Gmail in Claude and label support emails "' + SUPPORT_LABEL + '", and Support reads those too.'
       $.ui.invalidate('ui.render')
       return crew[name].note
     }
-    work = '\nQuestions waiting (one file each):\n' + waiting.map(f => '- ' + crewDir(name) + '/inbox/' + f).join('\n') + '\n'
+    if (waiting.length) work += '\nQuestions waiting (one file each):\n' + waiting.map(f => '- ' + crewDir(name) + '/inbox/' + f).join('\n') + '\n'
+    if (mail) work += '\nEmail: with the ' + mail + ' connector, search_threads for label:"' + SUPPORT_LABEL + '" newer_than:14d and read each thread with get_thread. ' +
+      'Each thread is one question named "email <thread id>": put that on its Question: line and the sender\'s address on its Customer: line. ' +
+      'A thread whose name is already on a Question: line in drafts/, done/ or skipped/ has its draft, so leave it. Look-ups only: never label, archive, reply or send.\n'
   }
   const r = await $.agent.spawn({
     subagentType: 'youcloned:' + name,
