@@ -4,7 +4,9 @@
 import json
 import os
 import sys
+import threading
 import time
+import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from xml.sax.saxutils import escape
@@ -38,7 +40,18 @@ def speechify_stream(text, voice, speed, accept):
         "Content-Type": "application/json",
         "Accept": accept,
     })
-    return urllib.request.urlopen(req, timeout=30)
+    for attempt in range(4):  # Speechify's "slow down" (429) on the free plan clears in about a second
+        try:
+            return urllib.request.urlopen(req, timeout=30)
+        except urllib.error.HTTPError as e:
+            if e.code != 429 or attempt == 3:
+                raise
+            time.sleep(min(float(e.headers.get("Retry-After") or 0.5), 2.0))
+
+
+# Speechify's free plan allows one request at a time per account. Your voice chat and the "one second" helper both
+# come through here, so each request waits its turn for the whole stream instead of being refused.
+SPEECHIFY_ONE_AT_A_TIME = threading.Lock()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -60,6 +73,10 @@ class Handler(BaseHTTPRequestHandler):
             voice = setting("SPEECHIFY_VOICE", "leonard")
         speed = float(req.get("speed") or setting("SPEECHIFY_SPEED", "1.0"))
         t0 = time.time()
+        with SPEECHIFY_ONE_AT_A_TIME:
+            self._speak(text, voice, speed, fmt, t0)
+
+    def _speak(self, text, voice, speed, fmt, t0):
         try:
             up = speechify_stream(text, voice, speed, "audio/pcm" if fmt == "pcm" else "audio/mpeg")
         except Exception as e:  # VoiceMode then falls back to the free voice

@@ -71,9 +71,10 @@
       "card": "bnsnstack#318",
       "buyer_file": "voice/speechify-voice.py",
       "buyers": "yes",
-      "mac": "to-port",
-      "pc": "to-port",
-      "check": null
+      "mac": "in-pr",
+      "pc": "in-pr",
+      "check": null,
+      "note": "Ported Oct 17 (same file runs on Mac and PC). Repo test: tools/voice/test_speechify_voice.py. Buyer check still to write with the setup check."
     },
     {
       "id": "voice-06",
@@ -167,7 +168,7 @@
       "id": "bridge-12",
       "area": "bridge",
       "fix": "Usage pill always shows the last reading, dead connections dropped, readings every 5 minutes",
-      "jon_file": "Jon Benson/BNSN/vsl-skill/prototype/bridge.html; ~/isaac-voice/crew/crew_bus.py",
+      "jon_file": "bridge.html (team Bridge) and crew_bus.py (Isaac crew folder) on Jon's Mac",
       "card": "bnsnstack#311",
       "buyer_file": "Bridge in the dashboard (youcloned#29)",
       "buyers": "yes",
