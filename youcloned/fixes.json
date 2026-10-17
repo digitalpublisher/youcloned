@@ -1,10 +1,10 @@
 {
-  "about": "Every fix Isaac gets on Jon's Mac, and the buyer file it becomes. Rule (Jon, Oct 16): a buyer's YouCloned environment has every 'yes' and 'adapt' row from day one. Add a row in a PR the same day a fix ships. 'check' is {\"mac\": ..., \"pc\": ...}: the command that proves the fix on that computer, run from the add-on folder. voice/check-fixes.py runs every row and only says 'Every fix is in.' when all pass; the ship gate refuses a release while a yes/adapt row has no buyer_file, or no check for a computer it isn't n/a on.",
+  "about": "Every fix made on the author's own setup, and the buyer file it becomes. Rule: a buyer's YouCloned environment has every 'yes' and 'adapt' row from day one. Add a row in a PR the same day a fix ships. 'author' rows are fixes only the author's setup needs. 'check' is {\"mac\": ..., \"pc\": ...}: the command that proves the fix on that computer, run from the add-on folder. voice/check-fixes.py runs every row and only says 'Every fix is in.' when all pass; the ship gate refuses a release while a yes/adapt row has no buyer_file, or no check for a computer it isn't n/a on. The author's own file names and working notes live outside this repo.",
   "states": {
     "buyers": [
       "yes",
       "adapt",
-      "jon"
+      "author"
     ],
     "mac/pc": [
       "to-port",
@@ -19,7 +19,6 @@
       "id": "voice-01",
       "area": "voice",
       "fix": "Control while the clone speaks stops the voice and opens the listen in under half a second",
-      "jon_file": "~/.local/isaac/voice/isaac_keys.sh",
       "card": "bnsnstack#303",
       "buyer_file": "voice/clone-keys.sh",
       "buyers": "yes",
@@ -28,27 +27,23 @@
       "check": {
         "mac": "cmp -s voice/clone-keys.sh \"$HOME/.youcloned-phone/clone-keys.sh\"",
         "pc": "$a = Join-Path $env:USERPROFILE '.youcloned-phone\\pc_voice.py'; $b = Join-Path $PWD 'voice\\pc_voice.py'; if ((Test-Path -LiteralPath $a) -and ([Convert]::ToBase64String([IO.File]::ReadAllBytes($a)) -ceq [Convert]::ToBase64String([IO.File]::ReadAllBytes($b)))) { exit 0 } else { exit 1 }"
-      },
-      "note": "Ported Oct 17: Ctrl+Opt+N / Ctrl+Opt+S send one JSON line straight to the voice control socket (0.2 to 0.4s in the fake-socket test), with the voicemode command as fallback. PC already sent straight to the socket (pc_voice.py COMMANDS)."
+      }
     },
     {
       "id": "voice-02",
       "area": "voice",
       "fix": "Control while you talk always sends your words (no 90-second cutoff)",
-      "jon_file": "~/.local/isaac/voice/vm_phase.py",
       "card": "bnsnstack#303",
       "buyer_file": "voice/setup-keys.sh",
-      "buyers": "jon",
+      "buyers": "author",
       "mac": "n/a",
       "pc": "n/a",
-      "check": null,
-      "note": "Not needed for buyers (Oct 17): the bug was Jon's one Control key guessing the phase and reading a long listen as idle. Buyer keys never read the phase; Ctrl+Opt+N always ends the turn and sends the words."
+      "check": null
     },
     {
       "id": "voice-03",
       "area": "voice",
       "fix": "Option interrupt stops the sound only and keeps the conversation going (VoiceMode streaming.py patch, pinned to VoiceMode 8.12.0)",
-      "jon_file": "voicemode voice_mode/streaming.py",
       "card": "bnsnstack#303",
       "buyer_file": "voice/patch-voicemode.py + voice/voicemode-8.12.0-instant-stop.diff (run by setup-voice.sh / setup-voice.ps1)",
       "buyers": "yes",
@@ -57,27 +52,23 @@
       "check": {
         "mac": "\"$(uv tool dir)/voice-mode/bin/python\" voice/patch-voicemode.py check",
         "pc": ". .\\voice\\pc-common.ps1; $t = Get-VoiceTool; if (-not $t) { exit 1 }; & $t.Py voice\\patch-voicemode.py check; exit $LASTEXITCODE"
-      },
-      "note": "Ported Oct 17: ships only the diff. The patcher changes streaming.py only when it is byte-for-byte stock 8.12.0 (hash matches the wheel RECORD), keeps the original, re-applies after a reinstall, and its output is identical to Jon's live file. Tested on a fake VoiceMode copy: stock, rerun, check, changed file refused, no VoiceMode. PC line not run yet (no PowerShell on Jon's Mac): Windows run or Ben's PC."
+      }
     },
     {
       "id": "voice-04",
       "area": "voice",
       "fix": "\"One second, still working\" waits 45 seconds and never talks over a listen",
-      "jon_file": "~/.local/isaac/voice/wake_feedback.py",
       "card": "bnsnstack#303",
       "buyer_file": "Talk button relay (youcloned#28)",
       "buyers": "adapt",
       "mac": "waiting",
       "pc": "waiting",
-      "check": null,
-      "note": "Oct 17: the buyer install has no wake helper (Jon's wake_feedback.py watches a Hey Isaac wake relayed to Voice Command). The buyer form is \"Talk pressed, no answer in 45s: one short line, never over a listen\", built with the Talk relay in #28. Until then the talk skill tells the clone to say a short line before slow work."
+      "check": null
     },
     {
       "id": "voice-05",
       "area": "voice",
       "fix": "Speechify sends one request at a time and retries when told to slow down",
-      "jon_file": "~/.local/isaac/voice/speechify_bridge.py",
       "card": "bnsnstack#318",
       "buyer_file": "voice/speechify-voice.py",
       "buyers": "yes",
@@ -86,53 +77,45 @@
       "check": {
         "mac": "[ ! -f \"$HOME/.youcloned-phone/speechify-voice.py\" ] || cmp -s voice/speechify-voice.py \"$HOME/.youcloned-phone/speechify-voice.py\"",
         "pc": "$a = Join-Path $env:USERPROFILE '.youcloned-phone\\speechify-voice.py'; $b = Join-Path $PWD 'voice\\speechify-voice.py'; if ((-not (Test-Path -LiteralPath $a)) -or ([Convert]::ToBase64String([IO.File]::ReadAllBytes($a)) -ceq [Convert]::ToBase64String([IO.File]::ReadAllBytes($b)))) { exit 0 } else { exit 1 }"
-      },
-      "note": "Ported Oct 17 (same file runs on Mac and PC). Repo test: tools/voice/test_speechify_voice.py. Mac and PC checks pass while voice isn't set up and fail on a changed copy (PC proven on a GitHub Windows runner, run 39024529016)."
+      }
     },
     {
       "id": "voice-06",
       "area": "voice",
       "fix": "Talk wakes only the chat it points at, plus the safe restart",
-      "jon_file": "~/.local/isaac/voice/relay/relay.py",
       "card": "bnsnstack#318",
       "buyer_file": "Talk button relay (youcloned#28)",
       "buyers": "adapt",
       "mac": "to-port",
       "pc": "to-port",
-      "check": null,
-      "note": "A buyer has one voice chat: Talk wakes the chat you pressed it in."
+      "check": null
     },
     {
       "id": "voice-07",
       "area": "voice",
       "fix": "Microphone permission check for each Claude version, with a warning when the current version can't hear the mic",
-      "jon_file": "~/.config/isaac/inbox/watch/pending_actions.py",
       "card": "bnsnstack#318",
       "buyer_file": "voice/check-voice.sh",
       "buyers": "yes",
       "mac": "waiting",
       "pc": "waiting",
-      "check": null,
-      "note": "Oct 17: waits on #321 with voice-10. Jon's check reads the mic entry for the versioned ~/.local/bin/claude path; which program holds a buyer's mic (Claude app or a fixed Claude Code path) is what #321 settles. Reading the permission list may also need Full Disk Access on a buyer Mac, so the buyer check needs its own design."
+      "check": null
     },
     {
       "id": "voice-08",
       "area": "voice",
-      "fix": "Voice Command starts on the login whose chats hear the mic",
-      "jon_file": "~/.local/isaac/chat-rotator/chat_rotator.py",
+      "fix": "The voice chat starts on the login whose chats hear the mic",
       "card": "bnsnstack#318",
       "buyer_file": null,
-      "buyers": "jon",
+      "buyers": "author",
       "mac": "n/a",
       "pc": "n/a",
-      "check": null,
-      "note": "Buyers have one Claude login; voice-07 covers their case."
+      "check": null
     },
     {
       "id": "voice-09",
       "area": "voice",
       "fix": "The voice chat swaps itself when it gets heavy (200k tokens or 3 hours)",
-      "jon_file": "~/.local/isaac/chat-rotator/chat_rotator.py",
       "card": "bnsnstack#320",
       "buyer_file": "add-on universal rules, hooks/universal.js (chat switch, youcloned#34, PR #35)",
       "buyers": "adapt",
@@ -141,27 +124,23 @@
       "check": {
         "mac": "grep -q \"past about 200,000 tokens\" hooks/universal.js",
         "pc": "if (Select-String -Quiet -Path hooks\\universal.js -Pattern 'past about 200,000 tokens') { exit 0 } else { exit 1 }"
-      },
-      "note": "Adds the heavy-chat trigger to the buyer's \"time to change chats\". Oct 17: the clone offers to change chats past about 200,000 tokens or three hours since the chat started (PR #35 commit 5abad0b). Measured by the clone in part 1; part 2 of #34 has the add-on measure it. The check passes once PR #35 is merged into the release."
+      }
     },
     {
       "id": "voice-10",
       "area": "voice",
       "fix": "One fixed Claude Code location, so mic and Desktop permissions survive updates",
-      "jon_file": null,
       "card": "bnsnstack#321",
       "buyer_file": "voice/setup-voice.sh",
       "buyers": "yes",
       "mac": "waiting",
       "pc": "waiting",
-      "check": null,
-      "note": "Isaac Inbox builds it on Jon's Mac first (Oct 17); ports once it passes there."
+      "check": null
     },
     {
       "id": "voice-11",
       "area": "voice",
       "fix": "Listens use listen_duration_min 8, so a short pause doesn't close your turn",
-      "jon_file": "Voice Command converse parameter",
       "card": "bnsnstack#318",
       "buyer_file": "voice/talk-out-loud/SKILL.md; hooks/register.js and dashboard/server.py (Talk prompt)",
       "buyers": "yes",
@@ -170,14 +149,12 @@
       "check": {
         "mac": "cmp -s voice/talk-out-loud/SKILL.md \"$HOME/.claude/skills/talk-out-loud/SKILL.md\"",
         "pc": "$a = Join-Path $env:USERPROFILE '.claude\\skills\\talk-out-loud\\SKILL.md'; $b = Join-Path $PWD 'voice\\talk-out-loud\\SKILL.md'; if ((Test-Path -LiteralPath $a) -and ([Convert]::ToBase64String([IO.File]::ReadAllBytes($a)) -ceq [Convert]::ToBase64String([IO.File]::ReadAllBytes($b)))) { exit 0 } else { exit 1 }"
-      },
-      "note": "Ported Oct 17: the talk skill says listen_duration_min 8 (was 4) and the Talk button prompt names 8 and 600. VoiceMode 8.12.0 has no env setting for the minimum, so it lives in the instructions."
+      }
     },
     {
       "id": "voice-14",
       "area": "voice",
       "fix": "Full-loop voice test and stop-time test (talk, stop, listen again, words arrive)",
-      "jon_file": "~/.local/isaac/voice/tests/full_loop_test.py, stop_latency_test.py",
       "card": "bnsnstack#303",
       "buyer_file": "voice/loop-test.py (bash check-voice.sh loop)",
       "buyers": "yes",
@@ -185,14 +162,12 @@
       "pc": "to-port",
       "check": {
         "mac": "bash voice/check-voice.sh loop"
-      },
-      "note": "Ported Oct 17 (Mac): three rounds, Ctrl+Opt+N mid-sentence must stop the voice within 1s, the listen must open, and a say-voice phrase must arrive. Not run on Jon's Mac (plays sound, shares the control socket with Voice Command); first run on the clean test Mac. check-voice.sh also now checks the instant-stop fix every run. PC version to write."
+      }
     },
     {
       "id": "bridge-12",
       "area": "bridge",
       "fix": "Usage pill always shows the last reading, dead connections dropped, readings every 5 minutes",
-      "jon_file": "bridge.html (team Bridge) and crew_bus.py (Isaac crew folder) on Jon's Mac",
       "card": "bnsnstack#311",
       "buyer_file": "dashboard plan gauge: dashboard/index.html + hooks/register.js (claudeAt); the Bridge build (youcloned#29) grows from this dashboard",
       "buyers": "yes",
@@ -201,14 +176,12 @@
       "check": {
         "mac": "grep -q \"not read since\" dashboard/index.html && grep -q \"live.claudeAt\" hooks/register.js",
         "pc": "if ((Select-String -Quiet -Path dashboard\\index.html -Pattern 'not read since') -and (Select-String -Quiet -Path hooks\\register.js -Pattern 'live.claudeAt')) { exit 0 } else { exit 1 }"
-      },
-      "note": "Oct 17 (adapted): the buyer gauge already kept its last reading and reads every 20 seconds; it now also says \"not read since <time>\" once no reading has come in for 10 minutes (Claude closed or the read failing). Dead database connections are n/a: a buyer's dashboard has no database. Checked in Firefox at 1280 and 390 wide."
+      }
     },
     {
       "id": "agent-13",
       "area": "agents",
       "fix": "Slack clone answers YouCloned and computer questions only from text it has, never from memory",
-      "jon_file": "scripts/isaac/youcloned_platform_guard.py",
       "card": "bnsnstack#315",
       "buyer_file": "clone-slack-bridge.py in the Your Clone in Slack lesson (installs to ~/.youcloned-slack), version 1.2.1",
       "buyers": "adapt",
@@ -217,14 +190,12 @@
       "check": {
         "mac": "[ ! -f \"$HOME/.youcloned-slack/clone-slack-bridge.py\" ] || grep -q \"PLATFORM_RULE\" \"$HOME/.youcloned-slack/clone-slack-bridge.py\"",
         "pc": "$f = Join-Path $env:USERPROFILE '.youcloned-slack\\clone-slack-bridge.py'; if (-not (Test-Path $f) -or (Select-String -Quiet -SimpleMatch -Path $f -Pattern 'PLATFORM_RULE')) { exit 0 } else { exit 1 }"
-      },
-      "note": "Oct 17 (adapted): the bridge spots a YouCloned, install or computer question (Jon's matching plus any YouCloned mention, Linux, \"Sarah's computer\", \"how do I install it\" and \"set it up\") and adds a rule for that chat: answer only from the rules page and the files the clone has, never from memory, never name a computer to buy or say what runs YouCloned unless that text does. Once a chat gets the rule it keeps it, and a new chat whose thread already asked gets it too. Owner in a direct message: if the text doesn't cover it, say so and point to the YouCloned Setup space. Owner in a channel or a teammate: no members-only link. The rule sits outside the teammate chat's context check, so it never starts a teammate over. Left out for buyers: Jon's KB file (Claire's internal knowledge base doesn't ship) and his carve-out for his own Mac. The bridge source is the lesson bundle (day-one/slack/files, version 1.2.1), outside this repo; the check passes while Slack isn't installed and fails on an installed bridge without the rule. Tests: day-one/slack/tests/test_fixes.py, nine agent-13 checks; Codex reviewed three times, last pass clear."
+      }
     },
     {
       "id": "agent-a",
       "area": "agents",
       "fix": "Nothing sends that we didn't write and okay (send gate)",
-      "jon_file": null,
       "card": "bnsnstack#207",
       "buyer_file": "hooks/gate.js (the crew reads and drafts only: every connector call that sends, posts or replies is refused) + the Review drafts prompt in hooks/register.js (shows exactly what goes where and waits for the buyer's yes)",
       "buyers": "yes",
@@ -233,14 +204,12 @@
       "check": {
         "mac": "grep -q \"'send', 'post', 'reply'\" hooks/gate.js && grep -q \"wait for my yes\" hooks/register.js",
         "pc": "if ((Select-String -Quiet -SimpleMatch -Path hooks\\gate.js -Pattern \"'send', 'post', 'reply'\") -and (Select-String -Quiet -Path hooks\\register.js -Pattern 'wait for my yes')) { exit 0 } else { exit 1 }"
-      },
-      "note": "Oct 17: already in the add-on. A crew member can't send anything (gate.js refuses send, post, reply and every other change tool), and nothing goes out until the buyer says yes on the Review drafts step. The Zoom lesson's own sender (agent-g) gets its row checked with that lesson."
+      }
     },
     {
       "id": "agent-b",
       "area": "agents",
       "fix": "No income claims or promises in any answer (claim gate)",
-      "jon_file": "claim_gate.py",
       "card": null,
       "buyer_file": "hooks/claims.js, called by hooks/gate.js on every crew draft (anything written under crew/<name>/drafts)",
       "buyers": "adapt",
@@ -249,14 +218,12 @@
       "check": {
         "mac": "grep -q \"claimProblems(call.content)\" hooks/gate.js && grep -q \"results or timeframe promise\" hooks/claims.js",
         "pc": "if ((Select-String -Quiet -SimpleMatch -Path hooks\\gate.js -Pattern 'claimProblems(call.content)') -and (Select-String -Quiet -Path hooks\\claims.js -Pattern 'results or timeframe promise')) { exit 0 } else { exit 1 }"
-      },
-      "note": "Oct 17 (adapted): the support mode of Jon's claim gate, ported to hooks/claims.js. A crew draft with an earnings figure, an earnings or results claim, a results or timeframe promise, or a refund, price or discount promise is refused and the crew rewrites it. Stated prices and a stated money-back policy still pass. Left out for buyers: Jon's hold-off rule (it is about his own Command sale) and his no-stall wording rule (his voice). Notes outside drafts/ are not checked, so the crew can still write down what a customer said. Test: tests/youcloned.test.ts, fails without the gate change."
+      }
     },
     {
       "id": "agent-c",
       "area": "agents",
       "fix": "Three answers per person on list replies; the third closes the thread",
-      "jon_file": null,
       "card": null,
       "buyer_file": "the buyer's reply clone",
       "buyers": "yes",
@@ -268,7 +235,6 @@
       "id": "agent-d",
       "area": "agents",
       "fix": "60-second limit on every mailbox read",
-      "jon_file": "claire_cases.py, claire_dm.py, claire_sendas.py, kelly_followups.py, claire_support.py (imaplib.IMAP4_SSL(host, timeout=60))",
       "card": "bnsnstack#88",
       "buyer_file": "every add-on script that opens a mailbox (none ship today); the check fails any one that opens IMAP without timeout=60",
       "buyers": "yes",
@@ -277,14 +243,12 @@
       "check": {
         "mac": "! grep -rnE --include=*.py \"IMAP4(_SSL)?\\(\" . | grep -v \"timeout=60\" | grep -q .",
         "pc": "if (Get-ChildItem -Recurse -Filter *.py | Select-String -Pattern 'IMAP4(_SSL)?\\(' | Where-Object { $_.Line -notmatch 'timeout=60' }) { exit 1 } else { exit 0 }"
-      },
-      "note": "Oct 17: the crew reads mail only through Claude's connectors, so no buyer script opens a mailbox today. The check guards the rule from now on: it passes while every IMAP open in the add-on carries timeout=60, and fails the day a script ships one without it."
+      }
     },
     {
       "id": "agent-e",
       "area": "agents",
       "fix": "Chat switch: says it's time, writes the handoff, switches on a yes",
-      "jon_file": null,
       "card": "youcloned#34",
       "buyer_file": "add-on universal rules, hooks/universal.js (PR #35)",
       "buyers": "yes",
@@ -299,7 +263,6 @@
       "id": "agent-f",
       "area": "agents",
       "fix": "Ask once to let the clone work without permission prompts",
-      "jon_file": null,
       "card": "youcloned#27",
       "buyer_file": "add-on setup (PR #27): load_setup asks once, the work_without_prompts tool writes the answer",
       "buyers": "yes",
@@ -308,27 +271,23 @@
       "check": {
         "mac": "grep -q \"work_without_prompts\" hooks/register.js",
         "pc": "if (Select-String -Quiet -SimpleMatch -Path hooks\\register.js -Pattern 'work_without_prompts') { exit 0 } else { exit 1 }"
-      },
-      "note": "Oct 17: the check passes when the add-on carries the work_without_prompts tool, so it fails until PR #27 merges. PR #27 already finds the PC's settings folders (USERPROFILE, APPDATA for Cursor and VS Code); it hasn't run on a PC yet, so it goes on Ben's PC list with the clean-Mac run."
+      }
     },
     {
       "id": "agent-g",
       "area": "agents",
-      "fix": "Zoom Isaac fixes: names calls, one-step walk-throughs, stops when talked over, coach role",
-      "jon_file": null,
+      "fix": "Zoom clone fixes: names calls, one-step walk-throughs, stops when talked over, coach role",
       "card": "bnsnstack#96",
       "buyer_file": "Zoom in Your Room lesson",
       "buyers": "yes",
       "mac": "to-port",
       "pc": "to-port",
-      "check": null,
-      "note": "Ships with that lesson, after week one."
+      "check": null
     },
     {
       "id": "voice-h",
       "area": "voice",
       "fix": "Voice late-skip fix and the never-silent \"Hey\" lines",
-      "jon_file": null,
       "card": "bnsnstack#88",
       "buyer_file": "voice/talk-out-loud/SKILL.md (steps 1 and 4); the Talk press itself waits on youcloned#28",
       "buyers": "yes",
@@ -337,29 +296,25 @@
       "check": {
         "mac": "grep -q \"Silence sounds like the voice broke\" voice/talk-out-loud/SKILL.md && grep -q \"skip the hello\" voice/talk-out-loud/SKILL.md",
         "pc": "if ((Select-String -Quiet -SimpleMatch -Path voice\\talk-out-loud\\SKILL.md -Pattern 'Silence sounds like the voice broke') -and (Select-String -Quiet -SimpleMatch -Path voice\\talk-out-loud\\SKILL.md -Pattern 'skip the hello')) { exit 0 } else { exit 1 }"
-      },
-      "note": "Oct 17: never-silent was already in the talk skill (step 4: a short holding line with no listen before a long job). The late-tap rule is now in step 1: a Talk press that comes right after the owner wrapped up, or is more than a minute old, gets no hello, only a silent listen (skip_tts). Jon's version is an instruction to Voice Command too. Waiting: a buyer's Talk button still posts to Jon's own voice relay (youcloned#28, unassigned), so dropping a stale press in code goes with that fix. voice-11's check compares the installed skill with this file."
+      }
     },
     {
       "id": "install-win-python",
       "area": "install",
       "fix": "Windows installer no longer counts the Microsoft Store python stub as installed",
-      "jon_file": null,
       "card": "youcloned#37",
-      "buyer_file": "PC installer (youcloned.bnsn.ai/install/windows.ps1, staged in the vault's .youcloned-deploy/install/windows.ps1)",
+      "buyer_file": "PC installer (youcloned.bnsn.ai/install/windows.ps1)",
       "buyers": "yes",
       "mac": "n/a",
       "pc": "waiting",
       "check": {
         "pc": "$p = (Get-Command python -ErrorAction SilentlyContinue).Source; if (-not $p -or $p -match 'WindowsApps') { exit 1 }; try { & python --version *> $null } catch { exit 1 }; if ($LASTEXITCODE -eq 0) { exit 0 } else { exit 1 }"
-      },
-      "note": "Oct 17: the fix is staged, not live. A GitHub Windows run passed both ways on Oct 16 (stub only: the patched script installs Python; Python present: it skips). Waiting on the deploy word from Jon or Ben (.youcloned-deploy/deploy.sh). The check passes when python on the PC is a working Python, not the Microsoft Store stub."
+      }
     },
     {
       "id": "install-intel-mac",
       "area": "install",
       "fix": "Mac installer works on Intel Macs again",
-      "jon_file": null,
       "card": "bnsnstack#296",
       "buyer_file": "Mac installer (PR #36)",
       "buyers": "yes",
@@ -367,14 +322,12 @@
       "pc": "n/a",
       "check": {
         "mac": "xcode-select -p >/dev/null 2>&1 && git --version >/dev/null && node --version >/dev/null && python3 --version >/dev/null && claude --version >/dev/null && [ -d /Applications/Obsidian.app ] && [ -d /Applications/Cursor.app ] && { [ \"$(uname -m)\" != x86_64 ] || lipo -archs /Applications/Cursor.app/Contents/MacOS/Cursor | grep -q x86_64; }"
-      },
-      "note": "Oct 17: the check mirrors PR #36's runner checks: Apple's command line tools, git, node, python3 and claude all run, Obsidian and Cursor are in Applications, and on an Intel Mac Cursor's app holds Intel code. It starts with xcode-select so a bare Mac never gets Apple's install pop-up from the git or python3 stand-ins. PR #36 waits on review and the deploy word."
+      }
     },
     {
       "id": "skills-split",
       "area": "skills",
-      "fix": "Installer's skill list follows the skills split page (Global downloads, SkillKey Custom, Jon-only never shipped)",
-      "jon_file": null,
+      "fix": "Installer's skill list follows the skills split page (Global downloads, SkillKey Custom, author-only never shipped)",
       "card": "bnsnstack#88",
       "buyer_file": "skills/youcloned-starter-skills.zip on youcloned.bnsn.ai (installer Step 10), names in skills-pack.txt",
       "buyers": "yes",
@@ -383,14 +336,12 @@
       "check": {
         "mac": "if [ ! -f \"$HOME/.youcloned/vault-path\" ]; then exit 0; fi; while IFS= read -r n || [ -n \"$n\" ]; do [ -z \"$n\" ] || [ -f \"$HOME/.claude/skills/$n/SKILL.md\" ] || exit 1; done < skills-pack.txt",
         "pc": "$m = Join-Path $env:USERPROFILE '.youcloned\\vault-path'; if (-not (Test-Path -LiteralPath $m)) { exit 0 }; foreach ($n in (Get-Content -Encoding UTF8 -LiteralPath (Join-Path $PWD 'skills-pack.txt'))) { $n = $n.Trim(); if ($n -and -not (Test-Path -LiteralPath (Join-Path $env:USERPROFILE (Join-Path '.claude\\skills' (Join-Path $n 'SKILL.md'))))) { exit 1 } }; exit 0"
-      },
-      "note": "Oct 17: buyer pack rebuilt from Jon's split page in the author's staging folder (day-one/skills-pack: ADAPT-SPEC.md rules 1 to 15, pack_gate.py, value_scan.py, build.sh): 75 folders (45 split-page skills, COM, done-day, recap-all, jon-benson-voice-hacks held for Jon's call, 26 third-party), the three Yours-only skills absent. Jon-only names, paths, voice ids, services and keys taken out by gate in code; voice skills read ELEVENLABS_VOICE_ID from the owner's vault env file; every helper finds the vault from ~/.youcloned/vault-path, which the patched installer writes. Codex reviewed it three times. The check passes before the new installer has run (no ~/.youcloned/vault-path) and fails when any pack skill is missing its SKILL.md after it ran. Ships only on Jon's or Ben's deploy word: zip to .youcloned-deploy/install/skills/, patched mac.sh and windows.ps1 to .youcloned-deploy/install/, deploy.sh."
+      }
     },
     {
       "id": "words-buy-more",
       "area": "skills",
       "fix": "Buy-more-words link wherever the word balance shows",
-      "jon_file": null,
       "card": "bnsn-checkout#246",
       "buyer_file": "list_skills, word_balance and the balance block on instaclone start",
       "buyers": "yes",

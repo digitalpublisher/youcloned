@@ -10,6 +10,9 @@ Each non-empty, non-comment denylist line is a case-insensitive literal.
 Repository literals live in tools/ship-gate/denylist.txt.
 Put customer names or emails in ~/.config/youcloned/ship-denylist.txt.
 Private denylist matches are reported without revealing their literal.
+A comment line # [kind: owner email] in the private list names the kind of every line under it;
+a hit then reads denylist:private:owner-email [private]. Private lines match whole words in any case.
+The skills pack gate (pack_gate.py and build.sh in the author's staging folder) reads the same private list.
 Add exact permitted addresses to tools/ship-gate/allow-emails.txt.
 example.com and example.org addresses are always permitted.
 A fixes.json (top level or youcloned/) blocks the gate while a yes or adapt row has no buyer_file,

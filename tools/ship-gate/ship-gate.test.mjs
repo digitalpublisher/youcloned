@@ -67,7 +67,7 @@ test('each key shape is caught and output is masked', () => {
 test('paths, repository denylist literals, and emails are caught', () => {
   const root = tempDirectory();
   const address = 'person' + '@' + 'buyer.test';
-  write(root, '/Users/' + 'someone/project\nJON' + 'BENSON\n' + address);
+  write(root, '/Users/' + 'someone/project\nISAAC' + '-VOICE\n' + address);
   const result = run(root);
   assert.equal(result.status, 1);
   assert.match(result.stdout, /author-machine-path/);
@@ -87,6 +87,21 @@ test('private denylist matches are found without exposing the entry', () => {
   assert.equal(result.status, 1);
   assert.match(result.stdout, /denylist:private \[private\]/);
   assert.ok(!result.stdout.includes(privateValue));
+});
+
+test('a private hit names its kind, matches whole words in any case, and never shows the entry', () => {
+  const root = tempDirectory();
+  const home = tempDirectory();
+  const privateValue = 'zq-made-up-' + 'owner';
+  fs.mkdirSync(path.join(home, '.config/youcloned'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.config/youcloned/ship-denylist.txt'), '# [kind: owner email]\n' + privateValue + '\n');
+  write(root, 'written by ' + privateValue.toUpperCase() + '\n', 'hit.txt');
+  write(root, 'inside a longer word: x' + privateValue + 'y\n', 'word.txt');
+  const result = run(root, ['--json'], { HOME: home });
+  assert.equal(result.status, 1);
+  const findings = JSON.parse(result.stdout).findings;
+  assert.deepEqual(findings.map((f) => `${f.file} ${f.rule} ${f.masked}`), ['hit.txt denylist:private:owner-email [private]']);
+  assert.ok(!result.stdout.toLowerCase().includes(privateValue));
 });
 
 test('placeholders and process environment references are not flagged', () => {

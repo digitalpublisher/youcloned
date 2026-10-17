@@ -9,6 +9,8 @@
 import { judge, denyText } from './gate.js'
 import { firstKey, writtenText, isEnvFile, commandReason, parseBans, bannedIn } from './guards.js'
 import { RULES_NAME, checkSetup, rulesMarkdown } from './rules.js'
+import { STEPS, CAN_SKIP, setupText, nextStep } from './steps.js'
+import { HELPERS, parseAgent, gmailReads, helperJudge, helperDenyText } from './helpers.js'
 import { topSvg, heroSvg, moneySvg, cardHeadSvg, plateSvg, thumbSvg, PLATE, THUMB, setWidth } from './panel.js'
 
 const PANE = 'youcloned'
@@ -31,6 +33,8 @@ const gatePassed = new Set() // tool_use_ids of crew calls the gate allowed
 let skillKey = false        // the SkillKey connector is on in this session
 let skillKeyServer = null   // its name for $.mcp.call: "claude.ai SkillKey" in the terminal, an id in the desktop app
 const crewReady = new Set() // crew members registered with their instructions from SkillKey
+const helperIds = new Map() // agentId -> feed-me helper name (librarian, wiki-writer)
+const notHelper = new Set()
 let sessionStartedAt = 0     // when this session began; connectors can take a minute to connect after it
 const notOwned = new Set()  // YouCloned skills SkillKey says this account does not have (their plan decides)
 let cloneHere = false       // this session runs in the customer's clone folder
@@ -295,23 +299,114 @@ async function refreshLive($, withWords) {
 }
 
 let lastName
-// The dashboard's "Set up your clone" steps 1 to 3, from what is on this computer, never assumed:
-// home = the rules file is saved; tools = git (Apple's developer tools or Homebrew), Obsidian, Node,
-// ffmpeg and Wispr Flow are all there; backup = the clone folder is a git repo with a GitHub remote.
+// Night-one setup (hooks/steps.js): each step is checked on this computer, never assumed, and the
+// dashboard and setup_next both read the result.
+//   tools      install-tools --check passes (Git, Node, Python, ffmpeg, Obsidian, gh)
+//   home       the clone folder setup_next saved (its marker file) or the one the interview saved
+//   protection the YouCloned key check is in Git's hooks for every repository
+//   skillkey   SkillKey's tools are in this Claude account
+//   interview  the rules file is saved in the clone folder
+//   skills     every skill in skills-pack.txt is in ~/.claude/skills with its SKILL.md
+//   backup     the folder is a Git repository with a GitHub remote, and setup-backup proved it private
+//   library    the env file holds the library's address and token
+//   voice      VoiceMode's settings file is there (the voice setup writes it last)
+//   feed       the librarian wrote the library's index page in the clone folder
+async function cloneFolder($) {
+  const saved = await $.store.get('folder')
+  return typeof saved === 'string' && saved ? saved : project
+}
+
+const sep = () => (onMac() ? '/' : '\\')
+
 async function checkSetupSteps($) {
   const has = async (paths) => { for (const p of paths) { if (await $.fs.exists(p)) return true } return false }
-  const homeDone = !!project && (await $.fs.exists(project + '/' + RULES_NAME))
-  let tools = false
+  const folder = await cloneFolder($)
+  const root = $.plugin.root
+  const st = {}
+  // tools
   if (onMac()) {
-    const git = (await run($, ['/usr/bin/xcode-select', '-p'])).exitCode === 0 || (await has(['/opt/homebrew/bin/git', '/usr/local/bin/git']))
-    tools = git && (await has(['/Applications/Obsidian.app', home + '/Applications/Obsidian.app']))
-      && (await has(['/opt/homebrew/bin/node', '/usr/local/bin/node', home + '/.nvm/versions/node']))
-      && (await has(['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg']))
-      && (await has(['/Applications/Wispr Flow.app', home + '/Applications/Wispr Flow.app']))
+    if (await $.fs.exists(root + '/setup/install-tools.sh')) {
+      st.tools = (await runWith($, ['/bin/bash', root + '/setup/install-tools.sh', '--check'], { timeoutMs: 60000 })).exitCode === 0
+    } else {
+      const git = (await run($, ['/usr/bin/xcode-select', '-p'])).exitCode === 0 || (await has(['/opt/homebrew/bin/git', '/usr/local/bin/git']))
+      st.tools = git && (await has(['/Applications/Obsidian.app', home + '/Applications/Obsidian.app']))
+        && (await has(['/opt/homebrew/bin/node', '/usr/local/bin/node', home + '/.nvm/versions/node']))
+        && (await has(['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg']))
+    }
+  } else {
+    st.tools = (await runWith($, ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', root + '\\setup\\install-tools.ps1', '-Check'], { timeoutMs: 60000 })).exitCode === 0
   }
-  let backup = false
-  if (project) { try { backup = /\[remote "[^"]+"\][^[]*url\s*=\s*\S*github\.com/i.test(await $.fs.read(project + '/.git/config')) } catch {} }
-  live.setup = { home: homeDone, tools, backup }
+  st.home = !!folder && ((await $.fs.exists(folder + '/.youcloned-folder')) || (await $.fs.exists(folder + '/' + RULES_NAME)))
+  st.protection = (await $.fs.exists(home + '/.youcloned/git-hooks/pre-commit')) && (await $.fs.exists(home + '/.youcloned/lib/secret-rules.mjs'))
+  if (!skillKeyServer) { try { await checkSkillKey($) } catch {} }
+  st.skillkey = !!skillKeyServer
+  st.interview = !!folder && (await $.fs.exists(folder + '/' + RULES_NAME))
+  st.skills = false
+  try {
+    const names = (await $.fs.read(root + '/skills-pack.txt')).split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'))
+    st.skills = names.length > 0
+    for (const n of names) { if (!(await $.fs.exists(home + '/.claude/skills/' + n + '/SKILL.md'))) { st.skills = false; break } }
+  } catch {}
+  st.backup = false
+  if (folder) {
+    try {
+      st.backup = /\[remote "[^"]+"\][^[]*url\s*=\s*\S*github\.com/i.test(await $.fs.read(folder + '/.git/config'))
+        && (await $.fs.exists(folder + '/.git/youcloned-backup-private'))
+    } catch {}
+  }
+  st.library = false
+  if (folder) {
+    try {
+      const env = await $.fs.read(folder + '/.env')
+      st.library = /^YOUCLONED_LIBRARY_URL=\S+/m.test(env) && /^YOUCLONED_LIBRARY_TOKEN=\S+/m.test(env)
+    } catch {}
+  }
+  st.voice = await $.fs.exists(home + '/.voicemode/voicemode.env')
+  st.feed = !!folder && (await $.fs.exists(folder + '/Library/index.md'))
+  let skipped = []
+  try { const s = await $.store.get('skipped'); if (Array.isArray(s)) skipped = s.filter(x => CAN_SKIP.has(x)) } catch {}
+  const next = nextStep(st, new Set(skipped))
+  live.setup = {
+    home: st.home, tools: st.tools, backup: st.backup, // read by older dashboards
+    steps: STEPS.map(s => ({ id: s.id, title: s.title, why: s.why, done: !!st[s.id], skipped: !st[s.id] && skipped.includes(s.id) })),
+    next: next ? next.id : null,
+  }
+  return { st, skipped: new Set(skipped), folder }
+}
+
+async function setupNext($, e) {
+  if (e && e.folder) {
+    const f = expandHome(e.folder).replace(/[\\/]+$/, '')
+    if (!/^([A-Za-z]:)?[\\/]/.test(f)) return 'Not saved: the folder must be a full path, such as ' + nightFolder() + '.'
+    try { await $.fs.write(f + '/.youcloned-folder', 'This folder is a YouCloned clone home.\n') } catch (err) { return 'Could not make ' + f + ': ' + String(err).slice(0, 200) }
+    await $.store.set('folder', f)
+    // The starter skills and the library scripts find the clone folder here (first line, full path).
+    try { await $.fs.write(dataDir() + '/vault-path', f + '\n') } catch {}
+  }
+  if (e && e.skip) {
+    if (!CAN_SKIP.has(e.skip)) return 'The ' + e.skip + ' step can\'t be put off: every step after it needs it.'
+    let s = []
+    try { const v = await $.store.get('skipped'); if (Array.isArray(v)) s = v } catch {}
+    if (!s.includes(e.skip)) s.push(e.skip)
+    await $.store.set('skipped', s)
+  }
+  const { st, skipped, folder } = await checkSetupSteps($)
+  await writeState($)
+  $.ui.invalidate('ui.render')
+  const f = folder || nightFolder()
+  const next = nextStep(st, skipped)
+  if (next && next.id === 'feed') { try { await registerHelpers($) } catch (err) { $.ui.log('feed-me helpers not registered: ' + String(err).slice(0, 200)) } }
+  return setupText(st, skipped, {
+    root: $.plugin.root, home, folder: f, mac: onMac(), defaultFolder: nightFolder(),
+    needsSkillKey: NEEDS_SKILLKEY, envFile: f + sep() + '.env', scratch: home + sep() + '.youcloned' + sep() + 'feeding',
+    python: next && next.id === 'feed' && onMac() ? await findPython($) : '',
+  })
+}
+
+// The night-one default: the same Obsidian Vault folder Jon's clone uses, so the skills pack, the
+// lessons and the env file all agree on one place.
+function nightFolder() {
+  return home + (onMac() ? '/Documents/Obsidian Vault' : '\\Documents\\Obsidian Vault')
 }
 
 // What the dashboard reads: the numbers, the owner's name, this session (for the talk button) and
@@ -832,6 +927,46 @@ async function registerCrew($, quiet = false) {
   }
 }
 
+// The feed-me helpers: the librarian (Haiku) and the wiki writer (Sonnet). Their instructions are the
+// add-on's agents/<name>.md files. The librarian gets the Gmail connector's two look-up tools under
+// whatever name this Claude gives the connector (the desktop app names it by an id).
+async function registerHelpers($) {
+  const names = []
+  try { for (const t of await $.tool.list()) names.push(typeof t === 'string' ? t : t.name || '') } catch {}
+  try { for (const t of (await $.session.usage({ breakdown: 'summary' }))?.context?.breakdown?.mcpTools || []) names.push(t.name) } catch {}
+  const done = []
+  for (const h of HELPERS) {
+    const file = $.plugin.root + '/agents/' + h.name + '.md'
+    if (!(await $.fs.exists(file))) continue
+    const a = parseAgent(await $.fs.read(file))
+    if (!a || a.name !== h.name) { $.ui.log('feed-me helper ' + h.name + ': its agents file has no name, description or prompt'); continue }
+    const tools = h.name === 'librarian' ? [...new Set([...a.tools, ...gmailReads(names)])] : a.tools
+    await $.agent.register({ name: h.name, description: a.description, prompt: a.prompt, model: a.model, tools, maxTurns: h.maxTurns, omitClaudeMd: true })
+    done.push(h.name)
+  }
+  return done
+}
+
+async function isHelper($, e) {
+  const id = e.agentId
+  if (!id) return null
+  if (helperIds.has(id)) return helperIds.get(id)
+  if (notHelper.has(id)) return null
+  const a = (await $.agent.list()).find(x => x.id === id)
+  const m = a && /^youcloned:(.+)$/.exec(a.type)
+  if (m && HELPERS.some(h => h.name === m[1])) {
+    helperIds.set(id, m[1])
+    return m[1]
+  }
+  if (a) notHelper.add(id)
+  return null
+}
+
+async function helperContext($) {
+  const folder = await cloneFolder($)
+  return { feed: $.plugin.root + '/library/feed.py', scratch: home + '/.youcloned/feeding', library: folder ? folder + '/Library' : '' }
+}
+
 // Run now: a helper set up already starts at once. One that isn't yet needs its steps from SkillKey,
 // which Auto mode allows only inside a request, so Claude is asked to run it with the helper tool.
 async function crewNow($, name) {
@@ -933,13 +1068,26 @@ export function register(on) {
       return { deny: 'YouCloned blocked this write: it holds a ' + key + '. Put the key in a git-ignored .env file or your host\'s secret store.' }
     }
     const bans = await loadBans($)
-    const found = bans ? bannedIn(text, bans) : []
+    // The librarian's scratch files hold the owner's own sent emails on their way into the library,
+    // so the owner's banned words (meant for what Claude writes) don't keep them out. Keys still do.
+    const ownWords = e.agentId && (await isHelper($, e)) === 'librarian' && helperJudge('librarian', e, await helperContext($)) === null
+    const found = bans && !ownWords ? bannedIn(text, bans) : []
     if (found.length) return { deny: 'YouCloned blocked this write: ' + bans.message + ' Banned: ' + found.join(', ') + '.' }
     return next(e)
   })
 
   // The safety gate runs first, so no crew call reaches a tool without it. It fails closed.
+  // The feed-me helpers have their own gate: feed.py only, writes only in their own folder, Gmail look-ups only.
   on('tool.call', async ($, e, next) => {
+    const helper = await isHelper($, e)
+    if (helper) {
+      const no = helperJudge(helper, e, await helperContext($))
+      if (no) {
+        $.ui.log('safety gate refused ' + e.tool + ' for the ' + helper + ': ' + no)
+        return { deny: helperDenyText(helper, no) }
+      }
+      return next(e)
+    }
     const name = await isCrew($, e)
     if (!name) return next(e)
     const why = judge(e, crewDir(name) || '/nowhere')
@@ -950,6 +1098,9 @@ export function register(on) {
     if (e.tool_use_id) gatePassed.add(e.tool_use_id)
     return next(e)
   }).catch(async ($, e, next) => {
+    if (e.agentId && helperIds.has(e.agentId)) {
+      return { deny: helperDenyText(helperIds.get(e.agentId), 'the gate itself failed (' + next.error.kind + '), so the call was refused') }
+    }
     if (e.agentId && (crewIds.has(e.agentId) || !notCrew.has(e.agentId))) {
       return { deny: denyText('the gate itself failed (' + next.error.kind + '), so the call was refused') }
     }
@@ -1008,6 +1159,19 @@ export function register(on) {
     if (deskSession && onMac()) $.clock.after(3000, () => nudgeDevTools($))
     try {
       await $.tool.register({
+        name: 'setup_next',
+        description: 'Night-one setup, one step at a time in the only order that works. Checks every step on this computer and says exactly what to do next. Call it to start or continue setup, after each step, with folder once the person picks their clone folder, or with skip (voice or feed) when they want to do that step later.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            folder: { type: 'string', description: 'The clone folder the person chose, as a full path' },
+            skip: { type: 'string', enum: [...CAN_SKIP], description: 'A step the person wants to do later' },
+          },
+        },
+      })
+    } catch (err) { $.ui.log('setup_next not registered: ' + String(err)) }
+    try {
+      await $.tool.register({
         name: 'save_setup',
         description: 'Save the customer\'s YouCloned rules file after the youcloned:setup interview. Refuses a setup with an empty section or fewer than two writing samples the customer wrote themselves.',
         inputSchema: {
@@ -1053,6 +1217,7 @@ export function register(on) {
         try { await registerCrew($, true) } catch {}
         $.ui.invalidate('ui.render')
       }
+      try { await registerHelpers($) } catch (err) { $.ui.log('feed-me helpers not registered: ' + String(err).slice(0, 200)) }
       await setUpCrew()
       $.clock.after(15000, setUpCrew)
       $.clock.after(60000, setUpCrew)
@@ -1131,7 +1296,7 @@ export function register(on) {
   on('tool.call', { tool: 'mcp__youcloned__save_setup' }, async ($, e) => {
     const problems = checkSetup(e)
     if (problems.length) return { result: 'Not saved. Fix these and call save_setup again:\n- ' + problems.join('\n- ') }
-    const folder = expandHome(e.folder) || await defaultFolder($)
+    const folder = expandHome(e.folder) || (await cloneFolder($)) || await defaultFolder($)
     if (!/^([A-Za-z]:)?[\\/]/.test(folder)) return { result: 'Not saved: the folder must be a full path, such as ' + home + '/YouCloned.' }
     await $.fs.write(folder + '/' + RULES_NAME, rulesMarkdown(e))
     for (const c of CREW) {
@@ -1140,16 +1305,23 @@ export function register(on) {
     }
     project = folder
     await $.store.set('project', folder)
+    if (!(await $.store.get('folder'))) {
+      await $.store.set('folder', folder)
+      try { await $.fs.write(dataDir() + '/vault-path', folder + '\n') } catch {}
+    }
     everywhere = true
     await $.store.set('everywhere', true)
     // Switch on in this same chat: the bar, the dashboard and the crew, so the buyer needs no new chat.
     cloneHere = true
     if (watched) { try { await turnOn($, await openedFolder($)) } catch {} }
+    try { await registerHelpers($) } catch {}
     try { await checkSkillKey($); if (skillKeyServer) await registerCrew($, true) } catch {}
     await refreshDrafts($)
     $.ui.invalidate('ui.render')
     return { result: 'Saved. Rules file: ' + folder + '/' + RULES_NAME + '. Crew folders: ' + folder + '/crew/support and ' + folder + '/crew/inbox. Every new conversation reads the rules file. ' + SYNC_NOTE }
   })
+
+  on('tool.call', { tool: 'mcp__youcloned__setup_next' }, async ($, e) => ({ result: await setupNext($, e) }))
 
   on('tool.call', { tool: 'mcp__youcloned__load_setup' }, async ($) => {
     if (!skillKeyServer) await checkSkillKey($)
@@ -1157,7 +1329,10 @@ export function register(on) {
     if (!text) return { result: NEEDS_SKILLKEY + ' Tell the person exactly that, and stop.' }
     let devtools = ''
     try { if (onMac() && (await run($, ['/usr/bin/xcode-select', '-p'])).exitCode !== 0) devtools = '\n\nBefore the first question, tell them in one or two short sentences: ' + DEVTOOLS_NOTE + ' They can keep going here while it installs.' } catch {}
-    return { result: text + '\n\nFolder: the default is ' + (await defaultFolder($)) + ' (the folder this conversation is open in, or YouCloned in their home folder). Offer that as the default, and leave folder out of save_setup when they take it.' + devtools }
+    const chosen = await cloneFolder($)
+    const where = chosen ? '\n\nFolder: they already chose ' + chosen + ' in setup. Don\'t ask again; leave folder out of save_setup.'
+      : '\n\nFolder: the default is ' + (await defaultFolder($)) + ' (the folder this conversation is open in, or YouCloned in their home folder). Offer that as the default, and leave folder out of save_setup when they take it.'
+    return { result: text + where + devtools }
   })
 
   // Learns SkillKey's name the moment Claude itself uses it, for apps whose tool list leaves it out.

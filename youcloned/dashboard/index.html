@@ -302,7 +302,7 @@ body{padding:0;background:var(--ground)}
           <div>
             <div class="who">
               <button class="mark" type="button" id="talk" aria-label="Talk to your clone"><span class="ring"></span><span class="ring"></span><span class="ring"></span><img src="assets/youcloned-mark-white.png" alt=""></button>
-              <div><h2><span id="hello">Hello</span>, <span id="who">Jon</span></h2><div class="sub" id="talkhint">Type in Claude, or tap a job</div></div>
+              <div><h2><span id="hello">Hello</span>, <span id="who">there</span></h2><div class="sub" id="talkhint">Type in Claude, or tap a job</div></div>
             </div>
             <div class="today">
               <div><i></i>Three emails need you</div>
@@ -417,32 +417,17 @@ body{padding:0;background:var(--ground)}
 
       <!-- SETUP -->
       <div class="vbody" data-v="setup" hidden>
-        <div class="vhead row"><div><h2>Set up your clone</h2><p>About ten minutes. Each step is one click and YouCloned does the work. Watch Jon's lesson for any step, or skip it.</p></div><div class="prog"><b id="st-count">0 of 9 done</b><span class="sb"><i id="st-bar" style="width:0%"></i></span></div></div>
-        <div class="one">
-          <div class="dots" id="st-dots" aria-label="Step 4 of 9"><i></i><i></i><i></i><i class="c"></i><i></i><i></i><i></i><i></i><i></i></div>
-          <span class="stepof">Step 4 of 9</span>
-          <h3>Your database</h3>
-          <p>Your clone needs a place to keep your dashboard numbers and your crew's memory. YouCloned sets up a free Supabase account for you. It takes about a minute.</p>
-          <ul>
-            <li>Opens Supabase so you can sign up with Google or your email</li>
-            <li>Creates your clone's database and connects it</li>
-            <li>Saves the connection where your clone can find it, never in a shared file</li>
-          </ul>
-          <div class="acts"><button class="btn primary" type="button">Do it for me</button><button class="btn" type="button">Skip for now</button><button class="lesbtn" type="button"><span class="th2" aria-hidden="true"></span>Watch Jon's lesson: Supabase</button></div>
+        <div class="vhead row"><div><h2>Set up your clone</h2><p>One evening. Your clone does each step with you in the chat, in the order that works, and checks each one on this computer.</p></div><div class="prog"><b id="st-count">0 of 10 done</b><span class="sb"><i id="st-bar" style="width:0%"></i></span></div></div>
+        <div class="one" id="st-one">
+          <div class="dots" id="st-dots"></div>
+          <span class="stepof" id="st-of">Step 1 of 10</span>
+          <h3 id="st-title">Your tools</h3>
+          <p id="st-why">Installs Git, Node, Python, the video tools, Obsidian and GitHub's tool. Skips anything you already have.</p>
+          <div class="acts"><button class="btn primary" type="button" id="st-go">Do it for me</button></div>
         </div>
-        <button class="back" type="button" id="allsteps">See all 9 steps</button>
-        <ol class="ss" id="steplist" hidden>
-          <li id="st-home"><span class="sn">1</span><div><b>Your clone's home</b><p>Pick a folder. It becomes your Obsidian vault, where your clone keeps your notes, rules and work.</p><span class="les">Lesson: Obsidian</span></div><span class="pill">Not yet</span></li>
-          <li id="st-tools"><span class="sn">2</span><div><b>Your tools</b><p>Installs Obsidian, Git, Node, Python, the video tools your skills use, and Wispr Flow so you can talk instead of type. Skips anything you already have.</p><span class="les">Lesson: Claude Code</span><span class="les">Lesson: The AI Stack</span></div><span class="pill">Not yet</span></li>
-          <li id="st-backup"><span class="sn">3</span><div><b>Back up to GitHub</b><p>A private copy of your clone folder, saved every hour.</p><span class="les">Lesson: Git and GitHub</span></div><span class="pill">Not yet</span></li>
-          <li class="now"><span class="sn">4</span><div><b>Your database</b><p>A free Supabase account for your dashboard numbers and your crew's memory.</p><span class="les">Lesson: Supabase</span></div><button class="btn sm primary" type="button">Set it up</button></li>
-          <li><span class="sn">5</span><div><b>Jon's skills and your apps</b><p>Connect SkillKey (free) for every skill Jon releases, plus BNSN, BookBuilder or CourseBuilder if you own them.</p><span class="les">Lesson: Workflow Integration</span></div><button class="btn sm" type="button" disabled>Connect</button></li>
-          <li><span class="sn">6</span><div><b>Codex, your second opinion</b><p>Connect Codex with your ChatGPT plan so it checks Claude's work. Skip it if you don't use ChatGPT.</p></div><button class="btn sm" type="button" disabled>Connect</button></li>
-          <li><span class="sn">7</span><div><b>Teach your clone</b><p>A ten-minute interview: your voice, brand, offers and two pieces of your writing.</p><span class="les">Lesson: Intro and the AI Clone Guide</span></div><button class="btn sm" type="button" disabled>Start</button></li>
-          <li><span class="sn">8</span><div><b>Turn on protection</b><p>Blocks passwords and keys from shared files, and stops overnight helpers from approving anything on their own.</p></div><button class="btn sm" type="button" disabled>Turn on</button></li>
-          <li><span class="sn">9</span><div><b>Turn on your crew</b><p>Connect Gmail and YouTube, then each helper passes its test and starts.</p><span class="les">Lesson: Give every bot one job</span></div><button class="btn sm" type="button" disabled>Turn on</button></li>
-        </ol>
-        <p class="extras">Optional: NotebookLM and Cursor, each with its lesson, from Learn.</p>
+        <button class="back" type="button" id="allsteps">See all 10 steps</button>
+        <ol class="ss" id="steplist" hidden></ol>
+        <p class="extras">After setup: Codex, BNSN, Slack, your crew and Zoom, each with its lesson, from Learn.</p>
       </div>
 
       <!-- LEARN -->
@@ -496,13 +481,44 @@ body{padding:0;background:var(--ground)}
       "Check something with Codex": "/youcloned codex",
       "Review 3 emails": "/youcloned crew inbox",
       "Review 4 drafts": "/youcloned crew support",
-      "Do it for me": "/youcloned setup"
+      "Do it for me": "Set me up with YouCloned. Use the youcloned:setup skill."
     };
     if (map[t]) b.addEventListener("click", function () { send(map[t]); });
   });
 
   // Live numbers from the add-on: plan usage, words, name.
   function fmt(n) { return Number(n).toLocaleString("en-US"); }
+  function renderSetup(su) {
+    var steps = su.steps, n = 0, total = steps.length, list = document.getElementById("steplist"), dots = document.getElementById("st-dots");
+    list.textContent = ""; dots.textContent = "";
+    steps.forEach(function (st, i) {
+      if (st.done) n++;
+      var li = document.createElement("li");
+      if (st.done) li.className = "done"; else if (st.id === su.next) li.className = "now";
+      var sn = document.createElement("span"); sn.className = "sn"; sn.textContent = String(i + 1);
+      var d = document.createElement("div"), b = document.createElement("b"), p = document.createElement("p");
+      b.textContent = st.title; p.textContent = st.why; d.appendChild(b); d.appendChild(p);
+      var pill = document.createElement("span"); pill.className = "pill";
+      pill.textContent = st.done ? "Done" : st.skipped ? "Later" : st.id === su.next ? "Next" : "Not yet";
+      li.appendChild(sn); li.appendChild(d); li.appendChild(pill); list.appendChild(li);
+      var dot = document.createElement("i"); dot.className = st.done ? "d" : st.id === su.next ? "c" : ""; dots.appendChild(dot);
+    });
+    document.getElementById("st-count").textContent = n + " of " + total + " done";
+    document.getElementById("st-bar").style.width = Math.round(n * 100 / total) + "%";
+    document.getElementById("allsteps").textContent = "See all " + total + " steps";
+    var cur = steps.filter(function (x) { return x.id === su.next; })[0];
+    if (cur) {
+      document.getElementById("st-of").textContent = "Step " + (steps.indexOf(cur) + 1) + " of " + total;
+      document.getElementById("st-title").textContent = cur.title;
+      document.getElementById("st-why").textContent = cur.why;
+      document.getElementById("st-go").textContent = "Do it for me";
+    } else {
+      document.getElementById("st-of").textContent = "All set";
+      document.getElementById("st-title").textContent = "Your clone is set up";
+      document.getElementById("st-why").textContent = "Every step is done" + (steps.some(function (x) { return x.skipped; }) ? ", and the ones you put off are waiting for you. Say \"finish my setup\" any time." : ".");
+      document.getElementById("st-go").textContent = "Check my setup again";
+    }
+  }
   function load() {
     fetch("/state.json", { cache: "no-store" }).then(function (r) { return r.ok ? r.json() : null; }).then(function (s) {
       if (!s) return;
@@ -527,18 +543,8 @@ body{padding:0;background:var(--ground)}
         document.getElementById("codexL").textContent = s.codex.label || "Codex plan";
         document.getElementById("codexFill").setAttribute("transform", "translate(0," + (94 - 88 * s.codex.left / 100 - 62).toFixed(1) + ")");
       }
-      // Setup steps 1 to 3 show Done only when YouCloned checked them on this computer.
-      if (s.setup) {
-        var n = 0;
-        [["st-home", s.setup.home], ["st-tools", s.setup.tools], ["st-backup", s.setup.backup]].forEach(function (p, i) {
-          var li = document.getElementById(p[0]); if (!li) return;
-          li.classList.toggle("done", !!p[1]); li.querySelector(".pill").textContent = p[1] ? "Done" : "Not yet";
-          var dot = document.querySelectorAll("#st-dots i")[i]; if (dot) dot.className = p[1] ? "d" : "";
-          if (p[1]) n++;
-        });
-        document.getElementById("st-count").textContent = n + " of 9 done";
-        document.getElementById("st-bar").style.width = Math.round(n * 100 / 9) + "%";
-      }
+      // Setup: every step shows Done only when YouCloned checked it on this computer.
+      if (s.setup && s.setup.steps) renderSetup(s.setup);
       if ("listening" in s && Date.now() - talkAt > 8000) hero.classList.toggle("live", !!s.listening);
     }).catch(function () {});
   }

@@ -1,10 +1,13 @@
 ---
 name: setup
-description: Set up YouCloned for this person. Interviews them about who they are, what they sell, who buys, how they sound and their brand, collects two pieces of their own writing, then saves the rules file every YouCloned conversation reads. Use when they run /youcloned setup, press "Set me up" in the YouCloned pane, or ask to set up or redo their YouCloned rules.
+description: Set up YouCloned for this person, the whole night-one setup in order - tools, their clone folder, protection, SkillKey, the interview that teaches the clone who they are, Jon's starter skills, a private GitHub backup, their library on Supabase, the free voice, and feeding the clone their history. Use when they say "set me up", "finish my setup", run /youcloned setup, press "Set me up" or "Do it for me" in YouCloned, or ask to set up or redo YouCloned.
 ---
 
 # YouCloned setup
 
-Call the `load_setup` tool from the youcloned plugin first. It returns the setup interview from SkillKey. Follow what it returns exactly, step by step, and save with the `save_setup` tool when it says to.
+Call the `setup_next` tool from the youcloned plugin. It checks every step on this computer and tells you the one step to do next and exactly how. Do that step, then call `setup_next` again. Repeat until it says they are all set.
 
-If `load_setup` says SkillKey is not connected, tell the person that in one sentence and stop.
+- One step at a time. Say which step it is and why in one short sentence, then do it.
+- Never call a step done yourself and never skip ahead: only `setup_next` decides, from what is on this computer.
+- When the person picks their clone folder, call `setup_next` with `folder`. When they want to do the voice or feeding later, call it with `skip`.
+- If a command fails, tell them in plain words what failed, fix what you can, and run it again. Never ask them to type a password or key into the chat.

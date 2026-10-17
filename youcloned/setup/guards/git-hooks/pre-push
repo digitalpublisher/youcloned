@@ -1,0 +1,45 @@
+#!/bin/sh
+set -eu
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+rules="$script_dir/../lib/secret-rules.mjs"
+temporary=$(mktemp "${TMPDIR:-/tmp}/youcloned-push.XXXXXX")
+names=$(mktemp "${TMPDIR:-/tmp}/youcloned-names.XXXXXX")
+trap 'rm -f "$temporary" "$names"' EXIT HUP INT TERM
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$local_sha" in
+    0000000000000000000000000000000000000000) continue ;;
+  esac
+  case "$remote_sha" in
+    0000000000000000000000000000000000000000) git ls-tree -r --name-only "$local_sha" > "$names" ;;
+    *) git diff --name-only --diff-filter=ACMR "$remote_sha" "$local_sha" > "$names" ;;
+  esac
+  while IFS= read -r file; do
+    [ -n "$file" ] || continue
+    git show "$local_sha:$file" >> "$temporary" 2>/dev/null || true
+    printf '\n' >> "$temporary"
+  done < "$names"
+done
+
+find_node() {
+  if [ -f "$script_dir/../lib/node-path" ]; then
+    saved=$(cat "$script_dir/../lib/node-path")
+    if [ -x "$saved" ]; then printf '%s\n' "$saved"; return 0; fi
+  fi
+  if command -v node >/dev/null 2>&1; then command -v node; return 0; fi
+  for candidate in /opt/homebrew/bin/node /usr/local/bin/node "$HOME"/.nvm/versions/node/*/bin/node "$HOME"/.volta/bin/node; do
+    if [ -x "$candidate" ]; then printf '%s\n' "$candidate"; return 0; fi
+  done
+  return 1
+}
+
+if ! node_bin=$(find_node); then
+  echo "Blocked: YouCloned's key check could not find Node. Run the YouCloned setup again to fix it." >&2
+  exit 1
+fi
+
+if ! "$node_bin" "$rules" --stdin --label push < "$temporary"; then
+  echo "Blocked: commits being pushed include a secret-shaped value." >&2
+  exit 1
+fi

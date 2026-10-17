@@ -40,7 +40,6 @@ impeccable-polish
 impeccable-quieter
 impeccable-shape
 impeccable-typeset
-jon-benson-voice-hacks
 kickoff
 lock
 motion-canvas
@@ -69,6 +68,5 @@ write-hero-email
 write-promo-email
 write-teaching-email
 write-whats-new-email
-youcloned-setup
 youtube-thumbnail
 youtube-video

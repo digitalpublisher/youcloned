@@ -2,6 +2,8 @@ import { expect, mock, test } from 'claude-code/testing'
 import { judge } from '../hooks/gate.js'
 import { claimProblems } from '../hooks/claims.js'
 import { checkSetup } from '../hooks/rules.js'
+import { setupText, STEPS } from '../hooks/steps.js'
+import { helperJudge, feedCommandReason, parseAgent } from '../hooks/helpers.js'
 
 const PROJECT = '/Users/pat/YouCloned'
 const SAMPLE = 'Hey friend, '.repeat(40)
@@ -21,7 +23,7 @@ const SK = '4a62845f-77ec-431f-8b76-2d42902a60fb'
 const skTools = (server = SK) => ['list_skills', 'start_skill', 'run_skill', 'word_balance'].map(t => ({ name: 'mcp__' + server + '__' + t, description: '', mcp: true }))
 const fromSk = (body: string) => ({ content: [{ type: 'text', text: 'You are short on words.\n\n<<<YOUCLONED>>>\n' + body + '\n<<<END YOUCLONED>>>\n\nWhen you have everything the steps ask for, call run_skill with skill "x".' }], isError: false })
 
-function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[]) => unknown, toasts?: string[], lists?: Record<string, string[]>, cwd?: string, root?: string, skillKey?: string | null, mcpCalls?: { server: string, tool: string, args: Record<string, unknown> }[], registered?: { name: string, prompt: string }[], owns?: (slug: string) => boolean, opened?: string[], browser?: string[], toolCall?: (e: any) => unknown, read?: (path: string) => string | undefined, exists?: (path: string) => boolean | undefined, mcpThrow?: string, logs?: string[], listed?: boolean, appOwned?: boolean, connected?: () => boolean } = {}) {
+function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[]) => unknown, toasts?: string[], lists?: Record<string, string[]>, cwd?: string, root?: string, skillKey?: string | null, mcpCalls?: { server: string, tool: string, args: Record<string, unknown> }[], registered?: { name: string, prompt: string, model?: string, tools?: readonly string[] }[], extraTools?: string[], owns?: (slug: string) => boolean, opened?: string[], browser?: string[], toolCall?: (e: any) => unknown, read?: (path: string) => string | undefined, exists?: (path: string) => boolean | undefined, mcpThrow?: string, logs?: string[], listed?: boolean, appOwned?: boolean, connected?: () => boolean } = {}) {
   const writes = new Map<string, string>()
   const store = new Map<string, unknown>(opts.project ? [['project', opts.project]] : [])
   const clock = mock.clock(on)
@@ -34,7 +36,7 @@ function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: 
   on('fs.read', ($, e) => ({ value: opts.read?.(e.path) ?? (opts.files || {})[e.path] ?? (e.path.endsWith('SKILL.md') ? 'description: Set up YouCloned. More.' : 'crew prompt') }))
   on('fs.write', ($, e) => { writes.set(e.path, e.text); return { value: undefined } })
   const sk = opts.skillKey === undefined ? SK : opts.skillKey
-  on('tool.list', () => ({ value: sk && opts.listed !== false ? skTools(sk) : [] }))
+  on('tool.list', () => ({ value: [...(sk && opts.listed !== false ? skTools(sk) : []), ...(opts.extraTools || []).map(name => ({ name, description: '', mcp: true }))] }))
   on('mcp.call', ($, e) => {
     opts.mcpCalls?.push(e)
     if (opts.mcpThrow) return { value: { content: [{ type: 'text', text: 'YouCloned MCP call: ' + opts.mcpThrow }], isError: true } }
@@ -48,7 +50,7 @@ function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: 
     return { value: { content: [], isError: true } }
   })
   on('tool.register', () => ({ value: undefined }))
-  on('agent.register', ($, e) => { opts.registered?.push({ name: e.name, prompt: e.prompt }); return { value: { agent: 'youcloned:' + e.name } } })
+  on('agent.register', ($, e) => { opts.registered?.push({ name: e.name, prompt: e.prompt, model: e.model, tools: e.tools }); return { value: { agent: 'youcloned:' + e.name } } })
   on('agent.list', () => ({ value: opts.agents || [] }))
   on('command.register', () => ({ value: undefined }))
   on('ui.open', ($, e) => { opts.opened?.push(e.id); return { value: { isPlaced: true } } })
@@ -210,7 +212,7 @@ test('after setup the result tells Claude to have the buyer switch on Sync autom
   expect(ok.result).toMatch(/Sync automatically/)
 })
 
-test('dashboard setup steps 1 to 3 are Done only when this computer has them', async ($, on) => {
+test('dashboard setup steps are Done only when this computer has them', async ($, on) => {
   const here = '/Users/pat/Documents/Garden'
   const files: Record<string, string> = {}
   const { writes, clock } = sessionStubs(on, { project: here, cwd: here, files: { [here + '/YOUCLONED.md']: '# rules' },
@@ -220,7 +222,66 @@ test('dashboard setup steps 1 to 3 are Done only when this computer has them', a
   await $.session.start({ surface: 'desktop', isInteractive: false, cwd: here })
   await clock.advance(25000)
   const state = JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}')
-  expect(state.setup).toEqual({ home: true, tools: false, backup: false })
+  expect({ home: state.setup.home, tools: state.setup.tools, backup: state.setup.backup }).toEqual({ home: true, tools: false, backup: false })
+  expect(state.setup.steps.map((x: any) => x.id)).toEqual(['tools', 'home', 'protection', 'skillkey', 'interview', 'skills', 'backup', 'library', 'voice', 'feed'])
+  expect(state.setup.steps.filter((x: any) => x.done).map((x: any) => x.id)).toEqual(['home', 'skillkey', 'interview'])
+  expect(state.setup.next).toBe('tools')
+})
+
+test('setup_next walks the night-one steps in order and checks each one on this computer', async ($, on) => {
+  const vault = '/Users/pat/Documents/Obsidian Vault'
+  const files: Record<string, string> = {}
+  const present = new Set<string>()
+  let toolsOk = false
+  const { writes } = sessionStubs(on, { cwd: '/Users/pat/', skillKey: null,
+    read: (path) => files[path] ?? writes.get(path),
+    exists: (path) => present.has(path) || writes.has(path) || (path.endsWith('/setup/install-tools.sh') ? true : undefined),
+    process: (argv) => ({ exitCode: argv[1]?.endsWith('install-tools.sh') ? (toolsOk ? 0 : 1) : 1, stdout: '', stderr: '' }) })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/Users/pat/' })
+  let out = (await $.tool.call({ tool: 'mcp__youcloned__setup_next' })).result
+  expect(out).toMatch(/0 of 10 steps done/)
+  expect(out).toMatch(/Next is step 1, Your tools/)
+  expect(out).toMatch(/install-tools\.sh/)
+  toolsOk = true
+  out = (await $.tool.call({ tool: 'mcp__youcloned__setup_next' })).result
+  expect(out).toMatch(/Next is step 2, Your clone's home/)
+  expect(out).toContain(vault)
+  out = (await $.tool.call({ tool: 'mcp__youcloned__setup_next', folder: 'Documents/Somewhere' })).result
+  expect(out).toMatch(/must be a full path/)
+  out = (await $.tool.call({ tool: 'mcp__youcloned__setup_next', folder: '~/Documents/Obsidian Vault/' })).result
+  expect(writes.has(vault + '/.youcloned-folder')).toBe(true)
+  expect(writes.get('/Users/pat/.youcloned/vault-path')).toBe(vault + '\n')
+  expect(out).toMatch(/Next is step 3, Protection/)
+  expect(out).toMatch(/install-git-hooks\.mjs" --install/)
+  present.add('/Users/pat/.youcloned/git-hooks/pre-commit'); present.add('/Users/pat/.youcloned/lib/secret-rules.mjs')
+  out = (await $.tool.call({ tool: 'mcp__youcloned__setup_next' })).result
+  expect(out).toMatch(/Next is step 4, SkillKey/)
+  expect(out).toMatch(/Copy SkillKey address/)
+  // The interview can't be put off, and neither can anything else but voice and feed.
+  out = (await $.tool.call({ tool: 'mcp__youcloned__setup_next', skip: 'interview' })).result
+  expect(out).toMatch(/can't be put off/)
+})
+
+test('the interview saves into the folder setup_next chose, without asking again', async ($, on) => {
+  const vault = '/Users/pat/Documents/Obsidian Vault'
+  const { writes } = sessionStubs(on, { cwd: '/Users/pat/Documents/Garden' })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/Users/pat/Documents/Garden' })
+  await $.tool.call({ tool: 'mcp__youcloned__setup_next', folder: vault })
+  const steps = await $.tool.call({ tool: 'mcp__youcloned__load_setup' })
+  expect(steps.result).toMatch(/they already chose \/Users\/pat\/Documents\/Obsidian Vault in setup/)
+  await $.tool.call({ tool: 'mcp__youcloned__save_setup', ...SETUP })
+  expect(writes.has(vault + '/YOUCLONED.md')).toBe(true)
+})
+
+test('voice and feeding can be put off, and setup says all set once the rest is done', async ($, on) => {
+  const all = Object.fromEntries(STEPS.map(s => [s.id, true]))
+  const ctx = { root: '/p', home: '/Users/pat', folder: '/f', mac: true, defaultFolder: '/f', needsSkillKey: 'x', envFile: '/f/.env' }
+  expect(setupText(all, new Set(), ctx)).toMatch(/10 of 10 steps done/)
+  const most = { ...all, voice: false, feed: false }
+  const out = setupText(most, new Set(['voice', 'feed']), ctx)
+  expect(out).toMatch(/put off: voice, feed/)
+  expect(out).toMatch(/finish my setup/)
+  expect(setupText(most, new Set(['voice']), ctx)).toMatch(/Next is step 10, Feed me/)
 })
 
 test('a conversation open in the home folder itself still sets up in ~/YouCloned', async ($, on) => {
@@ -858,4 +919,95 @@ test('the words gauge updates from any SkillKey answer that names the balance', 
   await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
   await $.tool.call({ tool: 'mcp__' + SK + '__list_skills' })
   expect(JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}').words).toBe(1234)
+})
+
+// The feed-me helpers: their instructions are the add-on's agents files (frontmatter, then the prompt).
+// A test can't read the disk, so these stand in with the same frontmatter; library/test/feed-e2e.py
+// checks the shipped files say the same.
+const AGENT_FILES: Record<string, string> = {
+  librarian: '---\nname: librarian\ndescription: YouCloned librarian. Collects the history.\nmodel: haiku\n' +
+    'tools: Read, Glob, Grep, Bash, Write, ToolSearch, mcp__claude_ai_Gmail__search_threads, mcp__claude_ai_Gmail__get_thread\n---\n\n' +
+    'You are the YouCloned librarian. Search in:sent newest first.\n',
+  'wiki-writer': '---\nname: wiki-writer\ndescription: YouCloned wiki writer.\nmodel: sonnet\ntools: Read, Glob, Grep, Bash, Write, Edit\n---\n' +
+    'You write Library/index.md last.\n',
+}
+const agentFile = (name: string) => AGENT_FILES[name]
+const helperFiles = {
+  exists: (path: string) => /\/agents\/(librarian|wiki-writer)\.md$/.test(path) || undefined,
+  read: (path: string) => { const m = /\/agents\/(librarian|wiki-writer)\.md$/.exec(path); return m ? agentFile(m[1]) : undefined },
+}
+
+test('the librarian registers on Haiku and the wiki writer on Sonnet, each with only its own tools', async ($, on) => {
+  const registered: { name: string, prompt: string, model?: string, tools?: readonly string[] }[] = []
+  const desktopGmail = 'mcp__7f3c9a10-1111-4222-8333-944455556666__search_threads'
+  sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' }, registered, ...helperFiles,
+    extraTools: [desktopGmail, 'mcp__7f3c9a10-1111-4222-8333-944455556666__send_message', 'mcp__claude_ai_Slack__slack_read_thread'] })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  const lib = registered.find(r => r.name === 'librarian')
+  const wiki = registered.find(r => r.name === 'wiki-writer')
+  expect(lib?.model).toBe('haiku')
+  expect(wiki?.model).toBe('sonnet')
+  expect([...(lib?.tools || [])].sort()).toEqual(['Bash', 'Glob', 'Grep', 'Read', 'ToolSearch', 'Write', desktopGmail,
+    'mcp__claude_ai_Gmail__get_thread', 'mcp__claude_ai_Gmail__search_threads'].sort())
+  expect([...(wiki?.tools || [])].sort()).toEqual(['Bash', 'Edit', 'Glob', 'Grep', 'Read', 'Write'])
+  expect(lib?.prompt).toBe(parseAgent(agentFile('librarian'))?.prompt)
+  expect(lib?.prompt).toMatch(/in:sent/)
+  expect(wiki?.prompt).toMatch(/Library\/index\.md/)
+  // The crew still comes from SkillKey, beside them.
+  expect(registered.map(r => r.name).sort()).toEqual(['inbox', 'librarian', 'support', 'wiki-writer'])
+})
+
+test('the helpers\' gate: feed.py only, writes only in their own folder, Gmail look-ups only', () => {
+  const ctx = { feed: '/plug/youcloned/library/feed.py', scratch: '/Users/pat/.youcloned/feeding', library: PROJECT + '/Library' }
+  const run = (cmd: string) => ({ tool: 'Bash', command: cmd })
+  const env = ' --env "' + PROJECT + '/.env"'
+  const feed = 'python3 /plug/youcloned/library/feed.py '
+  expect(helperJudge('librarian', run('python3 "/plug/youcloned/library/feed.py" web "https://pat.example.com" --crawl --max 200' + env), ctx)).toBe(null)
+  expect(helperJudge('librarian', run(feed + "add --kind email --ref gmail:18c2ab --title 'Your $97 course' --file \"/Users/pat/.youcloned/feeding/18c2ab.txt\" --remove" + env), ctx)).toBe(null)
+  expect(helperJudge('librarian', run('uv run --with pypdf python "/plug/youcloned/library/feed.py" doc "/Users/pat/Feed me/book.pdf"' + env), ctx)).toBe(null)
+  expect(helperJudge('librarian', run(feed + 'stats; ls'), ctx)).toMatch(/one plain command/)
+  expect(helperJudge('librarian', run(feed + 'stats | wc -l'), ctx)).toMatch(/one plain command/)
+  expect(helperJudge('librarian', run(feed + 'stats > out.txt'), ctx)).toMatch(/one plain command/)
+  expect(helperJudge('librarian', run(feed + 'add --title "$(whoami)" --stdin'), ctx)).toMatch(/single quotes/)
+  expect(helperJudge('librarian', run('python3 /tmp/feed.py stats'), ctx)).toMatch(/own feed\.py/)
+  expect(helperJudge('librarian', run('ls /Users/pat'), ctx)).toMatch(/only feed\.py/)
+  expect(helperJudge('librarian', run(feed + 'wiki-put a b c'), ctx)).toMatch(/only these feed\.py commands/)
+  expect(helperJudge('wiki-writer', run(feed + 'web https://x.example.com'), ctx)).toMatch(/only these feed\.py commands/)
+  expect(helperJudge('wiki-writer', run(feed + "search 'what I sell' --k 20" + env), ctx)).toBe(null)
+  expect(helperJudge('librarian', { tool: 'Write', file_path: '/Users/pat/.youcloned/feeding/a.txt' }, ctx)).toBe(null)
+  expect(helperJudge('librarian', { tool: 'Write', file_path: PROJECT + '/Library/index.md' }, ctx)).toMatch(/outside/)
+  expect(helperJudge('wiki-writer', { tool: 'Write', file_path: PROJECT + '/Library/offers/garden.md' }, ctx)).toBe(null)
+  expect(helperJudge('wiki-writer', { tool: 'Edit', file_path: PROJECT + '/YOUCLONED.md' }, ctx)).toMatch(/outside/)
+  expect(helperJudge('wiki-writer', { tool: 'Write', file_path: PROJECT + '/Library/../.env' }, ctx)).toMatch(/env file/)
+  expect(helperJudge('librarian', { tool: 'Read', file_path: PROJECT + '/.env' }, ctx)).toMatch(/env file/)
+  expect(helperJudge('librarian', { tool: 'mcp__claude_ai_Gmail__get_thread' }, ctx)).toBe(null)
+  expect(helperJudge('librarian', { tool: 'mcp__claude_ai_Gmail__send_message' }, ctx)).toMatch(/not on the librarian/)
+  expect(helperJudge('librarian', { tool: 'mcp__claude_ai_Gmail__label_thread' }, ctx)).toMatch(/not on the librarian/)
+  expect(helperJudge('wiki-writer', { tool: 'mcp__claude_ai_Gmail__search_threads' }, ctx)).toMatch(/not on the wiki-writer/)
+  expect(feedCommandReason('py -3 "C:\\Users\\pat\\yc\\library\\feed.py" stats', 'C:\\Users\\pat\\yc\\library\\feed.py', ['stats'])).toBe(null)
+})
+
+test('a running librarian is held to its gate, and the feed step hands over its paths', async ($, on) => {
+  const vault = '/Users/pat/Documents/Obsidian Vault'
+  const agents = [{ id: 'L1', type: 'youcloned:librarian', description: '', status: 'running' }]
+  const registered: { name: string, prompt: string, model?: string, tools?: readonly string[] }[] = []
+  sessionStubs(on, { project: vault, cwd: vault, agents, registered, ...helperFiles, files: { [vault + '/YOUCLONED.md']: '# rules' } })
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: vault })
+  const sent = await $.tool.call({ tool: 'mcp__claude_ai_Gmail__send_message', agentId: 'L1' })
+  expect(sent.deny).toMatch(/safety gate refused/)
+  const out = await $.tool.call({ tool: 'Write', file_path: vault + '/notes.md', content: 'x', agentId: 'L1' })
+  expect(out.deny).toMatch(/outside \/Users\/pat\/\.youcloned\/feeding/)
+  const shell = await $.tool.call({ tool: 'Bash', command: 'ls', agentId: 'L1' })
+  expect(shell.deny).toMatch(/only feed\.py/)
+  const scratch = await $.tool.call({ tool: 'Write', file_path: '/Users/pat/.youcloned/feeding/m1.txt', content: 'Subject: hi', agentId: 'L1' })
+  expect(scratch.result).toBe('ran')
+  const done = new Set(['tools', 'home', 'protection', 'skillkey', 'interview', 'skills', 'backup', 'library', 'voice'])
+  const text = setupText(Object.fromEntries(STEPS.map(s => [s.id, done.has(s.id)])) as any, new Set(), {
+    root: '/plug/youcloned', home: '/Users/pat', folder: vault, mac: true, defaultFolder: vault, needsSkillKey: '',
+    envFile: vault + '/.env', scratch: '/Users/pat/.youcloned/feeding', detail: {} } as any)
+  expect(text).toMatch(/Next is step 10, Feed me/)
+  expect(text).toMatch(/youcloned:feed-me/)
+  expect(text).toContain('FEED "/plug/youcloned/library/feed.py"')
+  expect(text).toContain('ENV "/Users/pat/Documents/Obsidian Vault/.env"')
+  expect(text).toContain('SCRATCH "/Users/pat/.youcloned/feeding"')
 })

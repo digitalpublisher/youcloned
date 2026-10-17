@@ -1,5 +1,5 @@
 # The setup check (youcloned/voice/check-fixes.py) runs every buyer row, counts a row with no check as not
-# passed, skips jon and n/a rows, and only says "Every fix is in." when all pass.
+# passed, skips author and n/a rows, and only says "Every fix is in." when all pass.
 # Runs made-up rows with true/false commands, so nothing on this computer is touched.
 # Usage: python3 -I tools/voice/test_check_fixes.py
 import json, os, subprocess, sys, tempfile
@@ -18,7 +18,7 @@ def run(fixes):
 
 row = lambda i, buyers="yes", mac="in-pr", check=None: {"id": i, "fix": "made-up " + i, "buyers": buyers, "mac": mac, "pc": "n/a", "check": check}
 
-code, text = run([row("a", check={"mac": "true"}), row("b", check={"mac": "test -d voice"}), row("j", buyers="jon"), row("n", mac="n/a")])
+code, text = run([row("a", check={"mac": "true"}), row("b", check={"mac": "test -d voice"}), row("j", buyers="author"), row("n", mac="n/a")])
 assert code == 0 and "Every fix is in." in text and "PASS: a" in text and "PASS: b" in text, text
 assert "j:" not in text and "n:" not in text, text
 

@@ -1,0 +1,68 @@
+{
+  "about": "The Tools step of night one. install-tools.sh (Mac) and install-tools.ps1 (PC) put these on the computer; --check / -Check prints one line per tool, 'OK name version' or 'MISSING name', then ALL TOOLS READY when every tool for that computer is there. A check command exits 0 when the tool is there. Mac checks assume Homebrew's folders and ~/.local/bin are on the PATH, the way install-tools.sh sets it. A null check means that computer doesn't need the tool.",
+  "tools": [
+    {
+      "name": "apple-developer-tools",
+      "label": "Apple's developer tools",
+      "why": "Apple's free kit that Git, Homebrew and most other tools on a Mac are built on.",
+      "mac": "xcode-select -p",
+      "pc": null
+    },
+    {
+      "name": "homebrew",
+      "label": "Homebrew",
+      "why": "The free installer that puts the rest of the tools on an Apple silicon Mac and keeps them up to date.",
+      "mac": "[ \"$(uname -m)\" != arm64 ] || [ -x /opt/homebrew/bin/brew ]",
+      "pc": null
+    },
+    {
+      "name": "git",
+      "label": "Git",
+      "why": "Keeps every version of your clone's files so nothing you build is ever lost.",
+      "mac": "xcode-select -p && git --version",
+      "pc": "git --version"
+    },
+    {
+      "name": "node",
+      "label": "Node",
+      "why": "Runs the Claude tools and many of the skills your clone uses.",
+      "mac": "node --version || ls ~/.nvm/versions/node/*/bin/node",
+      "pc": "node --version"
+    },
+    {
+      "name": "python",
+      "label": "Python 3.12",
+      "why": "Runs the helper scripts behind your skills, like NotebookLM and the dashboard.",
+      "mac": "python3.12 --version",
+      "pc": "py -3.12 --version"
+    },
+    {
+      "name": "ffmpeg",
+      "label": "ffmpeg, the video tool",
+      "why": "Cuts, joins and converts the audio and video your skills make.",
+      "mac": "ffmpeg -version",
+      "pc": "ffmpeg -version"
+    },
+    {
+      "name": "gh",
+      "label": "GitHub's tool (gh)",
+      "why": "Signs you in to GitHub so the next step can back up your clone there.",
+      "mac": "gh --version",
+      "pc": "gh --version"
+    },
+    {
+      "name": "yt-dlp",
+      "label": "yt-dlp, the YouTube transcript tool",
+      "why": "Pulls the transcripts of your YouTube videos into your clone's library.",
+      "mac": "yt-dlp --version",
+      "pc": "yt-dlp --version"
+    },
+    {
+      "name": "obsidian",
+      "label": "Obsidian",
+      "why": "The free notes app where you read and edit everything your clone knows.",
+      "mac": "test -d /Applications/Obsidian.app || test -d ~/Applications/Obsidian.app",
+      "pc": "if ((Test-Path \"$env:LOCALAPPDATA\\Programs\\Obsidian\\Obsidian.exe\") -or (Test-Path \"$env:LOCALAPPDATA\\Obsidian\\Obsidian.exe\")) { exit 0 } else { exit 1 }"
+    }
+  ]
+}

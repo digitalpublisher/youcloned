@@ -1,0 +1,105 @@
+# Night one's Tools step (#42) on GitHub's own computers: lint, the sandbox test, and full installs
+# on a bare Apple silicon Mac, a bare Intel Mac and a Windows PC. The runners are thrown away after.
+# Its own file so it doesn't collide with windows-pc.yml and mac-installer.yml, which wait in PRs #30 and #296.
+name: Night one tools
+
+on:
+  pull_request:
+    paths: ["youcloned/setup/**", "tools/setup/**", ".github/workflows/night-one-tools.yml"]
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: shellcheck -s bash youcloned/setup/install-tools.sh tools/setup/test_install_tools.sh
+
+  mac-sandbox:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sandbox test (stub tools, fake HOME)
+        run: bash tools/setup/test_install_tools.sh
+
+  mac-apple-silicon:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clear the runner's Homebrew so the step sees a bare Mac
+        run: |
+          sudo mv /opt/homebrew /opt/homebrew.runner
+          test ! -e /Applications/Obsidian.app
+      - name: Check first (expects missing tools)
+        run: |
+          export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+          ! bash youcloned/setup/install-tools.sh --check
+          bash youcloned/setup/install-tools.sh --dry-run
+      - name: First run installs everything
+        run: |
+          export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+          bash youcloned/setup/install-tools.sh 2>&1 | tee first.txt
+          test "${PIPESTATUS[0]}" -eq 0
+          test "$(tail -n 1 first.txt)" = "ALL TOOLS READY"
+      - name: Second run skips every tool, check passes, profile line once
+        run: |
+          export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+          bash youcloned/setup/install-tools.sh 2>&1 | tee second.txt
+          test "${PIPESTATUS[0]}" -eq 0
+          n=$(grep -c "already here" second.txt); echo "skipped $n"; test "$n" -eq 9
+          bash youcloned/setup/install-tools.sh --check
+          test "$(grep -c "brew shellenv" ~/.zprofile)" -eq 1
+
+  mac-intel:
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+      - name: This is an Intel Mac
+        run: test "$(uname -m)" = x86_64
+      - name: Clear the runner's preinstalled tools
+        run: |
+          # /usr/local itself sits on the read-only system volume, so rename what is inside it.
+          sudo mv /usr/local/bin /usr/local/bin.runner
+          sudo mkdir -p /usr/local/bin
+          test ! -e /Applications/Obsidian.app
+      - name: First run installs everything from the makers' downloads
+        run: |
+          export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+          bash youcloned/setup/install-tools.sh 2>&1 | tee first.txt
+          test "${PIPESTATUS[0]}" -eq 0
+          test "$(tail -n 1 first.txt)" = "ALL TOOLS READY"
+      - name: Every tool runs, and a second run skips them
+        run: |
+          export PATH="$HOME/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+          node --version && npm --version && python3.12 -c "import ssl, urllib.request; print('python ok')"
+          ffmpeg -version | head -1 && ffprobe -version | head -1 && gh --version | head -1 && yt-dlp --version
+          codesign --verify /Applications/Obsidian.app || codesign --verify ~/Applications/Obsidian.app
+          bash youcloned/setup/install-tools.sh 2>&1 | tee second.txt
+          test "${PIPESTATUS[0]}" -eq 0
+          n=$(grep -c "already here" second.txt); echo "skipped $n"; test "$n" -eq 9
+          test "$(grep -c ".local/bin" ~/.zprofile)" -eq 1
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Windows PowerShell 5.1 is what a buyer has; PowerShell 7 must work too.
+      - name: -Check and -DryRun in Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File youcloned\setup\install-tools.ps1 -Check
+          powershell -NoProfile -ExecutionPolicy Bypass -File youcloned\setup\install-tools.ps1 -DryRun
+          if ($LASTEXITCODE -ne 0) { throw "dry run exit $LASTEXITCODE" }
+          powershell -NoProfile -ExecutionPolicy Bypass -File tools\setup\test_install_tools.ps1
+          if ($LASTEXITCODE -ne 0) { throw "self-check failed" }
+      - name: -Check and -DryRun in PowerShell 7
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -ExecutionPolicy Bypass -File tools/setup/test_install_tools.ps1
+          if ($LASTEXITCODE -ne 0) { throw "self-check failed" }
+      - name: Install what is missing, then again (throwaway runner only)
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File tools\setup\test_install_tools.ps1 -Install
+          if ($LASTEXITCODE -ne 0) { throw "install self-check failed" }
