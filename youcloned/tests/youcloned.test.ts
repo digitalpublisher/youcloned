@@ -2,7 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import { judge } from '../hooks/gate.js'
 import { claimProblems } from '../hooks/claims.js'
 import { checkSetup } from '../hooks/rules.js'
-import { setupText, STEPS } from '../hooks/steps.js'
+import { setupText, STEPS, onlyText } from '../hooks/steps.js'
 import { helperJudge, helperLinkReason, feedCommandReason, parseAgent } from '../hooks/helpers.js'
 import { normalize } from '../hooks/gate.js'
 
@@ -320,6 +320,14 @@ test('setup_next walks the night-one steps in order and checks each one on this 
   expect(writes.size).toBeGreaterThan(0)
   const back = (await $.tool.call({ tool: 'mcp__youcloned__setup_next', resume: true })).result
   expect(back).not.toMatch(/put off/)
+})
+
+test('someone who likes their clone can add just one step, and is told what it needs first', async ($, on) => {
+  const ctx = { root: '/p', home: '/Users/pat', folder: '/f', mac: true, defaultFolder: '/f', needsSkillKey: 'x', envFile: '/f/.env' }
+  const done = Object.fromEntries(STEPS.map(s => [s.id, true]))
+  expect(onlyText('library', { ...done, library: false }, ctx)).toMatch(/Adding just one step, Your library/)
+  expect(onlyText('library', done, ctx)).toMatch(/already set up on this computer/)
+  expect(onlyText('feed', { ...done, library: false, feed: false }, ctx)).toMatch(/needs Your library first/)
 })
 
 test('the interview saves into the folder setup_next chose, without asking again', async ($, on) => {

@@ -115,6 +115,26 @@ export function stepText(step, ctx) {
   }
 }
 
+// What each step needs first (Jon, Oct 17: "if you like your clone and you just want to add some things, do this").
+export const NEEDS = {
+  tools: [], home: [], protection: ['tools'], skillkey: [], interview: ['home', 'skillkey'], skills: [],
+  backup: ['tools', 'home', 'protection'], library: ['tools', 'home'], voice: ['tools'], feed: ['library'],
+}
+
+// One step on its own, for someone who likes their clone and wants to add just this.
+export function onlyText(id, status, ctx) {
+  const step = STEPS.find(s => s.id === id)
+  if (!step) return 'There is no setup step called ' + id + '. The steps are: ' + STEP_IDS.join(', ') + '.'
+  if (status[id]) return step.title + ' is already set up on this computer, so there is nothing to add. Tell them that in one sentence.'
+  const missing = (NEEDS[id] || []).filter(n => !status[n])
+  if (missing.length) {
+    const names = missing.map(n => STEPS.find(s => s.id === n).title).join(' and ')
+    return step.title + ' needs ' + names + ' first. Tell them that in one sentence and offer to do ' + (missing.length > 1 ? 'those' : 'that') + ' first, then this. If they say yes, call setup_next with only set to ' + missing[0] + '.'
+  }
+  return 'Adding just one step, ' + step.title + ': ' + step.why + '\nTell them in one short sentence, then do it:\n' + stepText(step, ctx) +
+    '\n\nWhen it is done, call setup_next with only set to ' + id + ' again to check it, and tell them it is added. Leave every other step as it is.'
+}
+
 export function setupText(status, skipped, ctx) {
   const p = progress(status, skipped)
   const next = nextStep(status, skipped)

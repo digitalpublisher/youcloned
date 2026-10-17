@@ -9,7 +9,7 @@
 import { judge, denyText } from './gate.js'
 import { firstKey, writtenText, isEnvFile, commandReason, parseBans, bannedIn } from './guards.js'
 import { RULES_NAME, checkSetup, rulesMarkdown } from './rules.js'
-import { STEPS, CAN_SKIP, setupText, nextStep } from './steps.js'
+import { STEPS, STEP_IDS, CAN_SKIP, setupText, nextStep, onlyText } from './steps.js'
 import { HELPERS, parseAgent, gmailReads, helperJudge, helperGate, helperDenyText } from './helpers.js'
 import { UNIVERSAL_RULES } from './universal.js'
 import { topSvg, heroSvg, moneySvg, cardHeadSvg, plateSvg, thumbSvg, PLATE, THUMB, setWidth } from './panel.js'
@@ -557,12 +557,15 @@ async function setupNext($, e) {
   $.ui.invalidate('ui.render')
   const f = folder || nightFolder()
   const next = nextStep(st, skipped)
-  if (next && next.id === 'feed') { try { await registerHelpers($) } catch (err) { $.ui.log('feed-me helpers not registered: ' + String(err).slice(0, 200)) } }
-  return setupText(st, skipped, {
+  const target = e && e.only ? String(e.only) : next ? next.id : ''
+  if (target === 'feed') { try { await registerHelpers($) } catch (err) { $.ui.log('feed-me helpers not registered: ' + String(err).slice(0, 200)) } }
+  const ctx = {
     root: $.plugin.root, home, folder: f, mac: onMac(), defaultFolder: nightFolder(),
     needsSkillKey: NEEDS_SKILLKEY, envFile: f + sep() + '.env', detail, scratch: home + sep() + '.youcloned' + sep() + 'feeding',
-    python: next && next.id === 'feed' && onMac() ? await findPython($) : '',
-  })
+    python: target === 'feed' && onMac() ? await findPython($) : '',
+  }
+  if (e && e.only) return onlyText(target, st, ctx)
+  return setupText(st, skipped, ctx)
 }
 
 // The night-one default: the same Obsidian Vault folder Jon's clone uses, so the skills pack, the
@@ -1336,6 +1339,7 @@ export function register(on) {
             folder: { type: 'string', description: 'The clone folder the person chose, as a full path' },
             skip: { type: 'string', enum: [...CAN_SKIP], description: 'A step the person wants to do later' },
             resume: { type: 'boolean', description: 'True when the person says "finish my setup": brings back the steps they put off' },
+            only: { type: 'string', enum: STEP_IDS, description: 'Add just this one step, for someone who likes their clone and wants only this (for example library, voice or backup)' },
           },
         },
       })
