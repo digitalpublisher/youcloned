@@ -1153,6 +1153,28 @@ def cmd_stats(lib, args):
     return 0
 
 
+def cmd_sources(lib, args):
+    status, reply = lib.call({"action": "sources", "limit": args.limit, "match": args.match or ""})
+    if status != 200:
+        say("Could not read the library (status " + str(status) + ": " + str(reply.get("error", "")) + ")")
+        return 1
+    rows = reply.get("sources", [])
+    say("Your library has these sources" + (" matching " + repr(args.match) if args.match else "") + ", newest first:" if rows else "Nothing in your library matches that.")
+    for r in rows:
+        say("  " + str(r.get("kind", "")) + " | " + str(r.get("title", "")) + " | " + str(r.get("ref", "")))
+    return 0
+
+
+def cmd_forget(lib, args):
+    status, reply = lib.call({"action": "forget", "ref": args.ref})
+    if status != 200:
+        say("Could not remove it (status " + str(status) + ": " + str(reply.get("error", "")) + ")")
+        return 1
+    n = reply.get("forgotten", 0)
+    say("Removed it from your library." if n else "That source wasn't in your library.")
+    return 0
+
+
 def cmd_wiki_put(lib, args):
     path = Path(args.file).expanduser()
     problem = lib.file_problem(path, roots=("library",))
@@ -1240,6 +1262,13 @@ def parser():
     p = sub.add_parser("stats", parents=[common], allow_abbrev=False, help="what is in the library")
     p.set_defaults(run=cmd_stats)
 
+    p = sub.add_parser("sources", parents=[common], allow_abbrev=False, help="list what is in the library")
+    p.add_argument("--match", default="")
+    p.add_argument("--limit", type=int, default=200)
+    p.set_defaults(run=cmd_sources)
+    p = sub.add_parser("forget", parents=[common], allow_abbrev=False, help="remove one source from the library by its ref")
+    p.add_argument("ref")
+    p.set_defaults(run=cmd_forget)
     p = sub.add_parser("wiki-put", parents=[common], allow_abbrev=False, help="save a wiki page from a file")
     p.add_argument("slug")
     p.add_argument("title")

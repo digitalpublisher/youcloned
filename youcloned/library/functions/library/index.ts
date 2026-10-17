@@ -245,8 +245,18 @@ async function forget(body: Record<string, unknown>) {
   return { ok: true, forgotten: rows.length }
 }
 
+// The sources in the library, newest first, so the owner can see what's in it and remove what isn't theirs.
+async function sources(body: Record<string, unknown>) {
+  const limit = Math.min(Math.max(Number(body.limit ?? 200) || 200, 1), 1000)
+  const match = typeof body.match === 'string' && body.match.trim() ? '%' + body.match.trim().slice(0, 200) + '%' : null
+  const rows = match
+    ? await sql`select ref, title, kind, added_at from youcloned.sources where title ilike ${match} or ref ilike ${match} order by added_at desc limit ${limit}`
+    : await sql`select ref, title, kind, added_at from youcloned.sources order by added_at desc limit ${limit}`
+  return { ok: true, sources: rows }
+}
+
 const ACTIONS: Record<string, (body: Record<string, unknown>) => Promise<unknown>> = {
-  ingest, search, stats, has, forget,
+  ingest, search, stats, has, forget, sources,
   wiki_upsert: wikiUpsert, wiki_get: wikiGet, wiki_list: wikiList,
 }
 
