@@ -339,7 +339,9 @@ function LIBRARY_NOTE() {
   if (!pluginRoot) return ''
   const py = onMac() ? 'python3' : 'py -3'
   return '\n\n## Your library\n\nWhen the owner asks about their business, offers, customers, past emails, pages, books, courses or videos, search their library first and answer from what it finds, naming the source: ' +
-    py + ' "' + pluginRoot + (onMac() ? '/library/feed.py' : '\\library\\feed.py') + '" search "<their question in a few words>". If the library isn\'t set up yet, say so and offer the setup step.'
+    py + ' "' + pluginRoot + (onMac() ? '/library/feed.py' : '\\library\\feed.py') + '" search "<their question in a few words>". If the library isn\'t set up yet, say so and offer the setup step.' +
+    ' When they ask what you have collected or what is in their library, run the same command with stats instead of search and tell them the counts by kind in plain words.' +
+    ' When they ask when their backup last saved, read the last lines of ' + (onMac() ? home + '/.youcloned/backup.log' : home + '\\.youcloned\\backup.log') + ' and tell them the date and time of the last "backed up" line, or that it hasn\'t run yet.'
 }
 
 
