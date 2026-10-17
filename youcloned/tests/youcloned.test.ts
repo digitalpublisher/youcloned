@@ -397,6 +397,9 @@ test('every clone, Mac or PC, is told to say when it is time to change chats and
   expect(text).toMatch(/A yes on the wording is not a yes to send/)
   expect(text).toMatch(/Never change, reset or set a password/)
   expect(text).toContain('memory/INDEX.md')
+  // Jon, Oct 17 (to-do 646): the kickoff offer and the better-model line ship to every clone
+  expect(text).toMatch(/offer the kickoff once before you build/)
+  expect(text).toMatch(/better or cheaper on a different Claude model, say so in one line/)
   expect(text).toContain('past about 200,000 tokens, or 3 hours since it started')
 })
 
