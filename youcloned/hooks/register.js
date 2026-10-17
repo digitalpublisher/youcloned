@@ -11,6 +11,7 @@ import { firstKey, writtenText, isEnvFile, commandReason, parseBans, bannedIn } 
 import { RULES_NAME, checkSetup, rulesMarkdown } from './rules.js'
 import { STEPS, CAN_SKIP, setupText, nextStep } from './steps.js'
 import { HELPERS, parseAgent, gmailReads, helperJudge, helperDenyText } from './helpers.js'
+import { UNIVERSAL_RULES } from './universal.js'
 import { topSvg, heroSvg, moneySvg, cardHeadSvg, plateSvg, thumbSvg, PLATE, THUMB, setWidth } from './panel.js'
 
 const PANE = 'youcloned'
@@ -1289,7 +1290,7 @@ export function register(on) {
     if (!rules) return result
     const running = version ? 'YouCloned version ' + version + ' is running in this conversation (tell the person this number if they ask which version they have).\n\n' : ''
     const block = { name: 'youcloned', text: running + 'The owner\'s YouCloned rules, from ' + project + '/' + RULES_NAME +
-      '. Follow them in everything you write for this person.\n\n' + rules }
+      '. Follow them in everything you write for this person.\n\n' + rules + '\n\nRules every YouCloned clone follows:\n\n' + UNIVERSAL_RULES }
     return { ...result, blocks: [...result.blocks, block] }
   })
 
