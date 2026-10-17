@@ -5,15 +5,62 @@ GET  /            the dashboard
 GET  /state.json  live numbers the YouCloned add-on writes (plan usage, words, name)
 POST /do          {"text": "..."} queues a job; the add-on puts it into Claude's chat
 POST /talk        asks Isaac's voice relay to start a voice conversation in the owner's YouCloned chat
+POST /skip        {"crew": "support", "file": "x.md"} moves a draft the Needs You list shows into the helper's skipped folder
 """
-import json, os, sys, time, urllib.request
+import json, os, sys, threading, time, urllib.request
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(os.path.expanduser("~"), ".youcloned")
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 4600
 RELAY = "http://127.0.0.1:8771/say"
+SKIP_LOCK = threading.Lock()  # one Skip at a time, so two never pick the same free name
 TALK = "Talk to Isaac was pressed in YouCloned. Start a voice conversation now: call converse with a short hello and listen."
+
+
+def skip_draft(crew, name):
+    """Moves one waiting draft into skipped/, next to drafts/. Only a draft state.json lists for that helper
+    can be named, and drafts/, skipped/ and the draft itself must be plain folders and files inside the
+    helper's folder (no links or junctions), so no other file on the computer can be reached. An earlier
+    skipped draft with the same name is kept: the new one gets a number. True when it moved."""
+    try:
+        state = json.load(open(os.path.join(DATA, "state.json")))
+        helper = next(c for c in state.get("crew") or [] if c.get("name") == crew)
+        if name not in [d.get("name") for d in helper.get("drafts") or []] or os.path.basename(name) != name or name in (".", ".."):
+            return False
+        home = os.path.realpath(helper["dir"])
+        drafts, skipped = os.path.join(helper["dir"], "drafts"), os.path.join(helper["dir"], "skipped")
+        src = os.path.join(drafts, name)
+        if os.path.realpath(drafts) != os.path.join(home, "drafts") or os.path.islink(src) or not os.path.isfile(src):
+            return False
+        os.makedirs(skipped, exist_ok=True)
+        if os.path.realpath(skipped) != os.path.join(home, "skipped"):
+            return False
+        stem, ext = os.path.splitext(name)
+        with SKIP_LOCK:
+            for n in range(1, 1000):
+                dst = os.path.join(skipped, name if n == 1 else "%s-%d%s" % (stem, n, ext))
+                if os.path.lexists(dst):
+                    continue
+                try:
+                    os.rename(src, dst)  # on Windows this refuses a name that appeared meanwhile; try the next
+                    return True
+                except FileExistsError:
+                    continue
+        return False
+    except Exception:
+        return False
+
+
+def same_site(headers):
+    """A POST only counts when it comes from the dashboard page itself. Another website's page can't send
+    one: its Origin names that site, and a page can't send JSON here without the browser asking first.
+    The Host check keeps out a web address that was pointed at this computer."""
+    hosts = {"127.0.0.1:%d" % PORT, "localhost:%d" % PORT}
+    origin = headers.get("Origin")
+    if headers.get("Host") not in hosts or (origin is not None and origin not in {"http://" + h for h in hosts}):
+        return False
+    return True
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -52,6 +99,10 @@ class Handler(SimpleHTTPRequestHandler):
         return super().do_GET()
 
     def do_POST(self):
+        json_body = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() == "application/json"
+        if not same_site(self.headers) or (self.path in ("/do", "/skip") and not json_body):
+            self.send_error(403)
+            return
         if self.path == "/talk":
             # The talk goes to the chat the add-on last wrote into state.json, through the voice relay.
             try:
@@ -62,6 +113,16 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_response(204)
             except Exception:
                 self.send_response(502)
+            self.end_headers()
+            return
+        if self.path == "/skip":
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                ask = json.loads(self.rfile.read(min(n, 4000)) or b"{}")
+                moved = skip_draft(str(ask.get("crew", "")), str(ask.get("file", "")))
+            except Exception:
+                moved = False
+            self.send_response(204 if moved else 404)
             self.end_headers()
             return
         if self.path != "/do":

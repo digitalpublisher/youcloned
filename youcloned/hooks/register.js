@@ -26,6 +26,8 @@ let tab = 'home'
 let codex = { busy: false, note: '' }
 let crew = {}               // name -> { running, lastRun, note, every, drafts }
 const crewIds = new Map()   // agentId -> crew name
+const NEEDS_SHOWN = 12      // drafts per helper the dashboard's Needs You list shows
+const SUPPORT_LABEL = 'YouCloned Support' // the Gmail label the Support helper reads
 const notCrew = new Set()
 const gatePassed = new Set() // tool_use_ids of crew calls the gate allowed
 let skillKey = false        // the SkillKey connector is on in this session
@@ -208,6 +210,14 @@ async function runJob($, text) {
   if (word === 'setup') return startSetup($)
   if (word === 'codex') return codexButton($)
   if (word === 'crew') { $.ui.toast(await crewNow($, (args.split(/\s+/)[1] || '').toLowerCase())); return }
+  if (word === 'draft') {
+    const [, action, name, file] = args.split(/\s+/)
+    let named = String(file || '')
+    try { named = decodeURIComponent(named) } catch {} // the dashboard sends the file name encoded, so a space survives
+    const job = draftJob(String(action || '').toLowerCase(), String(name || '').toLowerCase(), named)
+    if (job) await $.prompt.submit({ text: job, asUser: true })
+    else $.ui.toast('That draft is no longer waiting')
+  }
 }
 
 // Going through a helper's drafts with the owner, one at a time; nothing goes out without their yes.
@@ -287,6 +297,7 @@ async function refreshLive($, withWords) {
   try {
     const name = project ? ((await readRules($)) || '').match(/^#+\s*Who I am\s*\n+([^\n]+)/m) : null
     lastName = name ? name[1].trim().split(/[ ,]/)[0] : undefined
+    try { await refreshDrafts($) } catch {}
     await writeState($)
   } catch {}
   $.ui.invalidate('ui.render')
@@ -322,7 +333,7 @@ async function writeState($) {
     if (!deskSession) {
       try { const old = JSON.parse(await $.fs.read(dataDir() + '/state.json')); mine = { session: old.session, listening: !!old.listening } } catch { mine = {} }
     }
-    await $.fs.write(dataDir() + '/state.json', JSON.stringify({ ...live, name: lastName, ...mine, at: await $.clock.now() }))
+    await $.fs.write(dataDir() + '/state.json', JSON.stringify({ ...live, name: lastName, ...mine, crew: crewState(), at: await $.clock.now() }))
   } catch {}
 }
 
@@ -604,12 +615,39 @@ async function refreshDrafts($) {
   for (const c of CREW) {
     const dir = crewDir(c.name)
     let names = []
-    if (dir && (await $.fs.exists(dir + '/drafts'))) {
+    // A drafts folder or a draft that is a link points somewhere else on the computer, so it is left out.
+    const folder = dir && (await $.fs.exists(dir + '/drafts')) ? (await $.fs.list(dir)).find(x => x.name === 'drafts') : null
+    if (folder && folder.kind === 'dir' && !folder.isLink) {
       const entries = await $.fs.list(dir + '/drafts')
-      names = entries.filter(x => x.kind === 'file' && x.name.endsWith('.md')).sort((a, b) => b.mtimeMs - a.mtimeMs).map(x => x.name)
+      names = entries.filter(x => x.kind === 'file' && !x.isLink && x.name.endsWith('.md')).sort((a, b) => b.mtimeMs - a.mtimeMs).map(x => x.name)
     }
     crew[c.name].drafts = names
+    // The dashboard's Needs You list shows the newest drafts with the start of each one.
+    const shown = []
+    for (const name of names.slice(0, NEEDS_SHOWN)) {
+      let text = ''
+      try { text = String(await $.fs.read(dir + '/drafts/' + name)) } catch {}
+      shown.push({ name, preview: text.replace(/\s+/g, ' ').trim().slice(0, 280) })
+    }
+    crew[c.name].shown = shown
   }
+}
+
+// What the dashboard's Bridge shows for each helper: its live state and the drafts waiting on the owner.
+function crewState() {
+  return CREW.map(c => ({ name: c.name, title: c.title, what: c.what, running: !!crew[c.name]?.running, lastRun: crew[c.name]?.lastRun || 0,
+    note: crew[c.name]?.note || '', waiting: (crew[c.name]?.drafts || []).length, drafts: crew[c.name]?.shown || [], dir: crewDir(c.name) }))
+}
+
+// Approve and Edit from the dashboard's Needs You list. Approve never sends: Claude shows the owner what goes
+// where and waits for their yes. Only a draft the add-on listed itself can be named, so no other file is reached.
+function draftJob(action, name, file) {
+  const c = CREW.find(x => x.name === name)
+  if (!c || !project || !(crew[name]?.drafts || []).includes(file)) return null
+  const path = crewDir(name) + '/drafts/' + file
+  if (action === 'approve') return 'Approve my ' + c.title + ' helper\'s draft ' + path + '. Show me exactly what it says and where it goes (who it is to, and from which account), then wait for my yes. Nothing goes out before I say yes. Once it has gone out, move it into the "done" folder next to drafts.'
+  if (action === 'edit') return 'Edit my ' + c.title + ' helper\'s draft ' + path + '. Ask me what to change, rewrite it in the same file, and show me the new version. Send nothing.'
+  return null
 }
 
 // Question files in the support inbox that no draft names on its "Question:" line yet.
@@ -618,7 +656,7 @@ async function waitingQuestions($) {
   if (!(await $.fs.exists(dir + '/inbox'))) return []
   const questions = (await $.fs.list(dir + '/inbox')).filter(x => x.kind === 'file' && !x.name.startsWith('.')).map(x => x.name)
   const answered = new Set()
-  for (const folder of ['/drafts', '/done']) {
+  for (const folder of ['/drafts', '/done', '/skipped']) {
     if (!(await $.fs.exists(dir + folder))) continue
     for (const d of await $.fs.list(dir + folder)) {
       if (d.kind !== 'file' || !d.name.endsWith('.md')) continue
@@ -627,6 +665,24 @@ async function waitingQuestions($) {
     }
   }
   return questions.filter(q => !answered.has(q))
+}
+
+// The owner's Gmail is the connector with both search_threads and get_thread. Like SkillKey, the desktop
+// app may name it by an id, so it is found by its tools: from the tool list, or the context breakdown
+// when the desktop app keeps connector tools behind ToolSearch.
+function emailFrom(names) {
+  const servers = new Set(names.map(n => (/^mcp__(.+)__get_thread$/.exec(n) || [])[1]).filter(Boolean))
+  for (const n of names) {
+    const m = /^mcp__(.+)__search_threads$/.exec(n)
+    if (m && servers.has(m[1])) return m[1]
+  }
+  return null
+}
+
+async function emailServer($) {
+  try { const found = emailFrom((await $.tool.list()).map(t => typeof t === 'string' ? t : t.name || '')); if (found) return found } catch {}
+  try { return emailFrom(((await $.session.usage({ breakdown: 'summary' }))?.context?.breakdown?.mcpTools || []).map(t => t.name)) } catch {}
+  return null
 }
 
 // SkillKey is the connector with both start_skill and word_balance. The desktop app names
@@ -855,14 +911,19 @@ async function runCrew($, name) {
   const today = new Date(await $.clock.now()).toISOString().slice(0, 10)
   let work = ''
   if (name === 'support') {
-    // The crew has no shell, so the plugin finds the questions that have no draft yet.
+    // The crew has no shell, so the plugin finds the questions that have no draft yet. With Gmail
+    // connected, Support also reads the owner's "YouCloned Support" label, so it runs without files too.
     const waiting = await waitingQuestions($)
-    if (!waiting.length) {
-      crew[name].note = 'No new questions in ' + crewDir(name) + '/inbox.'
+    const mail = await emailServer($)
+    if (!waiting.length && !mail) {
+      crew[name].note = 'No new questions in ' + crewDir(name) + '/inbox. Connect Gmail in Claude and label support emails "' + SUPPORT_LABEL + '", and Support reads those too.'
       $.ui.invalidate('ui.render')
       return crew[name].note
     }
-    work = '\nQuestions waiting (one file each):\n' + waiting.map(f => '- ' + crewDir(name) + '/inbox/' + f).join('\n') + '\n'
+    if (waiting.length) work += '\nQuestions waiting (one file each):\n' + waiting.map(f => '- ' + crewDir(name) + '/inbox/' + f).join('\n') + '\n'
+    if (mail) work += '\nEmail: with the ' + mail + ' connector, search_threads for label:"' + SUPPORT_LABEL + '" newer_than:14d and read each thread with get_thread. ' +
+      'Each thread is one question named "email <thread id>": put that on its Question: line and the sender\'s address on its Customer: line. ' +
+      'A thread whose name is already on a Question: line in drafts/, done/ or skipped/ has its draft, so leave it. Look-ups only: never label, archive, reply or send.\n'
   }
   const r = await $.agent.spawn({
     subagentType: 'youcloned:' + name,

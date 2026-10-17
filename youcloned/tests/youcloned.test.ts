@@ -20,7 +20,7 @@ const SK = '4a62845f-77ec-431f-8b76-2d42902a60fb'
 const skTools = (server = SK) => ['list_skills', 'start_skill', 'run_skill', 'word_balance'].map(t => ({ name: 'mcp__' + server + '__' + t, description: '', mcp: true }))
 const fromSk = (body: string) => ({ content: [{ type: 'text', text: 'You are short on words.\n\n<<<YOUCLONED>>>\n' + body + '\n<<<END YOUCLONED>>>\n\nWhen you have everything the steps ask for, call run_skill with skill "x".' }], isError: false })
 
-function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[]) => unknown, toasts?: string[], lists?: Record<string, string[]>, cwd?: string, root?: string, skillKey?: string | null, mcpCalls?: { server: string, tool: string, args: Record<string, unknown> }[], registered?: { name: string, prompt: string }[], owns?: (slug: string) => boolean, opened?: string[], browser?: string[], toolCall?: (e: any) => unknown, read?: (path: string) => string | undefined, exists?: (path: string) => boolean | undefined, mcpThrow?: string, logs?: string[], listed?: boolean, appOwned?: boolean, connected?: () => boolean } = {}) {
+function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[]) => unknown, toasts?: string[], lists?: Record<string, string[]>, cwd?: string, root?: string, skillKey?: string | null, mcpCalls?: { server: string, tool: string, args: Record<string, unknown> }[], registered?: { name: string, prompt: string }[], owns?: (slug: string) => boolean, opened?: string[], browser?: string[], toolCall?: (e: any) => unknown, read?: (path: string) => string | undefined, exists?: (path: string) => boolean | undefined, mcpThrow?: string, logs?: string[], listed?: boolean, appOwned?: boolean, connected?: () => boolean, extraTools?: () => string[], links?: string[] } = {}) {
   const writes = new Map<string, string>()
   const store = new Map<string, unknown>(opts.project ? [['project', opts.project]] : [])
   const clock = mock.clock(on)
@@ -29,11 +29,11 @@ function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: 
   on('store.set', ($, e) => { store.set(e.key, e.value); return { value: undefined } })
   on('fs.exists', ($, e) => ({ value: opts.exists?.(e.path) ?? (e.path in (opts.files || {}) || e.path.endsWith('/skills')) }))
   on('fs.list', ($, e) => ({ value: e.path.endsWith('/skills') ? [{ name: 'setup', kind: 'dir', size: 0, mtimeMs: 0, isLink: false }, { name: 'notes.txt', kind: 'file', size: 1, mtimeMs: 0, isLink: false }]
-    : (opts.lists?.[e.path] || []).map(name => ({ name, kind: 'file', size: 1, mtimeMs: 0, isLink: false })) }))
+    : (opts.lists?.[e.path] || []).map(n => { const name = n.replace(/\/$/, ''); return { name, kind: n.endsWith('/') ? 'dir' : 'file', size: 1, mtimeMs: 0, isLink: (opts.links || []).includes(e.path + '/' + name) } }) }))
   on('fs.read', ($, e) => ({ value: opts.read?.(e.path) ?? (opts.files || {})[e.path] ?? (e.path.endsWith('SKILL.md') ? 'description: Set up YouCloned. More.' : 'crew prompt') }))
   on('fs.write', ($, e) => { writes.set(e.path, e.text); return { value: undefined } })
   const sk = opts.skillKey === undefined ? SK : opts.skillKey
-  on('tool.list', () => ({ value: sk && opts.listed !== false ? skTools(sk) : [] }))
+  on('tool.list', () => ({ value: [...(sk && opts.listed !== false ? skTools(sk) : []), ...(opts.extraTools?.() || []).map(name => ({ name, description: '', mcp: true }))] }))
   on('mcp.call', ($, e) => {
     opts.mcpCalls?.push(e)
     if (opts.mcpThrow) return { value: { content: [{ type: 'text', text: 'YouCloned MCP call: ' + opts.mcpThrow }], isError: true } }
@@ -343,6 +343,75 @@ test('the support crew gets only the questions that have no draft yet', async ($
   await $.command.run({ command: 'youcloned', args: 'crew support' })
   expect(spawned[0]).toMatch(/inbox\/tom\.txt/)
   expect(spawned[0]).not.toMatch(/maria\.txt/)
+})
+
+test('a skipped draft still counts as answered, so its question is not drafted again', async ($, on) => {
+  const dir = PROJECT + '/crew/support'
+  const spawned: string[] = []
+  sessionStubs(on, {
+    project: PROJECT,
+    files: { [dir + '/inbox']: '', [dir + '/skipped']: '', [dir + '/skipped/a.md']: 'Question: maria.txt\nCustomer: Maria\n\nHi' },
+    lists: { [dir + '/inbox']: ['maria.txt', 'tom.txt'], [dir + '/skipped']: ['a.md'] },
+  })
+  on('agent.spawn', ($, e) => { spawned.push(e.prompt); return { agentId: 'a1', model: 'x' } })
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  await $.command.run({ command: 'youcloned', args: 'crew support' })
+  expect(spawned[0]).toMatch(/inbox\/tom\.txt/)
+  expect(spawned[0]).not.toMatch(/maria\.txt/)
+})
+
+test('with Gmail connected, Support reads the "YouCloned Support" label even when no question files wait; without it, it says how', async ($, on) => {
+  const spawned: string[] = []
+  let gmail = true
+  const toasts: string[] = []
+  sessionStubs(on, { project: PROJECT, toasts, files: { [PROJECT + '/crew/support/inbox']: '' }, lists: { [PROJECT + '/crew/support/inbox']: [] },
+    extraTools: () => gmail ? ['search_threads', 'get_thread', 'create_draft'].map(t => 'mcp__a1b2__' + t) : [] })
+  on('agent.spawn', ($, e) => { spawned.push(e.prompt); return { agentId: 'a1', model: 'x' } })
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  await $.command.run({ command: 'youcloned', args: 'crew support' })
+  expect(spawned.length).toBe(1)
+  expect(spawned[0]).toContain('with the a1b2 connector, search_threads for label:"YouCloned Support" newer_than:14d')
+  expect(spawned[0]).toContain('named "email <thread id>"')
+  expect(spawned[0]).not.toMatch(/Questions waiting/)
+  gmail = false
+  const out = await $.command.run({ command: 'youcloned', args: 'crew support' })
+  expect(spawned.length).toBe(1)
+  expect(String(out.text || toasts.join(' '))).toMatch(/label support emails "YouCloned Support"/)
+})
+
+test('the Bridge: waiting drafts reach the dashboard, Approve and Edit ask in the chat and wait for the yes, an unlisted draft goes nowhere', async ($, on) => {
+  const here = '/Users/pat/Documents/Garden'
+  const dir = here + '/crew/support'
+  const jobs = '/Users/pat/.youcloned/jobs.jsonl'
+  const job = (text: string) => JSON.stringify({ text }) + '\n'
+  const files: Record<string, string> = {
+    [here + '/YOUCLONED.md']: '# rules', [dir + '/drafts']: '', [dir + '/drafts/maria reply.md']: 'Question: maria.txt\nTo: maria@example.com\n\nHi Maria,\n\nHere is how the course works.',
+    [jobs]: job('/youcloned draft approve support maria%20reply.md') + job('/youcloned draft edit support maria%20reply.md') +
+      job('/youcloned draft approve support ..%2F..%2FYOUCLONED.md') + job('/youcloned draft approve inbox maria%20reply.md'),
+  }
+  const toasts: string[] = []
+  const submitted: string[] = []
+  const inbox = here + '/crew/inbox'
+  files[inbox + '/drafts'] = ''
+  const { writes, clock } = sessionStubs(on, { project: here, cwd: here, files, toasts,
+    lists: { [dir]: ['drafts/'], [dir + '/drafts']: ['maria reply.md', 'linked.md'], [inbox]: ['drafts/'], [inbox + '/drafts']: ['elsewhere.md'] },
+    links: [dir + '/drafts/linked.md', inbox + '/drafts'], read: (path) => writes.get(path) ?? files[path] })
+  on('http.fetch', () => ({ value: { status: 200, ok: true, headers: {}, text: '{}' } }))
+  on('prompt.submit', ($, e) => { submitted.push(String(e.text)); return { text: String(e.text) } })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: here })
+  await clock.advance(25000)
+  const state = JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}')
+  const support = state.crew.find((c: any) => c.name === 'support')
+  expect(support.dir).toBe(dir)
+  expect(support.waiting).toBe(1)
+  expect(support.drafts).toEqual([{ name: 'maria reply.md', preview: 'Question: maria.txt To: maria@example.com Hi Maria, Here is how the course works.' }])
+  expect(state.crew.find((c: any) => c.name === 'inbox').waiting).toBe(0)
+  const asks = submitted.filter(t => t.includes("helper's draft"))
+  expect(asks.length).toBe(2)
+  expect(asks[0]).toContain(dir + '/drafts/maria reply.md')
+  expect(asks[0]).toMatch(/wait for my yes\. Nothing goes out before I say yes/)
+  expect(asks[1]).toMatch(/^Edit my Support helper's draft .*Send nothing\.$/)
+  expect(toasts.filter(t => t === 'That draft is no longer waiting').length).toBe(2)
 })
 
 test('after setup YouCloned shows everywhere; /youcloned off and on switch it', async ($, on) => {
