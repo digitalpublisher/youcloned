@@ -301,11 +301,15 @@
       "fix": "Ask once to let the clone work without permission prompts",
       "jon_file": null,
       "card": "youcloned#27",
-      "buyer_file": "add-on setup (PR #27)",
+      "buyer_file": "add-on setup (PR #27): load_setup asks once, the work_without_prompts tool writes the answer",
       "buyers": "yes",
       "mac": "in-pr",
-      "pc": "to-port",
-      "check": null
+      "pc": "in-pr",
+      "check": {
+        "mac": "grep -q \"work_without_prompts\" hooks/register.js",
+        "pc": "if (Select-String -Quiet -SimpleMatch -Path hooks\\register.js -Pattern 'work_without_prompts') { exit 0 } else { exit 1 }"
+      },
+      "note": "Oct 17: the check passes when the add-on carries the work_without_prompts tool, so it fails until PR #27 merges. PR #27 already finds the PC's settings folders (USERPROFILE, APPDATA for Cursor and VS Code); it hasn't run on a PC yet, so it goes on Ben's PC list with the clean-Mac run."
     },
     {
       "id": "agent-g",
