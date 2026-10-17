@@ -72,7 +72,7 @@ const SERVICE = 'ai.bnsn.youcloned.dashboard'
 const RELAY = 'http://127.0.0.1:8771/say'
 const SYNC_NOTE = 'Tell them one more thing in a short sentence or two: to get YouCloned updates on their own, open Customize, then Plugins, then + Add, then Manage marketplaces, click the three dots next to youcloned and switch on Sync automatically. The app can show it on when the marketplace is added and still leave it off.'
 const DEVTOOLS_NOTE = 'Apple\'s developer tools box is waiting behind this window. Click its icon in the Dock (a blue box with a down arrow), then Install. It takes a few minutes and is free.'
-const TALK = 'Talk to Isaac was pressed in YouCloned. Start a voice conversation now: call converse with a short hello and listen.'
+const TALK = 'Talk to Isaac was pressed in YouCloned. Start a voice conversation now: call converse with a short hello and listen (listen_duration_min 8, listen_duration_max 600, so a short pause never ends their turn).'
 const STOPPED = 'The owner pressed Talk again in YouCloned to stop the voice conversation. Do not call converse again until they press Talk. Carry on in text with anything already asked of you.'
 
 // New project: Claude files this session in a sidebar group of its own (the add-on cannot reach the sidebar).
@@ -271,6 +271,8 @@ async function refreshLive($, withWords) {
       }
       live.claudeLabel = label
       live.claudeSpan = w.kind === 'seven_day' ? 'Weekly plan' : w.kind === 'five_hour' ? '5-hour plan' : 'Claude plan'
+      // A failed read keeps the last numbers; claudeAt lets the dashboard say how old they are (fixes.json bridge-12).
+      live.claudeAt = await $.clock.now()
     }
   } catch {}
   if (withWords) {

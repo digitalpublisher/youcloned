@@ -3,6 +3,9 @@
 // Rule: a crew member may read anything, write only inside its own crew folder,
 // and call only connector tools whose names read as look-ups. It can't post, send,
 // buy, cancel, refund or delete; a person does that after reading the draft.
+// A draft (anything written under drafts/) also has to pass the money and promise gate in claims.js.
+
+import { claimProblems } from './claims.js'
 
 const READ_TOOLS = new Set(['Read', 'Grep', 'Glob', 'WebFetch', 'WebSearch', 'ToolSearch', 'TodoWrite'])
 const WRITE_TOOLS = { Write: 'file_path' }
@@ -50,7 +53,9 @@ export function judge(call, crewDir) {
   if (READ_TOOLS.has(tool)) return null
   if (tool in WRITE_TOOLS) {
     const p = call[WRITE_TOOLS[tool]]
-    return inside(p, crewDir) ? null : tool + ' to ' + p + ' is outside the crew folder ' + crewDir
+    if (!inside(p, crewDir)) return tool + ' to ' + p + ' is outside the crew folder ' + crewDir
+    const claims = inside(p, crewDir + '/drafts') ? claimProblems(call.content) : []
+    return claims.length ? 'the draft makes a money claim or a promise (' + claims.join('; ') + '). Rewrite it without one' : null
   }
   if (tool.startsWith('mcp__')) {
     const own = tool.split('__').slice(2).join('__')

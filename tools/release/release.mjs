@@ -59,6 +59,8 @@ function stageSource(sourceRoot, options) {
   const stage = fs.mkdtempSync(path.join(os.tmpdir(), 'youcloned-release-'));
   const plugin = path.join(sourceRoot, 'youcloned');
   if (!fs.statSync(plugin).isDirectory()) throw new Error(`Missing plugin directory: ${plugin}`);
+  // The fix list travels with every release; the ship gate reads it, so a release without it is refused.
+  if (!fs.existsSync(path.join(plugin, 'fixes.json'))) throw new Error(`Missing fix list: ${path.join(plugin, 'fixes.json')}`);
   copyTree(plugin, path.join(stage, 'youcloned'));
   if (options.guardsDir) copyTree(path.resolve(options.guardsDir), path.join(stage, 'guards'));
   return stage;

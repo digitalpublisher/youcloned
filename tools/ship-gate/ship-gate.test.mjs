@@ -151,3 +151,22 @@ test('generic secret rule catches camelCase secrets and leaves code names alone'
   const clean = run(code);
   assert.equal(clean.status, 0, clean.stdout);
 });
+
+test('fix list rows buyers get need a buyer file and a check for each computer', () => {
+  const root = tempDirectory();
+  fs.mkdirSync(path.join(root, 'youcloned'));
+  const fixes = [
+    { id: 'made-up-done', buyers: 'yes', buyer_file: 'voice/a.sh', mac: 'in-pr', pc: 'in-pr', check: { mac: 'true', pc: 'exit 0' } },
+    { id: 'made-up-jon', buyers: 'jon', buyer_file: null, mac: 'n/a', pc: 'n/a', check: null },
+    { id: 'made-up-mac-only', buyers: 'adapt', buyer_file: 'voice/b.sh', mac: 'to-port', pc: 'n/a', check: { mac: 'true' } },
+    { id: 'made-up-no-file', buyers: 'yes', buyer_file: '', mac: 'to-port', pc: 'n/a', check: { mac: 'true' } },
+    { id: 'made-up-no-pc', buyers: 'yes', buyer_file: 'voice/c.sh', mac: 'in-pr', pc: 'to-port', check: { mac: 'true' } },
+  ];
+  write(root, JSON.stringify({ fixes }, null, 2), path.join('youcloned', 'fixes.json'));
+  const result = run(root, ['--json']);
+  assert.equal(result.status, 1);
+  const found = JSON.parse(result.stdout).findings.map((f) => `${f.rule} ${f.masked}`).sort();
+  assert.deepEqual(found, ['fix-list-no-buyer-file made-up-no-file', 'fix-list-no-pc-check made-up-no-pc']);
+  write(root, '{not json', path.join('youcloned', 'fixes.json'));
+  assert.match(run(root).stdout, /fix-list-unreadable/);
+});

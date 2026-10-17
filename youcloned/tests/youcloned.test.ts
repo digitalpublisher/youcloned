@@ -1,5 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 import { judge } from '../hooks/gate.js'
+import { claimProblems } from '../hooks/claims.js'
 import { checkSetup } from '../hooks/rules.js'
 
 const PROJECT = '/Users/pat/YouCloned'
@@ -83,6 +84,24 @@ test('gate: connector look-ups pass, sends and changes are refused', () => {
   for (const t of ['send_message', 'create_draft', 'reply', 'trash_thread', 'label_thread', 'refund', 'post_comment', 'getaway_send', 'getAndSend', 'search_and_delete', 'read_then_archive', 'listen']) {
     expect(judge({ tool: 'mcp__x__' + t }, dir)).toMatch(/only look-up/)
   }
+})
+
+test('gate: a crew draft with a money claim or a promise is refused; plain facts pass', () => {
+  const dir = PROJECT + '/crew/support'
+  const write = (content: string, file = dir + '/drafts/a.md') => judge({ tool: 'Write', file_path: file, content }, dir)
+  for (const t of ["You'll make $3,000 in 30 days.", 'Guaranteed results.', "I'll refund you in full and add a free month.",
+    'He also covers the campaign rerun that pulled $22,000 from the same list.', 'Members make $2K-$3K with AI in 30 days.',
+    "Follow the steps and you can't fail.", 'Plenty of members earn money online with it.', 'We can give you a discount if you upgrade today.',
+    'Most people see results in thirty days.', "You\u2019ll be making money in 14 days.", "Within a month you'll have paying clients."]) {
+    expect(write(t)).toMatch(/money claim or a promise/)
+  }
+  for (const t of ['Pro is $99 a month or $999 a year.', 'It is $47 one payment with a 14-day money-back guarantee.',
+    'Open the dashboard, click Crew, then pick Support.', "In two days you'll get an email with the new plan.",
+    'The 14-day trial ends on Oct 26, and you can cancel any time before then.', "It's best to wait 24 hours for the domain to connect."]) {
+    expect(write(t)).toBe(null)
+  }
+  expect(write('Customer says they made $3,000 from the launch.', dir + '/notes.md')).toBe(null)
+  expect(claimProblems('Guaranteed results.')[0]).toMatch(/^earnings or results claim/)
 })
 
 test('gate: Windows paths are judged the same way', () => {
@@ -582,6 +601,27 @@ test('the plan gauge shows the tightest limit: a nearly spent week beats a fresh
   expect(st.claudePct).toBe(86)
   expect(st.claudeSpan).toBe('Weekly plan')
   expect(st.claudeLabel).toMatch(/this week · resets/)
+})
+
+test('a failed plan read keeps the last numbers and the time they were read, for the dashboard to show', async ($, on) => {
+  const { writes, clock } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' } })
+  on('http.fetch', () => ({ value: { status: 200, ok: true, headers: {}, text: '{}' } }))
+  let down = false
+  on('session.usage', () => {
+    if (down) throw new Error('usage read failed')
+    return { value: { rateLimits: [{ kind: 'five_hour', percentUsed: 40, resetsAt: '2026-10-05T18:50:00Z' }] } }
+  })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  await clock.advance(2000)
+  const first = JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}')
+  expect(first.claudePct).toBe(40)
+  expect(typeof first.claudeAt).toBe('number')
+  down = true
+  await clock.advance(60000)
+  const later = JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}')
+  expect(later.at).toBeGreaterThan(first.at)
+  expect(later.claudePct).toBe(40)
+  expect(later.claudeAt).toBe(first.claudeAt)
 })
 
 test('on a Mac the dashboard runs as a background service and launch.json opens its address', async ($, on) => {

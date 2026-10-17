@@ -1,0 +1,345 @@
+--- a/voice_mode/streaming.py
++++ b/voice_mode/streaming.py
+@@ -39,8 +39,60 @@
+ # cheap snapshot, so stop latency is bounded by one chunk (~85ms at 4096 B PCM
+ # @ 24kHz) -- well under the ~200ms barge-in target.
+ CONTROL_POLL_INTERVAL = 0.05
++
++
++class _InstantStopWatcher:
++    """2026-10-16 instant stop: polls the control state every 50 ms while a line plays, so a stop or
++    skip_forward ends playback at once even when the loop is blocked in stream.write() or waiting for
++    a slow first chunk. It aborts the device and records which key fired (it no longer cancels the task, 2026-10-16 pm)."""
++
++    def __init__(self, abort_fn):
++        self._abort = abort_fn
++        self._done = threading.Event()
++        self._lock = threading.Lock()
++        self.kind = None
++
++    def start(self):
++        self._loop = asyncio.get_running_loop()
++        self._task = asyncio.current_task()
++        self._thread = threading.Thread(target=self._run, daemon=True, name="instant-stop-watcher")
++        self._thread.start()
++
++    def _run(self):
++        while not self._done.wait(0.05):
++            try:
++                snap = get_control_state().snapshot()
++            except Exception:
++                continue
++            if snap.is_stopped or snap.is_skip_forward:
++                with self._lock:
++                    if self._done.is_set():
++                        return
++                    self.kind = "stop" if snap.is_stopped else "skip"
++                try:
++                    self._abort()
++                except Exception:
++                    logger.debug("instant stop abort failed", exc_info=True)
++                # 2026-10-16 pm: task.cancel() was removed. The watcher runs inside the converse tool's own task, so cancelling it
++                # killed the whole converse call (TOOL_CANCELLED client_cancel) and no listen opened after an Option interrupt.
++                # The device abort above unblocks stream.write(); the chunk loop then exits on snap.is_skip_forward/is_stopped
++                # and converse carries on to its listen.
++                logger.info("instant stop watcher fired: %s", self.kind)
++                return
++
++    def swallow(self, exc):
++        # a cancel we asked for must not leak out of the playback block
++        if isinstance(exc, asyncio.CancelledError):
++            try:
++                self._task.uncancel()
++            except Exception:
++                pass
+ 
++    def stop(self):
++        with self._lock:
++            self._done.set()
+ 
++
+ async def _poll_control_channel() -> bool:
+     """Honour the process-wide control channel between audio chunks (VM-1676/VM-1685).
+ 
+@@ -400,82 +452,97 @@
+         logger.info("Starting true HTTP streaming with iter_bytes()")
+         
+         # Use the streaming response API
+-        async with openai_client.audio.speech.with_streaming_response.create(
+-            **request_params
+-        ) as response:
+-            chunk_count = 0
+-            bytes_received = 0
++        chunk_count = 0
++        bytes_received = 0
++        playing = True
++        _iw = _InstantStopWatcher(_abort_once); _iw.start()
++        try:
++            async with openai_client.audio.speech.with_streaming_response.create(
++                **request_params
++            ) as response:
++                chunk_count = 0
++                bytes_received = 0
+             
+-            playing = True
++                playing = True
+ 
+-            # Stream chunks as they arrive
+-            async for chunk in response.iter_bytes(chunk_size=STREAM_CHUNK_SIZE):
+-                if not chunk:
+-                    continue
+-                if playing:
+-                    # VM-1676/VM-1739: a stop or skip_forward cuts immediately --
+-                    # abort the device and discard the rest of the stream.
+-                    # VM-1685 (impl-drain-restart): a skip_back or a pause instead
+-                    # STOPS PLAYING but keeps DRAINING the stream into the capture
+-                    # buffer, so the full utterance is captured (skip_back can then
+-                    # restart the CURRENT utterance; pause resumes from the buffer).
+-                    snap = get_control_state().snapshot()
+-                    if snap.is_stopped:
+-                        control_stopped = True
+-                        _abort_once()
+-                        break
+-                    if snap.is_skip_forward:
+-                        transport_interrupted = True
+-                        _abort_once()
+-                        break
+-                    if snap.pending_transport:
+-                        # skip_back: barge-in now (silence the device), then keep
+-                        # draining the remainder so converse replays the full
+-                        # current utterance from its start.
+-                        transport_interrupted = True
+-                        drain_reason = "transport"
+-                        playing = False
+-                        _abort_once()
+-                    elif snap.is_paused:
+-                        # pause: stop feeding the device (it drains what's buffered
+-                        # and goes quiet) but keep pulling the rest into the buffer
+-                        # to free the provider; resume plays the remainder.
+-                        drain_reason = "pause"
+-                        playing = False
++                # Stream chunks as they arrive
++                async for chunk in response.iter_bytes(chunk_size=STREAM_CHUNK_SIZE):
++                    if not chunk:
++                        continue
++                    if playing:
++                        # VM-1676/VM-1739: a stop or skip_forward cuts immediately --
++                        # abort the device and discard the rest of the stream.
++                        # VM-1685 (impl-drain-restart): a skip_back or a pause instead
++                        # STOPS PLAYING but keeps DRAINING the stream into the capture
++                        # buffer, so the full utterance is captured (skip_back can then
++                        # restart the CURRENT utterance; pause resumes from the buffer).
++                        snap = get_control_state().snapshot()
++                        if snap.is_stopped:
++                            control_stopped = True
++                            _abort_once()
++                            break
++                        if snap.is_skip_forward:
++                            transport_interrupted = True
++                            _abort_once()
++                            break
++                        if snap.pending_transport:
++                            # skip_back: barge-in now (silence the device), then keep
++                            # draining the remainder so converse replays the full
++                            # current utterance from its start.
++                            transport_interrupted = True
++                            drain_reason = "transport"
++                            playing = False
++                            _abort_once()
++                        elif snap.is_paused:
++                            # pause: stop feeding the device (it drains what's buffered
++                            # and goes quiet) but keep pulling the rest into the buffer
++                            # to free the provider; resume plays the remainder.
++                            drain_reason = "pause"
++                            playing = False
+ 
+-                # Track first chunk received (TTFA is receipt-based, independent of
+-                # whether playback is currently suppressed).
+-                if first_chunk_time is None:
+-                    first_chunk_time = time.perf_counter()
+-                    chunk_receive_time = first_chunk_time - start_time
+-                    logger.info(f"First audio chunk received after {chunk_receive_time:.3f}s")
++                    # Track first chunk received (TTFA is receipt-based, independent of
++                    # whether playback is currently suppressed).
++                    if first_chunk_time is None:
++                        first_chunk_time = time.perf_counter()
++                        chunk_receive_time = first_chunk_time - start_time
++                        logger.info(f"First audio chunk received after {chunk_receive_time:.3f}s")
+ 
+-                    # Log TTS first audio event
+-                    event_logger = get_event_logger()
+-                    if event_logger:
+-                        event_logger.log_event(event_logger.TTS_FIRST_AUDIO)
+-
+-                # Accumulate for the history buffer (and on-disk save) REGARDLESS of
+-                # playback suppression -- this is what makes the full utterance
+-                # available for skip-back replay / a pause resume.
+-                audio_buffer.write(chunk)
++                        # Log TTS first audio event
++                        event_logger = get_event_logger()
++                        if event_logger:
++                            event_logger.log_event(event_logger.TTS_FIRST_AUDIO)
+ 
+-                # Play the chunk immediately, unless an interrupt suppressed playback.
+-                if playing:
+-                    audio_array = np.frombuffer(chunk, dtype=np.int16)
+-                    stream.write(audio_array)
+-                    metrics.chunks_played = chunk_count + 1
+-                else:
+-                    # Suppressed by a pause: keep the un-played chunk to replay
+-                    # verbatim from the buffer on resume (skip_back discards this).
+-                    remainder_chunks.append(chunk)
++                    # Accumulate for the history buffer (and on-disk save) REGARDLESS of
++                    # playback suppression -- this is what makes the full utterance
++                    # available for skip-back replay / a pause resume.
++                    audio_buffer.write(chunk)
+ 
+-                chunk_count += 1
+-                bytes_received += len(chunk)
+-                metrics.chunks_received = chunk_count
++                    # Play the chunk immediately, unless an interrupt suppressed playback.
++                    if playing:
++                        audio_array = np.frombuffer(chunk, dtype=np.int16)
++                        stream.write(audio_array)
++                        metrics.chunks_played = chunk_count + 1
++                    else:
++                        # Suppressed by a pause: keep the un-played chunk to replay
++                        # verbatim from the buffer on resume (skip_back discards this).
++                        remainder_chunks.append(chunk)
+ 
+-                if debug and chunk_count % 10 == 0:
+-                    logger.debug(f"Streamed {chunk_count} chunks, {bytes_received} bytes")
++                    chunk_count += 1
++                    bytes_received += len(chunk)
++                    metrics.chunks_received = chunk_count
++
++                    if debug and chunk_count % 10 == 0:
++                        logger.debug(f"Streamed {chunk_count} chunks, {bytes_received} bytes")
++        except BaseException as _iex:
++            if _iw.kind is None or not isinstance(_iex, (asyncio.CancelledError, Exception)):
++                raise
++            _iw.swallow(_iex)
++        finally:
++            _iw.stop()
++        if _iw.kind == "stop":
++            control_stopped = True
++        elif _iw.kind == "skip":
++            transport_interrupted = True
+ 
+         # VM-1676/VM-1739: stop / skip_forward broke out of the loop having already
+         # aborted the device -- discard (do NOT capture) and return with the
+@@ -715,55 +782,67 @@
+ 
+         logger.info("Starting Cartesia SSE streaming")
+ 
+-        playing = True
+-        async for chunk in cartesia_tts.stream(
+-            text=text,
+-            voice_id=voice_id,
+-            sample_rate=sample_rate,
+-            speed=speed,
+-        ):
+-            if not chunk:
+-                continue
+-            if playing:
+-                # VM-1676/VM-1739: stop / skip_forward cut immediately + discard.
+-                # VM-1685: skip_back / pause stop playing but keep DRAINING into the
+-                # buffer so the full utterance is captured (see stream_pcm_audio).
+-                snap = get_control_state().snapshot()
+-                if snap.is_stopped:
+-                    control_stopped = True
+-                    _abort_once()
+-                    break
+-                if snap.is_skip_forward:
+-                    transport_interrupted = True
+-                    _abort_once()
+-                    break
+-                if snap.pending_transport:
+-                    transport_interrupted = True
+-                    drain_reason = "transport"
+-                    playing = False
+-                    _abort_once()
+-                elif snap.is_paused:
+-                    drain_reason = "pause"
+-                    playing = False
+-
+-            if first_chunk_time is None:
+-                first_chunk_time = time.perf_counter()
+-                logger.info(
+-                    f"Cartesia first audio chunk after {first_chunk_time - start_time:.3f}s"
+-                )
+-                if event_logger:
+-                    event_logger.log_event(event_logger.TTS_FIRST_AUDIO)
+-
+-            audio_buffer.write(chunk)
+-            if playing:
+-                audio_array = np.frombuffer(chunk, dtype=np.int16)
+-                stream.write(audio_array)
+-            else:
+-                remainder_chunks.append(chunk)
++        _iw = _InstantStopWatcher(_abort_once); _iw.start()
++        try:
++            playing = True
++            async for chunk in cartesia_tts.stream(
++                text=text,
++                voice_id=voice_id,
++                sample_rate=sample_rate,
++                speed=speed,
++            ):
++                if not chunk:
++                    continue
++                if playing:
++                    # VM-1676/VM-1739: stop / skip_forward cut immediately + discard.
++                    # VM-1685: skip_back / pause stop playing but keep DRAINING into the
++                    # buffer so the full utterance is captured (see stream_pcm_audio).
++                    snap = get_control_state().snapshot()
++                    if snap.is_stopped:
++                        control_stopped = True
++                        _abort_once()
++                        break
++                    if snap.is_skip_forward:
++                        transport_interrupted = True
++                        _abort_once()
++                        break
++                    if snap.pending_transport:
++                        transport_interrupted = True
++                        drain_reason = "transport"
++                        playing = False
++                        _abort_once()
++                    elif snap.is_paused:
++                        drain_reason = "pause"
++                        playing = False
+ 
+-            chunk_count += 1
+-            bytes_received += len(chunk)
++                if first_chunk_time is None:
++                    first_chunk_time = time.perf_counter()
++                    logger.info(
++                        f"Cartesia first audio chunk after {first_chunk_time - start_time:.3f}s"
++                    )
++                    if event_logger:
++                        event_logger.log_event(event_logger.TTS_FIRST_AUDIO)
+ 
++                audio_buffer.write(chunk)
++                if playing:
++                    audio_array = np.frombuffer(chunk, dtype=np.int16)
++                    stream.write(audio_array)
++                else:
++                    remainder_chunks.append(chunk)
++
++                chunk_count += 1
++                bytes_received += len(chunk)
++        except BaseException as _iex:
++            if _iw.kind is None or not isinstance(_iex, (asyncio.CancelledError, Exception)):
++                raise
++            _iw.swallow(_iex)
++        finally:
++            _iw.stop()
++        if _iw.kind == "stop":
++            control_stopped = True
++        elif _iw.kind == "skip":
++            transport_interrupted = True
++
+         # VM-1676/VM-1739: stop / skip_forward already aborted + discard.
+         if control_stopped:
+             logger.info("Cartesia TTS playback stopped via control channel")
