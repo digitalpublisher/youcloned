@@ -334,11 +334,14 @@
       "fix": "Windows installer no longer counts the Microsoft Store python stub as installed",
       "jon_file": null,
       "card": "youcloned#37",
-      "buyer_file": "PC installer",
+      "buyer_file": "PC installer (youcloned.bnsn.ai/install/windows.ps1, staged in the vault's .youcloned-deploy/install/windows.ps1)",
       "buyers": "yes",
       "mac": "n/a",
-      "pc": "to-port",
-      "check": null
+      "pc": "waiting",
+      "check": {
+        "pc": "$p = (Get-Command python -ErrorAction SilentlyContinue).Source; if (-not $p -or $p -match 'WindowsApps') { exit 1 }; try { & python --version *> $null } catch { exit 1 }; if ($LASTEXITCODE -eq 0) { exit 0 } else { exit 1 }"
+      },
+      "note": "Oct 17: the fix is staged, not live. A GitHub Windows run passed both ways on Oct 16 (stub only: the patched script installs Python; Python present: it skips). Waiting on the deploy word from Jon or Ben (.youcloned-deploy/deploy.sh). The check passes when python on the PC is a working Python, not the Microsoft Store stub."
     },
     {
       "id": "install-intel-mac",
