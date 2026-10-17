@@ -261,13 +261,17 @@
       "id": "agent-d",
       "area": "agents",
       "fix": "60-second limit on every mailbox read",
-      "jon_file": null,
-      "card": null,
-      "buyer_file": "every buyer script that reads a mailbox",
+      "jon_file": "claire_cases.py, claire_dm.py, claire_sendas.py, kelly_followups.py, claire_support.py (imaplib.IMAP4_SSL(host, timeout=60))",
+      "card": "bnsnstack#88",
+      "buyer_file": "every add-on script that opens a mailbox (none ship today); the check fails any one that opens IMAP without timeout=60",
       "buyers": "yes",
-      "mac": "to-port",
-      "pc": "to-port",
-      "check": null
+      "mac": "in-pr",
+      "pc": "in-pr",
+      "check": {
+        "mac": "! grep -rnE --include=*.py \"IMAP4(_SSL)?\\(\" . | grep -v \"timeout=60\" | grep -q .",
+        "pc": "if (Get-ChildItem -Recurse -Filter *.py | Select-String -Pattern 'IMAP4(_SSL)?\\(' | Where-Object { $_.Line -notmatch 'timeout=60' }) { exit 1 } else { exit 0 }"
+      },
+      "note": "Oct 17: the crew reads mail only through Claude's connectors, so no buyer script opens a mailbox today. The check guards the rule from now on: it passes while every IMAP open in the add-on carries timeout=60, and fails the day a script ships one without it."
     },
     {
       "id": "agent-e",
