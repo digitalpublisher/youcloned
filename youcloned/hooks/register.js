@@ -76,6 +76,11 @@ const SERVICE = 'ai.bnsn.youcloned.dashboard'
 // "[Voice] ..." and Claude starts the voice conversation.
 const RELAY = 'http://127.0.0.1:8771/say'
 const SYNC_NOTE = 'Tell them one more thing in a short sentence or two: to get YouCloned updates on their own, open Customize, then Plugins, then + Add, then Manage marketplaces, click the three dots next to youcloned and switch on Sync automatically. The app can show it on when the marketplace is added and still leave it off.'
+// Asked once during setup (Jon's yes, Oct 12, bnsnstack#88): newer Claude Code moved the bypass switch out of /config.
+const NO_PROMPTS_QUESTION = 'Let your clone work without stopping to ask permission at every step?'
+const NO_PROMPTS_NOTE = 'Before the first setup question, ask them this once, in these exact words: "' + NO_PROMPTS_QUESTION + '" '
+  + 'Say in one short sentence what yes means: Claude stops asking before each file change or command on this computer, and they can switch it back in Claude\'s settings any time. '
+  + 'Then call the work_without_prompts tool with allow true for yes or false for no, and go on with setup. Never ask it again.'
 const DEVTOOLS_NOTE = 'Apple\'s developer tools box is waiting behind this window. Click its icon in the Dock (a blue box with a down arrow), then Install. It takes a few minutes and is free.'
 const TALK = 'Talk to Isaac was pressed in YouCloned. Start a voice conversation now: call converse with a short hello and listen (listen_duration_min 8, listen_duration_max 600, so a short pause never ends their turn).'
 const STOPPED = 'The owner pressed Talk again in YouCloned to stop the voice conversation. Do not call converse again until they press Talk. Carry on in text with anything already asked of you.'
@@ -319,6 +324,78 @@ async function cloneFolder($) {
 
 const sep = () => (onMac() ? '/' : '\\')
 
+
+// Claude Code's user settings file, where bypass permission mode is switched on.
+const settingsFile = () => home + '/.claude/settings.json'
+
+// The Claude Code panel in Cursor (and VS Code) ignores bypass mode in ~/.claude/settings.json unless the editor's
+// own user settings allow it (bnsnstack#268): claudeCode.allowDangerouslySkipPermissions + initialPermissionMode.
+const EDITOR_KEYS = { 'claudeCode.allowDangerouslySkipPermissions': true, 'claudeCode.initialPermissionMode': 'bypassPermissions' }
+
+// The user settings file of each editor installed on this computer (its User folder exists).
+async function editorFiles($) {
+  let base = home + '/.config'
+  if (onMac()) base = home + '/Library/Application Support'
+  else if (/^[A-Za-z]:/.test(home)) base = (await $.env.get('APPDATA')) || home + '/AppData/Roaming'
+  const out = []
+  for (const app of ['Cursor', 'Code']) { if (await $.fs.exists(base + '/' + app + '/User')) out.push(base + '/' + app + '/User/settings.json') }
+  return out
+}
+
+async function noPromptsOn($) {
+  try {
+    if (JSON.parse(await $.fs.read(settingsFile()))?.permissions?.defaultMode !== 'bypassPermissions') return false
+    for (const f of await editorFiles($)) { if (JSON.parse(await $.fs.read(f))?.['claudeCode.allowDangerouslySkipPermissions'] !== true) return false }
+    return true
+  } catch { return false }
+}
+
+// Merges keys into one JSON settings file, backing it up first. False when the file isn't plain JSON
+// (an editor file with comments, say): that file is left alone.
+async function mergeSettings($, file, merge) {
+  let before = null
+  let settings = {}
+  if (await $.fs.exists(file)) {
+    before = await $.fs.read(file)
+    try { settings = before.trim() ? JSON.parse(before) : {} } catch { settings = null }
+    if (!settings || typeof settings !== 'object' || Array.isArray(settings)) return false
+    const stamp = new Date(await $.clock.now()).toISOString().replace(/[:.]/g, '-')
+    await $.fs.write(file + '.youcloned-backup-' + stamp, before)
+  }
+  merge(settings)
+  await $.fs.write(file, JSON.stringify(settings, null, 2) + '\n')
+  return before !== null ? 'backup' : 'new'
+}
+
+// The buyer's answer to the one setup question. Yes merges two keys into their settings file and keeps
+// everything else; the file is backed up first. A file that isn't valid JSON is left alone.
+async function setNoPrompts($, allow) {
+  if (!allow) {
+    await $.store.set('noPromptsAsked', 'no')
+    return 'Left as it is: Claude keeps asking before each step. If they change their mind later, they can say so and you call work_without_prompts with allow true.'
+  }
+  const file = settingsFile()
+  const done = await mergeSettings($, file, settings => {
+    settings.permissions = { ...(settings.permissions && typeof settings.permissions === 'object' ? settings.permissions : {}), defaultMode: 'bypassPermissions' }
+    settings.skipDangerousModePermissionPrompt = true
+  })
+  if (!done) {
+    return 'Nothing changed: their Claude settings file (' + file + ') isn\'t in a form YouCloned can safely edit. Tell them in one sentence, and that they can turn it on themselves later in Claude\'s settings.'
+  }
+  let backup = done === 'backup'
+  const skipped = []
+  for (const f of await editorFiles($)) {
+    const ed = await mergeSettings($, f, settings => Object.assign(settings, EDITOR_KEYS))
+    if (!ed) skipped.push(f)
+    else if (ed === 'backup') backup = true
+  }
+  await $.store.set('noPromptsAsked', 'yes')
+  return 'Done: their clone now works without stopping to ask permission, starting with their next new chat. Tell them that in one sentence' + (backup ? ' (their old settings are saved next to the file as a backup)' : '') + ', then go on with setup.'
+    + (skipped.length ? ' One more short sentence for them: their editor settings file (' + skipped.join(', ') + ') has notes in it YouCloned won\'t touch, so for the Claude panel in Cursor they open Cursor\'s settings, search "Claude Code", tick "Allow Dangerously Skip Permissions" and set "Initial Permission Mode" to bypassPermissions.' : '')
+}
+// The dashboard's "Set up your clone" steps 1 to 3, from what is on this computer, never assumed:
+// home = the rules file is saved; tools = git (Apple's developer tools or Homebrew), Obsidian, Node,
+// ffmpeg and Wispr Flow are all there; backup = the clone folder is a git repo with a GitHub remote.
 async function checkSetupSteps($) {
   const has = async (paths) => { for (const p of paths) { if (await $.fs.exists(p)) return true } return false }
   const folder = await cloneFolder($)
@@ -1196,6 +1273,13 @@ export function register(on) {
     } catch (err) { $.ui.log('load_setup not registered: ' + String(err)) }
     try {
       await $.tool.register({
+        name: 'work_without_prompts',
+        description: 'Saves the person\'s answer to the setup question about letting their clone work without permission prompts. With allow true it turns on Claude Code\'s bypass permission mode in their user settings (backing the file up first, keeping every other setting); with allow false it changes nothing. Call it only with the answer they gave.',
+        inputSchema: { type: 'object', properties: { allow: { type: 'boolean', description: 'true if they said yes, false if they said no' } }, required: ['allow'] },
+      })
+    } catch (err) { $.ui.log('work_without_prompts not registered: ' + String(err)) }
+    try {
+      await $.tool.register({
         name: 'helper',
         description: 'Runs one of the owner\'s YouCloned crew helpers (support or inbox) and says what it started. Call it when the person presses Run now or asks a helper to run.',
         inputSchema: { type: 'object', properties: { name: { type: 'string', enum: CREW.map(c => c.name), description: 'Which helper to run' } }, required: ['name'] },
@@ -1323,6 +1407,9 @@ export function register(on) {
   })
 
   on('tool.call', { tool: 'mcp__youcloned__setup_next' }, async ($, e) => ({ result: await setupNext($, e) }))
+  on('tool.call', { tool: 'mcp__youcloned__work_without_prompts' }, async ($, e) => {
+    return { result: await setNoPrompts($, e.allow === true) }
+  })
 
   on('tool.call', { tool: 'mcp__youcloned__load_setup' }, async ($) => {
     if (!skillKeyServer) await checkSkillKey($)
@@ -1333,7 +1420,9 @@ export function register(on) {
     const chosen = await cloneFolder($)
     const where = chosen ? '\n\nFolder: they already chose ' + chosen + ' in setup. Don\'t ask again; leave folder out of save_setup.'
       : '\n\nFolder: the default is ' + (await defaultFolder($)) + ' (the folder this conversation is open in, or YouCloned in their home folder). Offer that as the default, and leave folder out of save_setup when they take it.'
-    return { result: text + where + devtools }
+    let noPrompts = ''
+    try { if (!(await $.store.get('noPromptsAsked')) && !(await noPromptsOn($))) noPrompts = '\n\n' + NO_PROMPTS_NOTE } catch {}
+    return { result: text + where + devtools + noPrompts }
   })
 
   // Learns SkillKey's name the moment Claude itself uses it, for apps whose tool list leaves it out.
