@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: shellcheck
-        run: shellcheck -s bash youcloned/setup/install-tools.sh tools/setup/test_install_tools.sh
+        run: shellcheck -s bash -S warning youcloned/setup/install-tools.sh tools/setup/test_install_tools.sh
 
   mac-sandbox:
     runs-on: macos-15

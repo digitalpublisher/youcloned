@@ -64,6 +64,8 @@ trap cleanup EXIT
 say() { printf '%s\n' "$*"; }
 
 # Shows a path in your user folder as ~/... so the chat never shows a full user path.
+# The ~ is printed for the owner to read, never expanded.
+# shellcheck disable=SC2088
 short_path() { case "$1" in "$HOME"/*) printf '~/%s\n' "${1#"$HOME"/}" ;; *) printf '%s\n' "$1" ;; esac; }
 
 label() {

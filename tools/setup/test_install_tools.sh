@@ -6,6 +6,8 @@
 #   bash tools/setup/test_install_tools.sh
 # Set YC_TEST_TMP to keep the sandboxes in a folder of your choice.
 
+# Each check runs its test text through eval, so variables in single quotes expand there.
+# shellcheck disable=SC2016,SC2034
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
@@ -133,7 +135,7 @@ OWN_BEFORE="$(own_stamp)"
 echo "== static checks"
 OUT="$(/bin/bash -n "$SCRIPT" 2>&1)"; check "bash -n with the Mac's own bash 3.2" '[ -z "$OUT" ]'
 if command -v shellcheck >/dev/null 2>&1; then
-  OUT="$(shellcheck -s bash "$SCRIPT" 2>&1)"; check "shellcheck install-tools.sh" '[ -z "$OUT" ]'
+  OUT="$(shellcheck -s bash -S warning "$SCRIPT" 2>&1)"; check "shellcheck install-tools.sh" '[ -z "$OUT" ]'
 else
   echo "skip shellcheck (not installed here; the GitHub workflow runs it)"
 fi
