@@ -537,7 +537,8 @@ body{padding:0;background:var(--ground)}
         document.getElementById("claudeL").textContent = s.claudeLabel + (stale ? " · not read since " + new Date(s.claudeAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) : "");
       }
       document.getElementById("words").textContent = s.words != null ? fmt(s.words) : "Connect";
-      document.getElementById("wordsL").textContent = s.words != null ? "BNSN words" : "Connect SkillKey to see your words";
+      // SkillKey can be connected before its first word count comes in (clean-Mac run, Oct 17).
+      document.getElementById("wordsL").textContent = s.words != null ? "BNSN words" : s.skillKey ? "SkillKey connected: words show after your first skill" : "Connect SkillKey to see your words";
       if (s.codex && s.codex.left != null) {
         document.getElementById("codexPct").textContent = Math.round(s.codex.left);
         document.getElementById("codexL").textContent = s.codex.label || "Codex plan";

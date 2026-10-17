@@ -547,7 +547,7 @@ async function writeState($) {
     if (!deskSession) {
       try { const old = JSON.parse(await $.fs.read(dataDir() + '/state.json')); mine = { session: old.session, listening: !!old.listening } } catch { mine = {} }
     }
-    await $.fs.write(dataDir() + '/state.json', JSON.stringify({ ...live, name: lastName, ...mine, at: await $.clock.now() }))
+    await $.fs.write(dataDir() + '/state.json', JSON.stringify({ ...live, name: lastName, skillKey: !!skillKeyServer, ...mine, at: await $.clock.now() }))
   } catch {}
 }
 
