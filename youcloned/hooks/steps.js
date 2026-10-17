@@ -55,7 +55,7 @@ export function stepText(step, ctx) {
   switch (step.id) {
     case 'tools':
       return 'Run this with Bash and show the person each line it prints, in plain words: ' + sh('install-tools') + '. ' +
-        'It skips what is already there. If it stops with exit code 3, Apple\'s developer tools box has opened behind the Claude window: tell them to click its icon in the Dock and press Install, wait until they say it finished, then run the same command again. ' +
+        'It skips what is already there. If it stops with exit code 3, something outside Claude needs one click first: on a Mac, Apple\'s developer tools box has opened behind the Claude window (tell them to click its icon in the Dock and press Install); on a PC, the Microsoft Store page for App Installer has opened (tell them to press Get or Update). Wait until they say it finished, then run the same command again. ' +
         'Homebrew may ask for their computer password in the command\'s output: tell them to type it where Claude shows the prompt, never in the chat. When it prints ALL TOOLS READY, call setup_next.'
     case 'home':
       return TWO_PATHS + 'Ask one short question: do you already have an Obsidian vault or a folder for your work you want your clone to live in, or should I make a new one? ' +
@@ -83,10 +83,15 @@ export function stepText(step, ctx) {
         'Then read ' + q(ctx.root + (ctx.mac ? '/library/setup.md' : '\\library\\setup.md')) + ' and follow it step by step. The env file is ' + ctx.envFile + '. ' +
         'It needs Supabase\'s connector in Claude. When its last check passes, call setup_next.'
     case 'voice': {
-      const setup = ctx.mac ? '/bin/bash ' + q(ctx.root + '/voice/setup-voice.sh')
-        : 'powershell -NoProfile -ExecutionPolicy Bypass -File ' + q(ctx.root + '\\voice\\setup-voice.ps1')
-      return 'Run the voice setup with Bash: ' + setup + '. It installs the free voice and tells them when to quit and reopen Claude. ' +
-        'When its check passes, call setup_next. If they want to do the voice later, call setup_next with skip set to voice.'
+      // The voice setup asks questions and needs Claude closed for a moment, so it runs in its own Terminal
+      // (PowerShell) window, never inside this chat (Codex review 1, Oct 17).
+      const as = (x) => String(x).replace(/(["\\])/g, '\\$1')
+      const open = ctx.mac
+        ? "/usr/bin/osascript -e 'tell application \"Terminal\" to do script \"/bin/bash \\\"" + as(ctx.root + '/voice/setup-voice.sh') + "\\\"\"' -e 'tell application \"Terminal\" to activate'"
+        : 'powershell -NoProfile -Command "Start-Process powershell -ArgumentList \'-NoExit\',\'-NoProfile\',\'-ExecutionPolicy\',\'Bypass\',\'-File\',\'' + String(ctx.root + '\\voice\\setup-voice.ps1').replace(/'/g, "''") + '\'"'
+      return 'The voice setup runs in its own window because it asks two quick questions and needs Claude closed for a moment. Run this with Bash to open it: ' + open + '. ' +
+        'Tell them, in two short sentences: a window opens and asks them to pick a man\'s or a woman\'s voice, then asks them to quit Claude (Command Q on a Mac); when it says the voice is ready, they open Claude again and type "finish my setup". ' +
+        'Then stop and wait. If they want to do the voice later, call setup_next with skip set to voice.'
     }
     case 'feed': {
       const feed = ctx.root + (ctx.mac ? '/library/feed.py' : '\\library\\feed.py')
@@ -104,14 +109,14 @@ export function setupText(status, skipped, ctx) {
   const p = progress(status, skipped)
   const next = nextStep(status, skipped)
   const list = STEPS.map((s, i) => (i + 1) + '. ' + s.title + ': ' + (status[s.id] ? 'done' : skipped.has(s.id) ? 'put off' : 'not yet') +
-    (ctx.detail && ctx.detail[s.id] ? ' (' + ctx.detail[s.id] + ')' : '')).join('\\n')
+    (ctx.detail && ctx.detail[s.id] ? ' (' + ctx.detail[s.id] + ')' : '')).join('\n')
   if (!next) {
-    return 'YouCloned setup: ' + p.done + ' of ' + p.total + ' steps done' + (p.skipped.length ? ', put off: ' + p.skipped.join(', ') : '') + '.\\n' + list +
-      '\\n\\nTell them they are all set, in one or two warm sentences, and what they can ask you to do first.' + (p.skipped.length ? ' Remind them they can say "finish my setup" any time to do what they put off.' : '')
+    return 'YouCloned setup: ' + p.done + ' of ' + p.total + ' steps done' + (p.skipped.length ? ', put off: ' + p.skipped.join(', ') : '') + '.\n' + list +
+      '\n\nTell them they are all set, in one or two warm sentences, and what they can ask you to do first.' + (p.skipped.length ? ' Remind them they can say "finish my setup" any time to do what they put off.' : '')
   }
   const n = STEPS.indexOf(next) + 1
-  return 'YouCloned setup: ' + p.done + ' of ' + p.total + ' steps done.\\n' + list +
-    '\\n\\nNext is step ' + n + ', ' + next.title + ': ' + next.why + '\\n' +
-    'Tell them in one short sentence which step this is and why it matters, then do it:\\n' + stepText(next, ctx) +
-    '\\n\\nDo only this step now. Never skip ahead, and never call a step done yourself: setup_next checks it on this computer.'
+  return 'YouCloned setup: ' + p.done + ' of ' + p.total + ' steps done.\n' + list +
+    '\n\nNext is step ' + n + ', ' + next.title + ': ' + next.why + '\n' +
+    'Tell them in one short sentence which step this is and why it matters, then do it:\n' + stepText(next, ctx) +
+    '\n\nDo only this step now. Never skip ahead, and never call a step done yourself: setup_next checks it on this computer.'
 }

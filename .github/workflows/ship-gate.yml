@@ -75,7 +75,18 @@ jobs:
 
       - name: Ship gate on youcloned/
         if: ${{ !cancelled() }}
-        run: node tools/ship-gate/ship-gate.mjs youcloned
+        # A pull request fails on anything that would ship: keys, author paths, emails, denylist words.
+        # Two kinds wait for the release gate instead (tools/release): made-up paths in tests/ fixtures,
+        # and fix-list rows still being built. release.mjs refuses a release while either is open.
+        run: |
+          node --input-type=module -e '
+            import { scan } from "./tools/ship-gate/ship-gate.mjs";
+            const all = scan("youcloned");
+            const ships = all.filter(f => !String(f.file).startsWith("tests/") && !String(f.rule).startsWith("fix-list-"));
+            for (const f of ships) console.log(`${f.file}:${f.line} ${f.rule} [masked]`);
+            console.log(`Ship gate: ${ships.length} finding(s) that would ship, ${all.length - ships.length} left for the release gate.`);
+            process.exit(ships.length ? 1 : 0);
+          '
 
       - name: Ship gate tests
         if: ${{ !cancelled() }}

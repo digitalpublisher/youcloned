@@ -272,6 +272,14 @@ async function refreshLive($, withWords) {
     const w = (u.rateLimits || []).reduce((a, r) => (!a || r.percentUsed > a.percentUsed ? r : a), null)
     if (w) {
       live.claudePct = w.percentUsed
+      // The plan warning from the 49 jobs list (night one): once per reset window, at 90% used.
+      try {
+        const key = String(w.kind) + ':' + String(w.resetsAt || '')
+        if (w.percentUsed >= 90 && (await $.store.get('planWarned')) !== key) {
+          await $.store.set('planWarned', key)
+          $.ui.toast('Your Claude plan is ' + Math.round(w.percentUsed) + '% used. Finish big jobs first, and start fresh chats to make it last.')
+        }
+      } catch {}
       const span = w.kind === 'seven_day' ? 'this week' : w.kind === 'five_hour' ? 'this 5 hours' : 'spend limit'
       let label = 'Claude plan · ' + span
       if (w.resetsAt) {
@@ -323,6 +331,16 @@ async function cloneFolder($) {
 }
 
 const sep = () => (onMac() ? '/' : '\\')
+
+// Normal chats search the owner's library too, not only the helpers (Oct 17): before answering about the owner's
+// business, offers, customers or past work, look it up there. The command never shows the token.
+let pluginRoot = ''
+function LIBRARY_NOTE() {
+  if (!pluginRoot) return ''
+  const py = onMac() ? 'python3' : 'py -3'
+  return '\n\n## Your library\n\nWhen the owner asks about their business, offers, customers, past emails, pages, books, courses or videos, search their library first and answer from what it finds, naming the source: ' +
+    py + ' "' + pluginRoot + (onMac() ? '/library/feed.py' : '\\library\\feed.py') + '" search "<their question in a few words>". If the library isn\'t set up yet, say so and offer the setup step.'
+}
 
 
 // Claude Code's user settings file, where bypass permission mode is switched on.
@@ -416,6 +434,13 @@ async function checkSetupSteps($) {
   }
   st.home = !!folder && ((await $.fs.exists(folder + '/.youcloned-folder')) || (await $.fs.exists(folder + '/' + RULES_NAME)))
   st.protection = (await $.fs.exists(home + '/.youcloned/git-hooks/pre-commit')) && (await $.fs.exists(home + '/.youcloned/lib/secret-rules.mjs'))
+  if (st.protection) {
+    // --verify plants a fake key in a scratch repository and passes only when the commit is refused.
+    const script = root + (onMac() ? '/setup/guards/install-git-hooks.mjs' : '\\setup\\guards\\install-git-hooks.mjs')
+    const r = onMac() ? await runWith($, ['/bin/bash', '-lc', 'node "$0" --verify', script], { timeoutMs: 60000 })
+      : await runWith($, ['node', script, '--verify'], { timeoutMs: 60000 })
+    st.protection = r.exitCode === 0
+  }
   if (!skillKeyServer) { try { await checkSkillKey($) } catch {} }
   st.skillkey = !!skillKeyServer
   st.interview = !!folder && (await $.fs.exists(folder + '/' + RULES_NAME))
@@ -424,6 +449,7 @@ async function checkSetupSteps($) {
     const names = (await $.fs.read(root + '/skills-pack.txt')).split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'))
     st.skills = names.length > 0
     for (const n of names) { if (!(await $.fs.exists(home + '/.claude/skills/' + n + '/SKILL.md'))) { st.skills = false; break } }
+    if (await $.fs.exists(home + '/.claude/skills/youcloned-setup/SKILL.md')) st.skills = false // the old setup skill, retired by install-skills
   } catch {}
   st.backup = false
   if (folder) {
@@ -437,10 +463,12 @@ async function checkSetupSteps($) {
     try {
       const env = await $.fs.read(folder + '/.env')
       st.library = /^YOUCLONED_LIBRARY_URL=\S+/m.test(env) && /^YOUCLONED_LIBRARY_TOKEN=\S+/m.test(env)
+        && (await $.fs.exists(dataDir() + '/library-ok')) // written by library/smoke-test.py when add, find and remove all passed
     } catch {}
   }
-  st.voice = await $.fs.exists(home + '/.voicemode/voicemode.env')
-  st.feed = !!folder && (await $.fs.exists(folder + '/Library/index.md'))
+  st.voice = (await $.fs.exists(home + '/.voicemode/voicemode.env'))
+    && (await has([home + '/.local/bin/voicemode', home + '/.local/bin/voicemode.exe', home + '/AppData/Roaming/uv/tools/voice-mode']))
+  st.feed = !!folder && (await $.fs.exists(folder + '/Library/index.md')) && (await $.fs.exists(folder + '/Library/.fed.json'))
   let skipped = []
   try { const s = await $.store.get('skipped'); if (Array.isArray(s)) skipped = s.filter(x => CAN_SKIP.has(x)) } catch {}
   const next = nextStep(st, new Set(skipped))
@@ -459,8 +487,9 @@ async function setupNext($, e) {
     try { await $.fs.write(f + '/.youcloned-folder', 'This folder is a YouCloned clone home.\n') } catch (err) { return 'Could not make ' + f + ': ' + String(err).slice(0, 200) }
     await $.store.set('folder', f)
     // The starter skills and the library scripts find the clone folder here (first line, full path).
-    try { await $.fs.write(dataDir() + '/vault-path', f + '\n') } catch {}
+    try { await $.fs.write(dataDir() + '/vault-path', f + '\n') } catch (err) { return 'Saved the folder, but could not record it for the skills (' + String(err).slice(0, 160) + '). Tell the person in one sentence, then call setup_next with the same folder again.' }
   }
+  if (e && e.resume) await $.store.set('skipped', []) // "finish my setup": the steps they put off come back
   if (e && e.skip) {
     if (!CAN_SKIP.has(e.skip)) return 'The ' + e.skip + ' step can\'t be put off: every step after it needs it.'
     let s = []
@@ -1219,6 +1248,7 @@ export function register(on) {
     interactive = e.isInteractive
     await loadState($)
     try { version = JSON.parse(await $.fs.read($.plugin.root + '/.claude-plugin/plugin.json')).version || '' } catch {}
+    pluginRoot = $.plugin.root
     try { await refreshDrafts($) } catch {}
     await checkSkillKey($)
     try { const saved = await $.store.get('pins'); if (Array.isArray(saved)) pins = saved.filter(k => typeof k === 'string') } catch {}
@@ -1244,6 +1274,7 @@ export function register(on) {
           properties: {
             folder: { type: 'string', description: 'The clone folder the person chose, as a full path' },
             skip: { type: 'string', enum: [...CAN_SKIP], description: 'A step the person wants to do later' },
+            resume: { type: 'boolean', description: 'True when the person says "finish my setup": brings back the steps they put off' },
           },
         },
       })
@@ -1374,7 +1405,7 @@ export function register(on) {
     if (!rules) return result
     const running = version ? 'YouCloned version ' + version + ' is running in this conversation (tell the person this number if they ask which version they have).\n\n' : ''
     const block = { name: 'youcloned', text: running + 'The owner\'s YouCloned rules, from ' + project + '/' + RULES_NAME +
-      '. Follow them in everything you write for this person.\n\n' + rules + '\n\nRules every YouCloned clone follows:\n\n' + UNIVERSAL_RULES }
+      '. Follow them in everything you write for this person.\n\n' + rules + '\n\nRules every YouCloned clone follows:\n\n' + UNIVERSAL_RULES + LIBRARY_NOTE() }
     return { ...result, blocks: [...result.blocks, block] }
   })
 

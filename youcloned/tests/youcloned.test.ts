@@ -233,10 +233,11 @@ test('setup_next walks the night-one steps in order and checks each one on this 
   const files: Record<string, string> = {}
   const present = new Set<string>()
   let toolsOk = false
+  let verifyOk = false
   const { writes } = sessionStubs(on, { cwd: '/Users/pat/', skillKey: null,
     read: (path) => files[path] ?? writes.get(path),
     exists: (path) => present.has(path) || writes.has(path) || (path.endsWith('/setup/install-tools.sh') ? true : undefined),
-    process: (argv) => ({ exitCode: argv[1]?.endsWith('install-tools.sh') ? (toolsOk ? 0 : 1) : 1, stdout: '', stderr: '' }) })
+    process: (argv) => ({ exitCode: argv[1]?.endsWith('install-tools.sh') ? (toolsOk ? 0 : 1) : argv.join(' ').includes('--verify') ? (verifyOk ? 0 : 1) : 1, stdout: '', stderr: '' }) })
   await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/Users/pat/' })
   let out = (await $.tool.call({ tool: 'mcp__youcloned__setup_next' })).result
   expect(out).toMatch(/0 of 10 steps done/)
@@ -254,12 +255,21 @@ test('setup_next walks the night-one steps in order and checks each one on this 
   expect(out).toMatch(/Next is step 3, Protection/)
   expect(out).toMatch(/install-git-hooks\.mjs" --install/)
   present.add('/Users/pat/.youcloned/git-hooks/pre-commit'); present.add('/Users/pat/.youcloned/lib/secret-rules.mjs')
+  // The hook files alone don't count: the check must prove a planted key gets refused.
+  out = (await $.tool.call({ tool: 'mcp__youcloned__setup_next' })).result
+  expect(out).toMatch(/Next is step 3, Protection/)
+  verifyOk = true
   out = (await $.tool.call({ tool: 'mcp__youcloned__setup_next' })).result
   expect(out).toMatch(/Next is step 4, SkillKey/)
   expect(out).toMatch(/Copy SkillKey address/)
   // The interview can't be put off, and neither can anything else but voice and feed.
   out = (await $.tool.call({ tool: 'mcp__youcloned__setup_next', skip: 'interview' })).result
   expect(out).toMatch(/can't be put off/)
+  // Voice and feeding can be put off, and "finish my setup" brings them back.
+  await $.tool.call({ tool: 'mcp__youcloned__setup_next', skip: 'voice' })
+  expect(writes.size).toBeGreaterThan(0)
+  const back = (await $.tool.call({ tool: 'mcp__youcloned__setup_next', resume: true })).result
+  expect(back).not.toMatch(/put off/)
 })
 
 test('the interview saves into the folder setup_next chose, without asking again', async ($, on) => {

@@ -84,6 +84,16 @@ def main():
     for name, passed, status, body in results:
         print(("PASS " if passed else "FAIL ") + name + ("" if passed else " (status " + str(status) + ": " + str(body.get("error", "")) + ")"))
         failed = failed or not passed
+    # Setup's Library step counts as done only after this passes (the add-on checks for this file).
+    marker = Path.home() / ".youcloned" / "library-ok"
+    if failed:
+        try:
+            marker.unlink()
+        except OSError:
+            pass
+    else:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text("smoke test passed\n")
     sys.exit(1 if failed else 0)
 
 
