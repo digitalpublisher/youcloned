@@ -345,6 +345,53 @@ test('the support crew gets only the questions that have no draft yet', async ($
   expect(spawned[0]).not.toMatch(/maria\.txt/)
 })
 
+test('a skipped draft still counts as answered, so its question is not drafted again', async ($, on) => {
+  const dir = PROJECT + '/crew/support'
+  const spawned: string[] = []
+  sessionStubs(on, {
+    project: PROJECT,
+    files: { [dir + '/inbox']: '', [dir + '/skipped']: '', [dir + '/skipped/a.md']: 'Question: maria.txt\nCustomer: Maria\n\nHi' },
+    lists: { [dir + '/inbox']: ['maria.txt', 'tom.txt'], [dir + '/skipped']: ['a.md'] },
+  })
+  on('agent.spawn', ($, e) => { spawned.push(e.prompt); return { agentId: 'a1', model: 'x' } })
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  await $.command.run({ command: 'youcloned', args: 'crew support' })
+  expect(spawned[0]).toMatch(/inbox\/tom\.txt/)
+  expect(spawned[0]).not.toMatch(/maria\.txt/)
+})
+
+test('the Bridge: waiting drafts reach the dashboard, Approve and Edit ask in the chat and wait for the yes, an unlisted draft goes nowhere', async ($, on) => {
+  const here = '/Users/pat/Documents/Garden'
+  const dir = here + '/crew/support'
+  const jobs = '/Users/pat/.youcloned/jobs.jsonl'
+  const job = (text: string) => JSON.stringify({ text }) + '\n'
+  const files: Record<string, string> = {
+    [here + '/YOUCLONED.md']: '# rules', [dir + '/drafts']: '', [dir + '/drafts/maria reply.md']: 'Question: maria.txt\nTo: maria@example.com\n\nHi Maria,\n\nHere is how the course works.',
+    [jobs]: job('/youcloned draft approve support maria%20reply.md') + job('/youcloned draft edit support maria%20reply.md') +
+      job('/youcloned draft approve support ..%2F..%2FYOUCLONED.md') + job('/youcloned draft approve inbox maria%20reply.md'),
+  }
+  const toasts: string[] = []
+  const submitted: string[] = []
+  const { writes, clock } = sessionStubs(on, { project: here, cwd: here, files, toasts, lists: { [dir + '/drafts']: ['maria reply.md'] },
+    read: (path) => writes.get(path) ?? files[path] })
+  on('http.fetch', () => ({ value: { status: 200, ok: true, headers: {}, text: '{}' } }))
+  on('prompt.submit', ($, e) => { submitted.push(String(e.text)); return { text: String(e.text) } })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: here })
+  await clock.advance(25000)
+  const state = JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}')
+  const support = state.crew.find((c: any) => c.name === 'support')
+  expect(support.dir).toBe(dir)
+  expect(support.waiting).toBe(1)
+  expect(support.drafts).toEqual([{ name: 'maria reply.md', preview: 'Question: maria.txt To: maria@example.com Hi Maria, Here is how the course works.' }])
+  expect(state.crew.find((c: any) => c.name === 'inbox').waiting).toBe(0)
+  const asks = submitted.filter(t => t.includes("helper's draft"))
+  expect(asks.length).toBe(2)
+  expect(asks[0]).toContain(dir + '/drafts/maria reply.md')
+  expect(asks[0]).toMatch(/wait for my yes\. Nothing goes out before I say yes/)
+  expect(asks[1]).toMatch(/^Edit my Support helper's draft .*Send nothing\.$/)
+  expect(toasts.filter(t => t === 'That draft is no longer waiting').length).toBe(2)
+})
+
 test('after setup YouCloned shows everywhere; /youcloned off and on switch it', async ($, on) => {
   const { store } = sessionStubs(on, { project: PROJECT })
   store.set('everywhere', true)

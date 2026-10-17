@@ -26,6 +26,7 @@ let tab = 'home'
 let codex = { busy: false, note: '' }
 let crew = {}               // name -> { running, lastRun, note, every, drafts }
 const crewIds = new Map()   // agentId -> crew name
+const NEEDS_SHOWN = 12      // drafts per helper the dashboard's Needs You list shows
 const notCrew = new Set()
 const gatePassed = new Set() // tool_use_ids of crew calls the gate allowed
 let skillKey = false        // the SkillKey connector is on in this session
@@ -208,6 +209,14 @@ async function runJob($, text) {
   if (word === 'setup') return startSetup($)
   if (word === 'codex') return codexButton($)
   if (word === 'crew') { $.ui.toast(await crewNow($, (args.split(/\s+/)[1] || '').toLowerCase())); return }
+  if (word === 'draft') {
+    const [, action, name, file] = args.split(/\s+/)
+    let named = String(file || '')
+    try { named = decodeURIComponent(named) } catch {} // the dashboard sends the file name encoded, so a space survives
+    const job = draftJob(String(action || '').toLowerCase(), String(name || '').toLowerCase(), named)
+    if (job) await $.prompt.submit({ text: job, asUser: true })
+    else $.ui.toast('That draft is no longer waiting')
+  }
 }
 
 // Going through a helper's drafts with the owner, one at a time; nothing goes out without their yes.
@@ -287,6 +296,7 @@ async function refreshLive($, withWords) {
   try {
     const name = project ? ((await readRules($)) || '').match(/^#+\s*Who I am\s*\n+([^\n]+)/m) : null
     lastName = name ? name[1].trim().split(/[ ,]/)[0] : undefined
+    try { await refreshDrafts($) } catch {}
     await writeState($)
   } catch {}
   $.ui.invalidate('ui.render')
@@ -322,7 +332,7 @@ async function writeState($) {
     if (!deskSession) {
       try { const old = JSON.parse(await $.fs.read(dataDir() + '/state.json')); mine = { session: old.session, listening: !!old.listening } } catch { mine = {} }
     }
-    await $.fs.write(dataDir() + '/state.json', JSON.stringify({ ...live, name: lastName, ...mine, at: await $.clock.now() }))
+    await $.fs.write(dataDir() + '/state.json', JSON.stringify({ ...live, name: lastName, ...mine, crew: crewState(), at: await $.clock.now() }))
   } catch {}
 }
 
@@ -609,7 +619,32 @@ async function refreshDrafts($) {
       names = entries.filter(x => x.kind === 'file' && x.name.endsWith('.md')).sort((a, b) => b.mtimeMs - a.mtimeMs).map(x => x.name)
     }
     crew[c.name].drafts = names
+    // The dashboard's Needs You list shows the newest drafts with the start of each one.
+    const shown = []
+    for (const name of names.slice(0, NEEDS_SHOWN)) {
+      let text = ''
+      try { text = String(await $.fs.read(dir + '/drafts/' + name)) } catch {}
+      shown.push({ name, preview: text.replace(/\s+/g, ' ').trim().slice(0, 280) })
+    }
+    crew[c.name].shown = shown
   }
+}
+
+// What the dashboard's Bridge shows for each helper: its live state and the drafts waiting on the owner.
+function crewState() {
+  return CREW.map(c => ({ name: c.name, title: c.title, what: c.what, running: !!crew[c.name]?.running, lastRun: crew[c.name]?.lastRun || 0,
+    note: crew[c.name]?.note || '', waiting: (crew[c.name]?.drafts || []).length, drafts: crew[c.name]?.shown || [], dir: crewDir(c.name) }))
+}
+
+// Approve and Edit from the dashboard's Needs You list. Approve never sends: Claude shows the owner what goes
+// where and waits for their yes. Only a draft the add-on listed itself can be named, so no other file is reached.
+function draftJob(action, name, file) {
+  const c = CREW.find(x => x.name === name)
+  if (!c || !project || !(crew[name]?.drafts || []).includes(file)) return null
+  const path = crewDir(name) + '/drafts/' + file
+  if (action === 'approve') return 'Approve my ' + c.title + ' helper\'s draft ' + path + '. Show me exactly what it says and where it goes (who it is to, and from which account), then wait for my yes. Nothing goes out before I say yes. Once it has gone out, move it into the "done" folder next to drafts.'
+  if (action === 'edit') return 'Edit my ' + c.title + ' helper\'s draft ' + path + '. Ask me what to change, rewrite it in the same file, and show me the new version. Send nothing.'
+  return null
 }
 
 // Question files in the support inbox that no draft names on its "Question:" line yet.
@@ -618,7 +653,7 @@ async function waitingQuestions($) {
   if (!(await $.fs.exists(dir + '/inbox'))) return []
   const questions = (await $.fs.list(dir + '/inbox')).filter(x => x.kind === 'file' && !x.name.startsWith('.')).map(x => x.name)
   const answered = new Set()
-  for (const folder of ['/drafts', '/done']) {
+  for (const folder of ['/drafts', '/done', '/skipped']) {
     if (!(await $.fs.exists(dir + folder))) continue
     for (const d of await $.fs.list(dir + folder)) {
       if (d.kind !== 'file' || !d.name.endsWith('.md')) continue

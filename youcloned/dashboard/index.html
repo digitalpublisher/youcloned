@@ -171,6 +171,11 @@ p{margin:0}
 .need b{font-weight:600}
 .need small{display:block;color:var(--ink-3);font-size:12px}
 .need .pill{margin-left:auto}
+.need.nd{align-items:flex-start;flex-wrap:wrap}
+.need.nd>div:first-child{flex:1 1 260px;min-width:0}
+.need.nd small{overflow-wrap:anywhere}
+.need .acts{display:flex;gap:6px;flex-wrap:wrap;margin-left:auto}
+.empty{color:var(--ink-3);font-size:13px}
 .apps{display:flex;gap:10px;overflow-x:auto;padding-bottom:4px;scrollbar-width:thin}
 .app{flex:0 0 160px;display:flex;flex-direction:column;gap:8px}
 .app .plate{height:48px;border-radius:9px;background:var(--plate);display:grid;place-items:center;padding:0 12px}
@@ -318,15 +323,11 @@ body{padding:0;background:var(--ground)}
         </div>
 
         <div class="duo">
-          <div class="panel"><div class="ph"><span class="hic" style="--hc:var(--accent)"><svg viewBox="0 0 24 24"><path d="M12 3v18M16 7.5c0-1.9-1.8-3-4-3s-4 1.1-4 3 1.8 2.6 4 3 4 1.2 4 3.2-1.8 3.3-4 3.3-4-1.2-4-3.1"/></svg></span><h2>Made or saved this week</h2><span class="sample">Sample</span></div>
+          <div class="panel"><div class="ph"><span class="hic" style="--hc:var(--accent)"><svg viewBox="0 0 24 24"><path d="M12 3v18M16 7.5c0-1.9-1.8-3-4-3s-4 1.1-4 3 1.8 2.6 4 3 4 1.2 4 3.2-1.8 3.3-4 3.3-4-1.2-4-3.1"/></svg></span><h2>Made or saved this week</h2><span class="sample">Sample · coming</span></div>
             <div class="pb"><div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><span class="num big">$7,514</span><span class="pill">Up 17%</span></div>
               <div class="mini-split"><span><i style="background:var(--accent)"></i>Sales $4,120</span><span><i style="background:var(--violet)"></i>Time $3,180</span><span><i style="background:var(--amber)"></i>Bills $214</span></div></div></div>
-          <div class="panel"><div class="ph"><span class="hic" style="--hc:var(--amber)"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.4"/><path d="M3.5 19c.7-3 2.8-4.5 5.5-4.5s4.8 1.5 5.5 4.5M15 14.3c2.4 0 4.2 1.3 5 3.7"/></svg></span><h2>Your crew</h2><span class="sample">Sample</span><span class="meta">4 need you</span></div>
-            <div class="pb">
-              <div class="need"><div><b>Inbox helper</b><small>Sorted 38 emails</small></div><span class="pill warn">3 need you</span></div>
-              <div class="need"><div><b>Support helper</b><small>Answers from your rules</small></div><span class="pill">4 drafts</span></div>
-              <div class="need"><div><b>Comment helper</b><small>Skipped two trolls</small></div><span class="pill">12 drafts</span></div>
-            </div></div>
+          <div class="panel" id="needsHome"><div class="ph"><span class="hic" style="--hc:var(--amber)"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.4"/><path d="M3.5 19c.7-3 2.8-4.5 5.5-4.5s4.8 1.5 5.5 4.5M15 14.3c2.4 0 4.2 1.3 5 3.7"/></svg></span><h2>Needs you</h2><span class="meta" id="needsCount">Checking your helpers</span></div>
+            <div class="pb" id="needsTop"><p class="empty">Nothing needs you right now. Your helpers' drafts show up here.</p></div></div>
         </div>
 
         <div class="panel"><div class="ph"><span class="hic" style="--hc:var(--accent)"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span><h2>Your BNSN apps</h2></div>
@@ -369,13 +370,13 @@ body{padding:0;background:var(--ground)}
 
       <!-- MONEY -->
       <div class="vbody" data-v="money" hidden>
-        <div class="panel"><div class="ph"><span class="hic" style="--hc:var(--accent)"><svg viewBox="0 0 24 24"><path d="M12 3v18M16 7.5c0-1.9-1.8-3-4-3s-4 1.1-4 3 1.8 2.6 4 3 4 1.2 4 3.2-1.8 3.3-4 3.3-4-1.2-4-3.1"/></svg></span><h2>Made or saved this week</h2><span class="sample">Sample</span><span class="meta">Sales from Stripe · hours from your jobs</span></div>
+        <div class="panel"><div class="ph"><span class="hic" style="--hc:var(--accent)"><svg viewBox="0 0 24 24"><path d="M12 3v18M16 7.5c0-1.9-1.8-3-4-3s-4 1.1-4 3 1.8 2.6 4 3 4 1.2 4 3.2-1.8 3.3-4 3.3-4-1.2-4-3.1"/></svg></span><h2>Made or saved this week</h2><span class="sample">Sample · coming</span><span class="meta">Sales from Stripe · hours from your jobs</span></div>
           <div class="pb"><div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><span class="num big">$7,514</span><span class="pill">Up 17% on last week</span></div>
             <div class="mini-split"><span><i style="background:var(--accent)"></i>Sales $4,120</span><span><i style="background:var(--violet)"></i>Time saved $3,180 (26.5 hours at $120)</span><span><i style="background:var(--amber)"></i>Bills found $214</span></div>
             <div class="chart" id="trend" style="margin-top:12px"></div></div></div>
         <div class="duo">
-          <div class="panel"><div class="ph"><span class="hic" style="--hc:var(--accent)"><svg viewBox="0 0 24 24"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></svg></span><h2>Sales by product</h2><span class="sample">Sample</span></div><div class="pb" id="bars"></div></div>
-          <div class="panel"><div class="ph"><span class="hic" style="--hc:var(--amber)"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></svg></span><h2>Money finder</h2><span class="sample">Sample</span></div>
+          <div class="panel"><div class="ph"><span class="hic" style="--hc:var(--accent)"><svg viewBox="0 0 24 24"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></svg></span><h2>Sales by product</h2><span class="sample">Sample · coming</span></div><div class="pb" id="bars"></div></div>
+          <div class="panel"><div class="ph"><span class="hic" style="--hc:var(--amber)"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></svg></span><h2>Money finder</h2><span class="sample">Sample · coming</span></div>
             <div class="pb">
               <div class="find"><b>Old email tool</b><span class="amt">$183/mo</span><small>Your list moved in June</small></div>
               <div class="find"><b>Zoom Pro</b><span class="amt">$16/mo</span><small>No meetings in 60 days</small></div>
@@ -385,14 +386,18 @@ body{padding:0;background:var(--ground)}
       </div>
       <!-- CREW -->
       <div class="vbody" data-v="crew" hidden>
-        <div class="vhead"><h2>Your crew</h2><span class="sample">Sample</span><p>Each helper has one job, a playbook and a passed test. None of them can send, post or spend without your OK.</p></div>
-        <div class="crewgrid">
-          <div class="panel bot"><div class="bt"><b>Inbox helper</b><span class="pill warn">3 need you</span></div><p>Sorts Gmail every 30 minutes and drafts replies in your voice.</p><div class="score"><span class="sb"><i style="width:99%"></i></span>412 of 416 test questions</div><button class="btn sm primary" type="button">Review 3 emails</button></div>
-          <div class="panel bot"><div class="bt"><b>Support helper</b><span class="pill">4 drafts</span></div><p>Answers customer questions from your rules. Hands refunds to you.</p><div class="score"><span class="sb"><i style="width:99.7%"></i></span>1,212 of 1,216 test questions</div><button class="btn sm primary" type="button">Review 4 drafts</button></div>
-          <div class="panel bot"><div class="bt"><b>Comment helper</b><span class="pill">12 drafts</span></div><p>Drafts YouTube replies, skips trolls and arguments.</p><div class="score"><span class="sb"><i style="width:98%"></i></span>196 of 200 test questions</div><button class="btn sm" type="button">Review 12 replies</button></div>
-          <div class="panel bot"><div class="bt"><b>Clip cutter</b><span class="pill">Waiting</span></div><p>Cuts 20 clips from every new video for Shorts and Reels.</p><div class="score"><span class="sb"><i style="width:100%"></i></span>40 of 40 test clips</div></div>
-          <div class="panel bot"><div class="bt"><b>Watchdog</b><span class="pill">All on time</span></div><p>Checks every helper ran and tells you when one didn't.</p><div class="score"><span class="sb"><i style="width:100%"></i></span>25 of 25 test checks</div></div>
-          <div class="panel bot add"><b>Add a helper</b><p>Pick one job. Your clone writes the playbook and the hardest test it can.</p><button class="btn sm" type="button">Add a helper</button></div>
+        <div class="vhead"><h2>Your crew</h2><p>Each helper has one job and writes drafts only. None of them can send, post or spend without your OK.</p></div>
+        <div class="crewgrid" id="crewLive">
+          <div class="panel bot"><div class="bt"><b>Support helper</b><span class="pill">Checking</span></div><p>Drafts answers to customer questions in your voice</p></div>
+          <div class="panel bot"><div class="bt"><b>Inbox helper</b><span class="pill">Checking</span></div><p>Sorts your new email and drafts the replies that need you</p></div>
+        </div>
+        <div class="panel" style="margin-top:12px"><div class="ph"><h2>Needs you</h2><span class="meta" id="needsCountAll"></span></div>
+          <div class="pb" id="needsAll"><p class="empty">Nothing needs you right now.</p></div></div>
+        <div class="crewgrid" style="margin-top:12px">
+          <div class="panel bot"><div class="bt"><b>Comment helper</b><span class="pill">Coming</span></div><p>Drafts YouTube replies, skips trolls and arguments.</p></div>
+          <div class="panel bot"><div class="bt"><b>Clip cutter</b><span class="pill">Coming</span></div><p>Cuts clips from every new video for Shorts and Reels.</p></div>
+          <div class="panel bot"><div class="bt"><b>Watchdog</b><span class="pill">Coming</span></div><p>Checks every helper ran and tells you when one didn't.</p></div>
+          <div class="panel bot add"><b>Add a helper</b><p>Pick one job. Your clone writes the playbook and the hardest test it can.</p><button class="btn sm" type="button" disabled>Coming</button></div>
         </div>
       </div>
 
@@ -536,9 +541,71 @@ body{padding:0;background:var(--ground)}
         document.getElementById("st-bar").style.width = Math.round(n * 100 / 9) + "%";
       }
       if ("listening" in s && Date.now() - talkAt > 8000) hero.classList.toggle("live", !!s.listening);
+      if (s.crew) bridge(s.crew);
     }).catch(function () {});
   }
   load(); setInterval(load, 2000);
+
+  // The Bridge: each helper's live state and every draft waiting on the owner. Approve and Edit go to
+  // Claude's chat, where nothing goes out before the owner's yes; Skip moves the draft into skipped/.
+  var skipped = {}, lastCrew = [];
+  function ago(ms) {
+    if (!ms) return "Not run yet";
+    var m = Math.round((Date.now() - ms) / 60000);
+    if (m < 1) return "Ran just now";
+    if (m < 60) return "Ran " + m + (m === 1 ? " minute ago" : " minutes ago");
+    var h = Math.round(m / 60);
+    return h < 48 ? "Ran " + h + (h === 1 ? " hour ago" : " hours ago") : "Ran " + Math.round(h / 24) + " days ago";
+  }
+  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  function draftRow(c, d) {
+    var row = el("div", "need nd"), who = el("div");
+    who.append(el("b", null, c.title + " helper"), el("small", null, d.preview || d.name));
+    var acts = el("div", "acts");
+    var ok = el("button", "btn sm primary", "Approve"), ed = el("button", "btn sm", "Edit"), sk = el("button", "btn sm", "Skip");
+    [ok, ed, sk].forEach(function (b) { b.type = "button"; });
+    ok.addEventListener("click", function () { send("/youcloned draft approve " + c.name + " " + encodeURIComponent(d.name)); });
+    ed.addEventListener("click", function () { send("/youcloned draft edit " + c.name + " " + encodeURIComponent(d.name)); });
+    sk.addEventListener("click", function () {
+      fetch("/skip", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ crew: c.name, file: d.name }) })
+        .then(function (r) { if (r.ok) { skipped[c.name + "/" + d.name] = 1; bridge(lastCrew); say("Skipped. It's in the helper's skipped folder"); } else say("That draft is no longer waiting"); })
+        .catch(function () { say("Could not reach YouCloned"); });
+    });
+    acts.append(ok, ed, sk);
+    row.append(who, acts);
+    return row;
+  }
+  function bridge(crew) {
+    lastCrew = crew;
+    var all = [], waiting = 0;
+    crew.forEach(function (c) {
+      var left = (c.drafts || []).filter(function (d) { return !skipped[c.name + "/" + d.name]; });
+      waiting += Math.max(0, (c.waiting || 0) - ((c.drafts || []).length - left.length));
+      left.forEach(function (d) { all.push([c, d]); });
+    });
+    var label = waiting ? waiting + (waiting === 1 ? " draft waits for you" : " drafts wait for you") : "All clear";
+    document.getElementById("needsCount").textContent = label;
+    document.getElementById("needsCountAll").textContent = label;
+    [["needsTop", 4], ["needsAll", 1000]].forEach(function (p) {
+      var box = document.getElementById(p[0]); if (!box) return;
+      box.replaceChildren();
+      all.slice(0, p[1]).forEach(function (x) { box.appendChild(draftRow(x[0], x[1])); });
+      if (!all.length) box.appendChild(el("p", "empty", "Nothing needs you right now. Your helpers' drafts show up here."));
+      else if (all.length > p[1]) { var more = el("button", "btn sm", "See all " + all.length); more.type = "button"; more.addEventListener("click", function () { show("crew"); }); box.appendChild(more); }
+    });
+    var grid = document.getElementById("crewLive"); if (!grid) return;
+    grid.replaceChildren();
+    crew.forEach(function (c) {
+      var card = el("div", "panel bot"), top = el("div", "bt");
+      var n = c.waiting || 0;
+      var pill = el("span", n ? "pill warn" : "pill", c.running ? "Working" : n ? n + " need you" : "Up to date");
+      top.append(el("b", null, c.title + " helper"), pill);
+      var run = el("button", "btn sm primary", c.running ? "Working" : "Run now"); run.type = "button"; run.disabled = !!c.running;
+      run.addEventListener("click", function () { send("/youcloned crew " + c.name); });
+      card.append(top, el("p", null, c.what), el("div", "score", ago(c.lastRun) + (c.note ? " · " + c.note : "")), run);
+      grid.appendChild(card);
+    });
+  }
 
   // "New from Jon" follows the promo feed the add-on keeps (online, or its saved copy offline).
   function feed() {
