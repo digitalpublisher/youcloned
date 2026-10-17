@@ -568,7 +568,7 @@ body{padding:0;background:var(--ground)}
     ed.addEventListener("click", function () { send("/youcloned draft edit " + c.name + " " + encodeURIComponent(d.name)); });
     sk.addEventListener("click", function () {
       fetch("/skip", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ crew: c.name, file: d.name }) })
-        .then(function (r) { if (r.ok) { skipped[c.name + "/" + d.name] = 1; bridge(lastCrew, lastAt); say("Skipped. It's in the helper's skipped folder"); } else say("That draft is no longer waiting"); })
+        .then(function (r) { if (r.ok) { skipped[c.name + "/" + d.name] = Date.now(); bridge(lastCrew, lastAt); say("Skipped. It's in the helper's skipped folder"); } else say("That draft is no longer waiting"); })
         .catch(function () { say("Could not reach YouCloned"); });
     });
     acts.append(ok, ed, sk);
@@ -580,10 +580,9 @@ body{padding:0;background:var(--ground)}
     // The add-on writes the crew every 20 seconds while a YouCloned chat is open. Older than 2 minutes
     // means Claude is closed, so nothing is shown as working.
     var stale = !at || Date.now() - at > 120000;
-    // A skipped draft stays hidden only until the add-on's list no longer has it; a new draft with the same name shows.
-    Object.keys(skipped).forEach(function (k) {
-      if (!crew.some(function (c) { return (c.drafts || []).some(function (d) { return c.name + "/" + d.name === k; }); })) delete skipped[k];
-    });
+    // A skipped draft stays hidden only until the add-on writes its next list, which no longer has it;
+    // a draft with the same name in that list or a later one is a new draft, so it shows.
+    Object.keys(skipped).forEach(function (k) { if (at && at > skipped[k]) delete skipped[k]; });
     var all = [], waiting = 0;
     crew.forEach(function (c) {
       var left = (c.drafts || []).filter(function (d) { return !skipped[c.name + "/" + d.name]; });

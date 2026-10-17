@@ -7,13 +7,14 @@ POST /do          {"text": "..."} queues a job; the add-on puts it into Claude's
 POST /talk        asks Isaac's voice relay to start a voice conversation in the owner's YouCloned chat
 POST /skip        {"crew": "support", "file": "x.md"} moves a draft the Needs You list shows into the helper's skipped folder
 """
-import json, os, sys, time, urllib.request
+import json, os, sys, threading, time, urllib.request
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(os.path.expanduser("~"), ".youcloned")
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 4600
 RELAY = "http://127.0.0.1:8771/say"
+SKIP_LOCK = threading.Lock()  # one Skip at a time, so two never pick the same free name
 TALK = "Talk to Isaac was pressed in YouCloned. Start a voice conversation now: call converse with a short hello and listen."
 
 
@@ -36,11 +37,17 @@ def skip_draft(crew, name):
         if os.path.realpath(skipped) != os.path.join(home, "skipped"):
             return False
         stem, ext = os.path.splitext(name)
-        dst, n = os.path.join(skipped, name), 2
-        while os.path.lexists(dst):
-            dst, n = os.path.join(skipped, "%s-%d%s" % (stem, n, ext)), n + 1
-        os.rename(src, dst)
-        return True
+        with SKIP_LOCK:
+            for n in range(1, 1000):
+                dst = os.path.join(skipped, name if n == 1 else "%s-%d%s" % (stem, n, ext))
+                if os.path.lexists(dst):
+                    continue
+                try:
+                    os.rename(src, dst)  # on Windows this refuses a name that appeared meanwhile; try the next
+                    return True
+                except FileExistsError:
+                    continue
+        return False
     except Exception:
         return False
 

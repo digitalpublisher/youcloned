@@ -5,7 +5,7 @@ dashboard takes a POST only from its own page.
 Starts the shipped dashboard server on a spare port with a made-up home folder. No network, no sound.
 Usage: python3 -I tools/dashboard/test_skip.py
 """
-import json, os, socket, subprocess, sys, tempfile, time, urllib.request
+import json, os, socket, subprocess, sys, tempfile, threading, time, urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SERVER = os.path.join(ROOT, "youcloned", "dashboard", "server.py")
@@ -20,6 +20,15 @@ def post(port, body, path="/skip", headers=None):
         return e.code
 
 
+def link(target, path):
+    """A link for the link checks. Windows makes one only with Developer Mode or admin rights; without, those checks are left out."""
+    try:
+        os.symlink(target, path)
+        return True
+    except (OSError, NotImplementedError):
+        return False
+
+
 def main():
     home = tempfile.mkdtemp()
     crew = os.path.join(home, "YouCloned", "crew", "support")
@@ -30,14 +39,20 @@ def main():
     open(os.path.join(home, "YouCloned", "YOUCLONED.md"), "w").write("# rules")
     os.makedirs(os.path.join(crew, "skipped"))
     open(os.path.join(crew, "skipped", "again.md"), "w").write("the earlier one")
-    os.symlink(os.path.join(home, "YouCloned", "YOUCLONED.md"), os.path.join(crew, "drafts", "link.md"))
+    links = link(os.path.join(home, "YouCloned", "YOUCLONED.md"), os.path.join(crew, "drafts", "link.md"))
     # A second helper whose drafts folder is a link to somewhere else.
     other = os.path.join(home, "YouCloned", "crew", "inbox")
     os.makedirs(other)
     os.makedirs(os.path.join(home, "elsewhere"))
     open(os.path.join(home, "elsewhere", "x.md"), "w").write("not a draft")
-    os.symlink(os.path.join(home, "elsewhere"), os.path.join(other, "drafts"))
-    listed = [{"name": n, "preview": "Hi"} for n in ("maria reply.md", "again.md", "link.md")]
+    links = link(os.path.join(home, "elsewhere"), os.path.join(other, "drafts")) and links
+    # Pairs skipped at the same moment: dupN.md lands on dupN-2.md's would-be name, so both must still survive.
+    pairs = ["dup%d" % i for i in range(10)]
+    for stem in pairs:
+        open(os.path.join(crew, "skipped", stem + ".md"), "w").write("old " + stem)
+        for name in (stem + ".md", stem + "-2.md"):
+            open(os.path.join(crew, "drafts", name), "w").write("new " + name)
+    listed = [{"name": n, "preview": "Hi"} for n in ["maria reply.md", "again.md", "link.md"] + [p + ".md" for p in pairs] + [p + "-2.md" for p in pairs]]
     state = {"crew": [{"name": "support", "dir": crew, "drafts": listed}, {"name": "inbox", "dir": other, "drafts": [{"name": "x.md", "preview": ""}]}]}
     open(os.path.join(home, ".youcloned", "state.json"), "w").write(json.dumps(state))
     with socket.socket() as s:
@@ -67,12 +82,27 @@ def main():
             ("a draft state.json doesn't list stays put", post(port, {"crew": "support", "file": "tom.md"}) == 404 and os.path.isfile(os.path.join(crew, "drafts", "tom.md"))),
             ("a path out of drafts/ is refused", post(port, {"crew": "support", "file": "../../YOUCLONED.md"}) == 404 and os.path.isfile(os.path.join(home, "YouCloned", "YOUCLONED.md"))),
             ("an unknown helper is refused", post(port, {"crew": "nobody", "file": "tom.md"}) == 404),
+        ]
+        if links:
+            checks += [
             ("a draft that is a link stays put", post(port, {"crew": "support", "file": "link.md"}) == 404 and os.path.islink(os.path.join(crew, "drafts", "link.md"))),
             ("a drafts folder that is a link is refused", post(port, {"crew": "inbox", "file": "x.md"}) == 404 and os.path.isfile(os.path.join(home, "elsewhere", "x.md"))),
+            ]
+        else:
+            print("NOTE this computer can't make links, so the two link checks are left out")
+        checks += [
             ("an earlier skipped draft with the same name is kept", post(port, {"crew": "support", "file": "again.md"}) == 204
              and open(os.path.join(crew, "skipped", "again.md")).read() == "the earlier one"
              and open(os.path.join(crew, "skipped", "again-2.md")).read() == "Hi again.md"),
         ]
+        threads = [threading.Thread(target=post, args=(port, {"crew": "support", "file": n})) for stem in pairs for n in (stem + ".md", stem + "-2.md")]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        kept = sorted(open(os.path.join(crew, "skipped", f)).read() for f in os.listdir(os.path.join(crew, "skipped")) if f.startswith("dup"))
+        want = sorted(["old %s" % p for p in pairs] + ["new %s.md" % p for p in pairs] + ["new %s-2.md" % p for p in pairs])
+        checks.append(("Skips at the same moment lose no draft", kept == want))
     finally:
         proc.terminate()
         proc.wait()
