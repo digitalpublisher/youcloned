@@ -84,10 +84,23 @@ It is safe to run again later. It never deletes anything.
 
 ## Step 4: Put the library function online
 
-Read `functions/library/index.ts` in this folder and call `deploy_edge_function` with:
+First pick the function's name, so nothing of theirs is replaced. Schema isolation does not protect Edge Functions:
+deploying a name that is already there overwrites that function.
+
+1. Call `list_edge_functions` with the project id.
+2. No function is called `library`: the name is `library`.
+3. There is one called `library`: call `get_edge_function` for it and look in its `index.ts` for the line `const MARKER = 'x-youcloned-library'`.
+   If the connector can't show the files, ask the function itself with Bash: `curl -s -i -X GET "<project address>/functions/v1/library"` (Windows: `curl.exe` the same way)
+   and look for a header line `x-youcloned-library`.
+   - The marker is there: it is the library from an earlier setup, so the name stays `library` (deploying again brings it up to date).
+   - No marker: that function is theirs. Never touch it. The name is `youcloned-library`.
+4. The name is `youcloned-library` and that is in the list too: check it the same way. With the marker, use it. Without it, stop and tell the buyer:
+   "This project already has functions with the names my library uses, so I won't touch them." Offer another of their projects or the free one (Path B).
+
+Keep the name for Steps 5 and 7. Then read `functions/library/index.ts` in this folder and call `deploy_edge_function` with:
 
 - `project_id`: the project id
-- `name`: `library`
+- `name`: the name you picked (`library` or `youcloned-library`)
 - `entrypoint_path`: `index.ts`
 - `verify_jwt`: `false` (the function checks its own token instead)
 - `files`: one file, `name` `index.ts`, `content` the whole file exactly as it is
@@ -95,10 +108,10 @@ Read `functions/library/index.ts` in this folder and call `deploy_edge_function`
 ## Step 5: Make the token
 
 1. Call `get_project_url` and keep the address it returns.
-2. Run this on the buyer's computer (fill in this folder's path, the vault path and the address):
-   - Mac: `python3 "<this folder>/make-token.py" "<vault>/.env" --project-url "<address>"`
-   - Windows: `py -3 "<this folder>\make-token.py" "<vault>\.env" --project-url "<address>"` (use `python` if `py` is missing)
-3. It saves two lines in the env file: `YOUCLONED_LIBRARY_TOKEN` and `YOUCLONED_LIBRARY_URL`. It keeps every other line.
+2. Run this on the buyer's computer (fill in this folder's path, the vault path, the address and the name from Step 4):
+   - Mac: `python3 "<this folder>/make-token.py" "<vault>/.env" --project-url "<address>" --function <name>`
+   - Windows: `py -3 "<this folder>\make-token.py" "<vault>\.env" --project-url "<address>" --function <name>` (use `python` if `py` is missing)
+3. It saves two lines in the env file: `YOUCLONED_LIBRARY_TOKEN` and `YOUCLONED_LIBRARY_URL` (the address ends in `/functions/v1/<name>`, so it always calls the function you deployed). It keeps every other line.
 4. It prints one line: 64 letters and digits. That is a fingerprint of the token, not the token, so it is safe to use in the next step.
 5. If it says the env file is inside a git folder that does not ignore it, add a line `.env` to the `.gitignore` file at the top of the vault, then run it again.
    If it says the env file is tracked by git, stop and tell the buyer you need to take the env file out of their backup first.
@@ -127,7 +140,7 @@ The first run can take up to a minute while Supabase loads its search model.
 If a line says FAIL:
 
 - status 401: the fingerprint is not saved or does not match. Run Step 5 again (without `--new`), then Step 6.
-- status 404: the function is not online. Do Step 4 again.
+- status 404: the function is not online. Do Step 4 again, with the same name, and check Step 5 used that name.
 - status 500 or 546: look at the function's logs with the connector's log tool, fix what it says, and run the test again.
 - status 0 with a certificate error on a Mac: follow the hint it prints, then run it again.
 
@@ -147,6 +160,7 @@ Every reply is JSON. A problem comes back with `ok` set to false and an `error` 
 | `wiki_get` | `slug` | `page` |
 | `wiki_list` | nothing else | `pages` (no bodies) |
 | `stats` | nothing else | `kinds` (count per kind), `sources`, `chunks`, `wiki_pages`, `last_added` |
+| `has` | `refs` (a list of at most 1000) | `refs`: the ones that are in the library |
 | `forget` | `ref` | `forgotten` |
 
 - `kind` is one of `email`, `web`, `youtube`, `doc`, `note`, `other`.
@@ -155,3 +169,4 @@ Every reply is JSON. A problem comes back with `ok` set to false and an `error` 
 - `text` can be up to 400,000 characters a call (anything longer gets status 413). Long books or folders go in one file or section per call.
 - The function cuts text into pieces of about 350 words, each overlapping the one before by about 50 words, and stores a meaning fingerprint for each piece.
 - A wrong or missing token gets status 401.
+- Every reply, a refusal included, carries the header `x-youcloned-library` with the function's version, and a GET answers 405 with `"youcloned": "library"` in its body. That is how Step 4 knows the function is ours.

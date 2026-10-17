@@ -64,6 +64,16 @@ for _ in $(seq 1 90); do
   sleep 2
 done
 
+echo "== the function says it is ours"
+marker="$(curl -s -D - -o /dev/null -X GET http://127.0.0.1:54321/functions/v1/library | tr -d '\r' | grep -i '^x-youcloned-library:' || true)"
+[ -n "$marker" ] && echo "PASS a GET carries the x-youcloned-library header" || { echo "FAIL no x-youcloned-library header on a GET"; status_marker=1; }
+named="$scratch/named.env"
+rm -f "$named"
+python3 "$lib/make-token.py" "$named" --project-url http://127.0.0.1:54321 --function youcloned-library >/dev/null
+grep -q '^YOUCLONED_LIBRARY_URL=http://127.0.0.1:54321/functions/v1/youcloned-library$' "$named" \
+  && echo "PASS make-token --function youcloned-library points the env file at that name" || { echo "FAIL make-token --function"; status_marker=1; }
+rm -f "$named"
+
 echo "== token"
 rm -f "$envfile"
 hash="$(python3 "$lib/make-token.py" "$envfile" --project-url http://127.0.0.1:54321)"
@@ -82,6 +92,7 @@ python3 "$here/e2e.py" "$envfile" --db-container "$db" || status=$?
 
 echo "== feed.py"
 rm -rf "$scratch/feed" "$scratch/Library"
-python3 "$here/feed-e2e.py" "$envfile" "$scratch/feed" --whisper "${YOUCLONED_WHISPER_URL:-http://127.0.0.1:2022}" || status=$?
+python3 "$here/feed-e2e.py" "$envfile" "$scratch/feed" --whisper "${YOUCLONED_WHISPER_URL:-http://127.0.0.1:2022}" --db-container "$db" || status=$?
+[ -n "${status_marker:-}" ] && status=1
 if [ "$status" != "0" ]; then echo "-- functions serve log (last 40 lines)"; tail -40 "$log"; fi
 exit "$status"

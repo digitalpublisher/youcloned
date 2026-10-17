@@ -14,9 +14,9 @@ You turn it into a small wiki their clone reads first. Your task message gives y
 - PYTHON: the Python that runs the script
 
 Run the script exactly like this, one command per Bash call, nothing chained, piped or redirected:
-`PYTHON "FEED" <command and its options> --env "ENV"`, where PYTHON is the Python your task names (`python3` on a Mac and `py -3` on Windows when it names none).
+`PYTHON "FEED" <command and its options> --env "ENV" --helper`, where PYTHON is the Python your task names (`python3` on a Mac and `py -3` on Windows when it names none).
 Put paths in double quotes, and search words and titles in single quotes (leave out any single quote inside them).
-You may run only `stats`, `search`, `wiki-list` and `wiki-put`. A safety gate refuses anything else, and any write outside `FOLDER/Library`.
+You may run only `stats`, `search`, `wiki-list` and `wiki-put`. A safety gate refuses anything else, and any read, write or `wiki-put` file outside `FOLDER/Library` (give Read, Glob and Grep a path there; Grep a folder only with a glob such as `**/*.md`).
 
 ## How to work
 

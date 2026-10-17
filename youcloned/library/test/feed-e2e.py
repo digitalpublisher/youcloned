@@ -2,13 +2,15 @@
 """End-to-end checks for feed.py against a running library (the local one run-local.sh starts).
 
 Usage:
-  python3 feed-e2e.py ENV_FILE WORK_DIR [--whisper URL]
+  python3 feed-e2e.py ENV_FILE WORK_DIR [--whisper URL] [--db-container NAME]
 
 ENV_FILE holds YOUCLONED_LIBRARY_URL and YOUCLONED_LIBRARY_TOKEN. WORK_DIR is an empty scratch folder.
 Makes its own small fixtures (a three-page website with a sitemap, txt, md, docx, pptx, html, epub, pdf,
 a Feed me folder and, on a Mac, a spoken recording made with say), runs feed.py on each, and checks the
 library finds every one. The transcribe check uses the local transcriber (default http://127.0.0.1:2022).
 YouTube is never called: only the caption cleaner is checked.
+It also checks --helper keeps every file inside the helper's own folders (links included), and that a source
+the library lost goes in again. --db-container (the local database) adds the emptied-library check.
 Prints PASS or FAIL per check and exits 1 when any check fails. Never prints the token.
 """
 import functools
@@ -23,6 +25,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.request
 import zipfile
 from pathlib import Path
 
@@ -37,6 +40,7 @@ if len(args) < 2:
 ENV = Path(args[0]).resolve()
 WORK = Path(args[1]).resolve()
 WHISPER = args[args.index("--whisper") + 1] if "--whisper" in args else "http://127.0.0.1:2022"
+DB = args[args.index("--db-container") + 1] if "--db-container" in args else None
 WORK.mkdir(parents=True, exist_ok=True)
 
 TOKEN = ""
@@ -206,9 +210,12 @@ check("nav, script, style and footer text stay out", not leaked, leaked)
 (site / "robots.txt").unlink()
 (site / "sitemap.xml").unlink()
 (site / "index.html").write_text(page("Pat's Garden", "<h1>Grow</h1><p>The Hollowmere method, now with Pemberwick beds."
-                                      + filler * 3 + " <a href='/about.html'>more</a> <a href='https://elsewhere.example.org/x'>out</a></p>"), encoding="utf-8")
+                                      + filler * 3 + " <a href='/about.html'>more</a> <a href='https://elsewhere.example.org/x'>out</a>"
+                                      + " <a href='http://['>broken</a></p>"), encoding="utf-8")
 code, out, fed = feed("web", base + "/", "--crawl")
 check("crawl without a sitemap follows same-site links", code == 0 and fed == (1, 1) and "Read 3 pages" not in out and "elsewhere" not in out, out)
+check("a malformed link (href=\"http://[\") is skipped and the crawl goes on to its end", code == 0 and "Skipped a broken link" in out
+      and "Traceback" not in out and re.search(r"^Read \d+ pages?\.$", out, re.M), out)
 httpd.shutdown()
 
 # ---------- doc ----------
@@ -384,6 +391,92 @@ want_doc = len(pieces) + huge_parts + 6 + 4 + (1 if have_pypdf or shutil.which("
 want = {"email": 1, "web": 3, "doc": want_doc, "note": 2, "other": 1 if shutil.which("say") else 0}
 check("stats counts every kind fed (%s)" % dk, dk == want, (dk, want))
 check("stats wiki pages counted", end.get("wiki_pages", 0) >= start.get("wiki_pages", 0) + 1, end)
+
+# ---------- re-feed: a source the library lost goes in again ----------
+URL = ""
+for line in ENV.read_text(encoding="utf-8").splitlines():
+    if line.startswith("YOUCLONED_LIBRARY_URL="):
+        URL = line.split("=", 1)[1].strip()
+
+
+def library_call(body):
+    request = urllib.request.Request(URL, data=json.dumps(body).encode("utf-8"), method="POST",
+                                     headers={"Content-Type": "application/json", "x-library-token": TOKEN})
+    with urllib.request.urlopen(request, timeout=120) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+b_ref = (box / "b.md").resolve().as_posix()
+gone = library_call({"action": "forget", "ref": b_ref})
+has = library_call({"action": "has", "refs": [b_ref, (box / "a.txt").resolve().as_posix()]})
+check("has names only the refs still in the library", has.get("refs") == [(box / "a.txt").resolve().as_posix()] and gone.get("forgotten") == 1, has)
+code, out, fed = feed("folder", str(box))
+check("a source missing from the library goes in again though the file is unchanged", code == 0 and fed == (1, 1)
+      and "no longer in your library" in out and out.count("Already in your library") == 3 and found("Saltbrindle", "/b.md")[0], out)
+
+# ---------- helpers: --helper keeps every file inside the helper's own folders ----------
+hv = WORK / "helper-vault"
+(hv / "Feed me").mkdir(parents=True, exist_ok=True)
+(hv / "Library").mkdir(parents=True, exist_ok=True)
+henv = hv / ".env"
+shutil.copyfile(str(ENV), str(henv))
+os.chmod(str(henv), 0o600)
+hhome = WORK / "helper-home"
+feeding = hhome / ".youcloned" / "feeding"
+feeding.mkdir(parents=True, exist_ok=True)
+hrun = lambda *a: feed(*a, "--helper", env_file=henv, extra_env={"HOME": str(hhome)})
+env_size = henv.stat().st_size
+
+# Codex: add --file <vault>/.env --remove uploaded the env file, then deleted it.
+code, out, fed = hrun("add", "--kind", "note", "--ref", "test:envgrab", "--title", "grab", "--file", str(henv), "--remove")
+check("helper: add --file <vault>/.env --remove is refused and the env file stays", code != 0 and fed == (0, 0)
+      and henv.is_file() and henv.stat().st_size == env_size and "env file" in out, out)
+code, out, fed = feed("add", "--kind", "note", "--ref", "test:envgrab", "--title", "grab", "--file", str(henv), env_file=henv)
+check("without --helper the env file is refused too", code != 0 and fed == (0, 0) and henv.is_file(), out)
+link = feeding / "m9.txt"
+link.symlink_to(henv)
+code, out, fed = hrun("add", "--kind", "email", "--ref", "gmail:link", "--title", "link", "--file", str(link), "--remove")
+check("helper: a link in feeding that leads to the env file is refused, the link and the env file stay", code != 0 and fed == (0, 0)
+      and link.is_symlink() and henv.is_file() and henv.stat().st_size == env_size, out)
+outside = WORK / "outside.txt"
+outside.write_text("Wombleton is outside the helper folders.", encoding="utf-8")
+(hv / "Feed me" / "away.txt").symlink_to(outside)
+code, out, fed = hrun("doc", str(hv / "Feed me" / "away.txt"))
+check("helper: a link in Feed me that leads outside is refused", code != 0 and fed == (0, 0) and "outside" in out, out)
+code, out, fed = hrun("doc", str(outside))
+check("helper: a document outside Feed me is refused", code != 0 and fed == (0, 0) and "outside" in out, out)
+kept = hv / "Feed me" / "keep.txt"
+kept.write_text("Pellingford stays in the Feed me folder.", encoding="utf-8")
+code, out, fed = hrun("add", "--kind", "note", "--ref", "test:keep", "--title", "keep", "--file", str(kept), "--remove")
+check("helper: --remove outside feeding is refused and the file stays", code != 0 and kept.is_file() and fed == (0, 0), out)
+mail2 = feeding / "m2.txt"
+mail2.write_text("Subject: Quenwick\n\nThe Quenwick class starts Friday.", encoding="utf-8")
+code, out, fed = hrun("add", "--kind", "email", "--ref", "gmail:quenwick", "--title", "Quenwick", "--file", str(mail2), "--remove")
+check("helper: add from feeding with --remove goes in and the scratch file goes", code == 0 and fed == (1, 1) and not mail2.exists(), out)
+(hv / "Feed me" / ".env.local").write_text("NOT_A_KEY=1\n", encoding="utf-8")
+(hv / "Feed me" / "id_rsa").write_text("not a key\n", encoding="utf-8")
+code, out, fed = hrun("doc", str(hv / "Feed me" / "id_rsa"))
+check("helper: a key-shaped file is refused", code != 0 and fed == (0, 0) and "key file" in out, out)
+code, out, fed = hrun("folder", str(hv / "Feed me"))
+check("helper: folder feeds Feed me and skips the links that lead out", code == 0 and fed == (1, 1) and "outside" in out, out)
+# Codex: wiki-put accepted any file.
+code, out, fed = hrun("wiki-put", "feedtest/outside", "Outside", str(outside))
+check("helper: wiki-put of a file outside Library is refused", code != 0 and "outside" in out, out)
+code, out, fed = hrun("wiki-put", "feedtest/env", "Env", str(hv / "Library" / ".." / ".env"))
+check("helper: wiki-put of the env file through .. is refused", code != 0 and "env file" in out, out)
+wiki_page = hv / "Library" / "helper.md"
+wiki_page.write_text("# Helper page\n", encoding="utf-8")
+code, out, fed = hrun("wiki-put", "feedtest/helper", "Helper page", str(wiki_page))
+check("helper: wiki-put of a page in Library works", code == 0 and "Saved wiki page feedtest/helper" in out, out)
+for ref in ("gmail:quenwick", (hv / "Feed me" / "keep.txt").resolve().as_posix()):
+    library_call({"action": "forget", "ref": ref})
+
+# ---------- re-feed: an emptied library takes everything again ----------
+if DB:
+    subprocess.run(["docker", "exec", "-i", DB, "psql", "-U", "postgres", "-q", "-c", "delete from youcloned.sources;"], check=True, capture_output=True)
+    code, out, fed = feed("folder", str(box))
+    check("after the library is emptied, unchanged files all go in again", code == 0 and fed == (4, 4)
+          and "library is empty" in out and "Already in your library" not in out, out)
 
 # ---------- never a secret ----------
 check("the token never appears in anything feed.py printed", TOKEN and not any(TOKEN in o for o in outputs))

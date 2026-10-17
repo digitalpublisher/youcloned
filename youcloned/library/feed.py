@@ -13,6 +13,11 @@ Usage (put --env ENV_FILE after the command when the env file is not the vault's
   feed.py wiki-put SLUG TITLE FILE
   feed.py wiki-list
 
+A helper (the librarian or the wiki writer) adds --helper: then every file must sit inside the helper's own
+folders (~/.youcloned/feeding and <vault>/Feed me for add, doc, folder and transcribe; <vault>/Library for
+wiki-put), --remove works only inside ~/.youcloned/feeding, and a link counts where it leads, not where it sits.
+Env files and key files are never read, in any mode.
+
 The env file is <vault>/.env, where the vault is the first line of ~/.youcloned/vault-path
 (or the Obsidian Vault folder in Documents). It holds YOUCLONED_LIBRARY_URL and YOUCLONED_LIBRARY_TOKEN.
 The token is read in code and never printed. What was fed is kept in <vault>/Library/.fed.json,
@@ -66,6 +71,12 @@ SKIP_LINKS = re.compile(r"\.(?:jpe?g|png|gif|webp|svg|ico|bmp|tiff?|pdf|zip|gz|r
 
 FED = {"sources": 0, "chunks": 0}
 
+# Files feed.py never reads: env files, and names that hold keys. hooks/helpers.js holds the same list (KEY_NAME).
+ENV_NAME = re.compile(r"^\.env(?:\..+)?$", re.I)
+KEY_NAME = re.compile(r"(?:\.(?:pem|key|p12|pfx|keystore|jks|ppk|gpg|asc|kdbx)$|^id_(?:rsa|dsa|ecdsa|ed25519)|^(?:credentials|secrets?)(?:\.|$)"
+                      r"|^\.(?:npmrc|netrc|pgpass|pypirc|git-credentials)$|^token\.json$)", re.I)
+FEEDS_FILES = {"add", "web", "doc", "folder", "transcribe", "youtube"}
+
 
 def say(line):
     print(line, flush=True)
@@ -99,8 +110,19 @@ def env_values(env_file):
     return values
 
 
+def secret_name(path):
+    """True when the path names an env file (anywhere along it) or a file that holds keys."""
+    parts = Path(path).parts
+    return any(ENV_NAME.match(part) for part in parts) or bool(parts and KEY_NAME.search(parts[-1]))
+
+
+def within(path, folder):
+    return path == folder or folder in path.parents
+
+
 class Library:
-    def __init__(self, env_arg):
+    def __init__(self, env_arg, helper=False):
+        self.helper = helper
         if env_arg:
             self.env_file = Path(env_arg).expanduser().resolve()
             self.vault = self.env_file.parent
@@ -117,6 +139,7 @@ class Library:
             say("Your env file has no library address or token yet. The library step of setup adds them.")
             finish(3)
         self.state_file = self.vault / "Library" / ".fed.json"
+        self.roots = {"feeding": Path.home() / ".youcloned" / "feeding", "feedme": self.vault / "Feed me", "library": self.vault / "Library"}
         self.state = self._load_state()
         self.checked = False
 
@@ -168,17 +191,69 @@ class Library:
             wait *= 2
         return 0, {"error": "no answer"}
 
-    # A library that was emptied or replaced starts the record over, so nothing is skipped by mistake.
-    def check_once(self):
+    def file_problem(self, path, roots=("feeding", "feedme")):
+        """Why feed.py won't read this file (or folder), or None. Env and key files never; for a helper,
+        only inside its own folders, judged by where a link leads."""
+        given = Path(path).expanduser()
+        if not os.path.lexists(str(given)):
+            return None  # the command says there is nothing there
+        try:
+            resolved = given.resolve(strict=True)
+        except (OSError, RuntimeError):
+            return str(given) + " leads nowhere"
+        if secret_name(given.absolute()) or secret_name(resolved):
+            return str(given) + " is an env file or a key file, and those never go in the library"
+        try:
+            if resolved == self.env_file or resolved.samefile(self.env_file):
+                return str(given) + " is the env file, and it never goes in the library"
+        except OSError:
+            pass
+        if self.helper:
+            folders = []
+            for name in roots:
+                try:
+                    folders.append(self.roots[name].resolve(strict=True))
+                except (OSError, RuntimeError):
+                    pass
+            if not any(within(resolved, f) for f in folders):
+                return str(given) + " is outside " + " and ".join(str(self.roots[n]) for n in roots)
+        return None
+
+    # A library that was emptied or replaced, or that lost a source, starts that part of the record over,
+    # so nothing is skipped by mistake. It runs before anything is skipped.
+    def check_once(self, only=None):
+        """only: the refs this run can skip (all of them when None)."""
         if self.checked:
             return
         self.checked = True
         if not (self.state["hashes"] or self.state["files"]):
             return
         status, body = self.call({"action": "stats"})
-        if status == 200 and body.get("sources") == 0:
+        if status != 200:
+            return
+        if body.get("sources") == 0:
             lib = self.state["library"]
             self.state = {"library": lib, "hashes": {}, "parts": {}, "files": {}}
+            self.save_state()
+            say("Your library is empty, so everything goes in again.")
+            return
+        refs = sorted(r for r in self.state["hashes"] if only is None or r in only)
+        probe = {ref: (ref + "#part-1" if int(self.state["parts"].get(ref, 1) or 1) > 1 else ref) for ref in refs}
+        present = set()
+        wanted = sorted(set(probe.values()))
+        for start in range(0, len(wanted), 500):
+            status, body = self.call({"action": "has", "refs": wanted[start:start + 500]})
+            if status != 200 or not isinstance(body.get("refs"), list):
+                return  # an older library function can't say; the empty check above still holds
+            present.update(str(r) for r in body["refs"])
+        gone = [ref for ref in refs if probe[ref] not in present]
+        for ref in gone:
+            for key in ("hashes", "parts", "files"):
+                self.state[key].pop(ref, None)
+        if gone:
+            self.save_state()
+            say(str(len(gone)) + (" source is" if len(gone) == 1 else " sources are") + " no longer in your library, so "
+                + ("it goes" if len(gone) == 1 else "they go") + " in again.")
 
     def ingest(self, kind, ref, title, text, happened_at=None, quiet=False):
         """Sends one source, in pieces of at most 8k characters. Returns (sent, chunks) or None on failure."""
@@ -188,6 +263,9 @@ class Library:
             if not quiet:
                 say("Skipped " + title + ": no words in it.")
             return (0, 0)
+        if self._token and self._token in text:
+            say("Skipped " + title + ": it holds your library token, and that never goes in the library.")
+            return None
         digest = hashlib.sha256((kind + "\n" + title + "\n" + (happened_at or "") + "\n" + text).encode("utf-8")).hexdigest()
         if self.state["hashes"].get(ref) == digest:
             if not quiet:
@@ -382,7 +460,10 @@ def fetch(url, accept_html=True):
 
 
 def host_of(url):
-    host = (urllib.parse.urlsplit(url).hostname or "").lower()
+    try:
+        host = (urllib.parse.urlsplit(url).hostname or "").lower()
+    except ValueError:
+        return ""
     return host[4:] if host.startswith("www.") else host
 
 
@@ -460,8 +541,13 @@ def cmd_web(lib, args):
     seen, pages, failed = set(), 0, 0
     while queue and pages < limit:
         url = queue.pop(0)
-        key = seen_key(url)
-        if key in seen or SKIP_LINKS.search(urllib.parse.urlsplit(url).path) or not allowed(url):
+        try:
+            key = seen_key(url)
+            skip = key in seen or SKIP_LINKS.search(urllib.parse.urlsplit(url).path) or not allowed(url)
+        except ValueError:
+            say("Skipped a broken link: " + url[:120])
+            continue
+        if skip:
             seen.add(key)
             continue
         seen.add(key)
@@ -478,9 +564,12 @@ def cmd_web(lib, args):
         text, title, links = html_to_text(body)
         if args.crawl:
             for href in links:
-                nxt = urllib.parse.urljoin(final, href.strip())
-                if nxt.startswith("http") and host_of(nxt) == host_of(start) and seen_key(nxt) not in seen:
-                    queue.append(clean_url(nxt))
+                try:
+                    nxt = urllib.parse.urljoin(final, href.strip())
+                    if nxt.startswith("http") and host_of(nxt) == host_of(start) and seen_key(nxt) not in seen:
+                        queue.append(clean_url(nxt))
+                except ValueError:
+                    say("Skipped a broken link on " + final[:120] + ": " + href.strip()[:80])
         if len(text.split()) < 20:
             say("Skipped " + final + ": almost no words on it.")
             continue
@@ -655,6 +744,10 @@ def file_ref(path):
 
 def feed_doc(lib, path, quiet_skip=False):
     """Returns 'ok', 'skip', 'fail' or 'pdf'."""
+    problem = lib.file_problem(path)
+    if problem:
+        say("Skipped: " + problem + ".")
+        return "fail"
     ref = file_ref(path)
     st = path.stat()
     stamp = {"mtime": int(st.st_mtime), "size": st.st_size}
@@ -679,6 +772,10 @@ def feed_doc(lib, path, quiet_skip=False):
 
 def cmd_doc(lib, args):
     path = Path(args.path).expanduser()
+    problem = lib.file_problem(path)
+    if problem:
+        say("I won't read that: " + problem + ".")
+        return 1
     if not path.is_file():
         say("There is no file at " + str(path) + ".")
         return 1
@@ -693,7 +790,7 @@ def cmd_doc(lib, args):
 
 
 def env_tail(args):
-    return (' --env "' + args.env + '"') if getattr(args, "env", None) else ""
+    return ((' --env "' + args.env + '"') if getattr(args, "env", None) else "") + (" --helper" if getattr(args, "helper", False) else "")
 
 
 def files_in(folder, types):
@@ -709,6 +806,10 @@ def files_in(folder, types):
 
 def cmd_folder(lib, args):
     folder = Path(args.path).expanduser()
+    problem = lib.file_problem(folder)
+    if problem:
+        say("I won't read that: " + problem + ".")
+        return 1
     if not folder.is_dir():
         say("There is no folder at " + str(folder) + ".")
         return 1
@@ -795,6 +896,10 @@ def media_seconds(path):
 
 def cmd_transcribe(lib, args):
     target = Path(args.path).expanduser()
+    problem = lib.file_problem(target)
+    if problem:
+        say("I won't read that: " + problem + ".")
+        return 1
     if not target.exists():
         say("There is nothing at " + str(target) + ".")
         return 1
@@ -814,6 +919,11 @@ def cmd_transcribe(lib, args):
     for path in files:
         if path.suffix.lower() not in MEDIA_TYPES:
             say("Skipped " + path.name + ": not a video or recording.")
+            continue
+        problem = lib.file_problem(path)
+        if problem:
+            say("Skipped: " + problem + ".")
+            failed += 1
             continue
         ref = file_ref(path)
         st = path.stat()
@@ -924,8 +1034,18 @@ def cmd_youtube(lib, args):
 # ---------- the rest ----------
 
 def cmd_add(lib, args):
+    if args.remove and not args.file:
+        say("--remove works only with --file.")
+        return 2
     if args.file:
         path = Path(args.file).expanduser()
+        problem = lib.file_problem(path)
+        if not problem and args.remove and lib.helper:
+            problem = lib.file_problem(path, roots=("feeding",))
+            problem = problem and problem.replace("is outside", "can be removed only inside")
+        if problem:
+            say("I won't read that: " + problem + ".")
+            return 1
         if not path.is_file():
             say("There is no file at " + str(path) + ".")
             return 1
@@ -984,6 +1104,10 @@ def cmd_stats(lib, args):
 
 def cmd_wiki_put(lib, args):
     path = Path(args.file).expanduser()
+    problem = lib.file_problem(path, roots=("library",))
+    if problem:
+        say("I won't read that: " + problem + ".")
+        return 1
     if not path.is_file():
         say("There is no file at " + str(path) + ".")
         return 1
@@ -1012,10 +1136,12 @@ def cmd_wiki_list(lib, args):
 def parser():
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--env", default=argparse.SUPPRESS, help="the env file (default: the vault's .env)")
-    top = argparse.ArgumentParser(prog="feed.py", description="Feed the YouCloned library.", parents=[common])
+    common.add_argument("--helper", action="store_true", default=argparse.SUPPRESS,
+                        help="run for a helper: files only inside the helper's own folders")
+    top = argparse.ArgumentParser(prog="feed.py", description="Feed the YouCloned library.", parents=[common], allow_abbrev=False)
     sub = top.add_subparsers(dest="command")
 
-    p = sub.add_parser("add", parents=[common], help="add one source from a file or stdin")
+    p = sub.add_parser("add", parents=[common], allow_abbrev=False, help="add one source from a file or stdin")
     p.add_argument("--kind", required=True, choices=["email", "web", "youtube", "doc", "note", "other"])
     p.add_argument("--ref", required=True)
     p.add_argument("--title", required=True)
@@ -1026,47 +1152,47 @@ def parser():
     p.add_argument("--remove", action="store_true", help="delete the file once it is in the library")
     p.set_defaults(run=cmd_add)
 
-    p = sub.add_parser("web", parents=[common], help="a web page, or the whole site with --crawl")
+    p = sub.add_parser("web", parents=[common], allow_abbrev=False, help="a web page, or the whole site with --crawl")
     p.add_argument("url")
     p.add_argument("--crawl", action="store_true")
     p.add_argument("--max", type=int, default=200)
     p.set_defaults(run=cmd_web)
 
-    p = sub.add_parser("doc", parents=[common], help="one document")
+    p = sub.add_parser("doc", parents=[common], allow_abbrev=False, help="one document")
     p.add_argument("path")
     p.set_defaults(run=cmd_doc)
 
-    p = sub.add_parser("folder", parents=[common], help="every document in a folder")
+    p = sub.add_parser("folder", parents=[common], allow_abbrev=False, help="every document in a folder")
     p.add_argument("path")
     p.set_defaults(run=cmd_folder)
 
-    p = sub.add_parser("transcribe", parents=[common], help="videos and recordings, transcribed on this computer")
+    p = sub.add_parser("transcribe", parents=[common], allow_abbrev=False, help="videos and recordings, transcribed on this computer")
     p.add_argument("path")
     p.add_argument("--whisper", help="the transcriber's address (default " + DEFAULT_WHISPER + ")")
     p.add_argument("--kind", default="other", choices=["doc", "other"])
     p.set_defaults(run=cmd_transcribe)
 
-    p = sub.add_parser("youtube", parents=[common], help="a YouTube channel's captions")
+    p = sub.add_parser("youtube", parents=[common], allow_abbrev=False, help="a YouTube channel's captions")
     p.add_argument("url")
     p.add_argument("--max", type=int, default=200)
     p.set_defaults(run=cmd_youtube)
 
-    p = sub.add_parser("search", parents=[common], help="search the library")
+    p = sub.add_parser("search", parents=[common], allow_abbrev=False, help="search the library")
     p.add_argument("query")
     p.add_argument("--k", type=int, default=8)
     p.add_argument("--kinds")
     p.set_defaults(run=cmd_search)
 
-    p = sub.add_parser("stats", parents=[common], help="what is in the library")
+    p = sub.add_parser("stats", parents=[common], allow_abbrev=False, help="what is in the library")
     p.set_defaults(run=cmd_stats)
 
-    p = sub.add_parser("wiki-put", parents=[common], help="save a wiki page from a file")
+    p = sub.add_parser("wiki-put", parents=[common], allow_abbrev=False, help="save a wiki page from a file")
     p.add_argument("slug")
     p.add_argument("title")
     p.add_argument("file")
     p.set_defaults(run=cmd_wiki_put)
 
-    p = sub.add_parser("wiki-list", parents=[common], help="list the wiki pages")
+    p = sub.add_parser("wiki-list", parents=[common], allow_abbrev=False, help="list the wiki pages")
     p.set_defaults(run=cmd_wiki_list)
     return top
 
@@ -1081,8 +1207,10 @@ def main():
     if not getattr(args, "run", None):
         parser().print_help()
         sys.exit(2)
-    lib = Library(getattr(args, "env", None))
+    lib = Library(getattr(args, "env", None), helper=getattr(args, "helper", False))
     try:
+        if args.command in FEEDS_FILES:
+            lib.check_once([args.ref.strip()] if args.command == "add" else None)
         code = args.run(lib, args)
     except KeyboardInterrupt:
         say("Stopped. What went in stays in; run it again to carry on.")
