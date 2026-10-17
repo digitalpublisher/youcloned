@@ -18,6 +18,9 @@ const PANE = {
 // SkillKey as the desktop app names it (an id) unless a test says otherwise.
 const SK = '4a62845f-77ec-431f-8b76-2d42902a60fb'
 const skTools = (server = SK) => ['list_skills', 'start_skill', 'run_skill', 'word_balance'].map(t => ({ name: 'mcp__' + server + '__' + t, description: '', mcp: true }))
+const BN = 'b7c1e0d2-bnsn-connector'
+const BN_TOOLS = ['check-word-balance', 'ask_vslAgent', 'bnsn', 'ask_bnsn_agent', 'vsl_planner', 'list-blueprints', 'list-projects', 'save-content-to-project', 'get-generation-task-status']
+const bnTools = (server = BN, tools = BN_TOOLS) => tools.map(t => ({ name: 'mcp__' + server + '__' + t, description: '', mcp: true }))
 const fromSk = (body: string) => ({ content: [{ type: 'text', text: 'You are short on words.\n\n<<<YOUCLONED>>>\n' + body + '\n<<<END YOUCLONED>>>\n\nWhen you have everything the steps ask for, call run_skill with skill "x".' }], isError: false })
 
 function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[]) => unknown, toasts?: string[], lists?: Record<string, string[]>, cwd?: string, root?: string, skillKey?: string | null, mcpCalls?: { server: string, tool: string, args: Record<string, unknown> }[], registered?: { name: string, prompt: string }[], owns?: (slug: string) => boolean, opened?: string[], browser?: string[], toolCall?: (e: any) => unknown, read?: (path: string) => string | undefined, exists?: (path: string) => boolean | undefined, mcpThrow?: string, logs?: string[], listed?: boolean, appOwned?: boolean, connected?: () => boolean } = {}) {
@@ -33,15 +36,22 @@ function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: 
   on('fs.read', ($, e) => ({ value: opts.read?.(e.path) ?? (opts.files || {})[e.path] ?? (e.path.endsWith('SKILL.md') ? 'description: Set up YouCloned. More.' : 'crew prompt') }))
   on('fs.write', ($, e) => { writes.set(e.path, e.text); return { value: undefined } })
   const sk = opts.skillKey === undefined ? SK : opts.skillKey
-  on('tool.list', () => ({ value: sk && opts.listed !== false ? skTools(sk) : [] }))
+  // BNSN, when a test connects it: { server, tools, words, calls }. Kept out of the options type on purpose.
+  const bn = (opts as { bnsn?: { server: string, tools: string[], words?: number, calls?: string[] } }).bnsn
+  on('tool.list', () => ({ value: [...(sk && opts.listed !== false ? skTools(sk) : []), ...(bn ? bnTools(bn.server, bn.tools) : [])] }))
   on('mcp.call', ($, e) => {
     opts.mcpCalls?.push(e)
+    if (bn && e.server === bn.server) {
+      bn.calls?.push(e.tool)
+      if (e.tool === 'check-word-balance') return { value: { content: [{ type: 'text', text: JSON.stringify({ canProceed: true, wordsRemaining: bn.words ?? 25000 }) }], isError: false } }
+      return { value: { content: [{ type: 'text', text: 'BNSN ran ' + e.tool }], isError: false } }
+    }
     if (opts.mcpThrow) return { value: { content: [{ type: 'text', text: 'YouCloned MCP call: ' + opts.mcpThrow }], isError: true } }
     if (opts.browser && e.server === 'Claude_Browser') { opts.browser.push(e.tool + ' ' + JSON.stringify(e.args)); return { value: { content: [{ type: 'text', text: 'ok' }], isError: false } } }
     if (opts.connected && !opts.connected()) throw new Error('no connected MCP tool "' + e.tool + '" on a server named "' + e.server + '"')
     if (!sk || (e.server !== sk && e.server !== 'claude.ai SkillKey')) throw new Error('no such server')
     if (opts.appOwned) throw new Error('no connected MCP tool "' + e.tool + '" on a server named "' + e.server + '"')
-    if (e.tool === 'list_skills') return { value: { content: [{ type: 'text', text: '- AI Revenue Plan (skill: "ai-revenue-plan"): A one-page 12-month plan\n- YouCloned Setup (skill: "youcloned-setup"): Sets up your clone\n\nWords left: 4,200' }], isError: false } }
+    if (e.tool === 'list_skills') return { value: { content: [{ type: 'text', text: '- AI Revenue Plan (skill: "ai-revenue-plan"): A one-page 12-month plan\n- VSL Lead Writer (skill: "vsl-lead-writer"): Your VSL lead in Jon\'s method\n- YouCloned Setup (skill: "youcloned-setup"): Sets up your clone\n\nWords left: 4,200' }], isError: false } }
     if (e.tool === 'word_balance') return { value: { content: [{ type: 'text', text: 'Words left: 4,200' }], isError: false } }
     if (e.tool === 'start_skill') return { value: (opts.owns || (() => true))(String(e.args.skill)) ? fromSk('Instructions for ' + e.args.skill) : { content: [{ type: 'text', text: 'That skill is not on this account. Call list_skills to see the skills this person has.' }], isError: false } }
     return { value: { content: [], isError: true } }
@@ -422,7 +432,7 @@ test('the desktop Dashboard: greeting, job card, money (Sample), crew with its b
   expect(await ui.find({ key: 'home-run-support' })).toBeDefined()
   expect(await ui.find({ key: 'home-new' })).toBeDefined()
   const links = (await ui.findAll({ type: 'Link' })).map(l => String(l.props.href))
-  expect(links).toContain('https://app.bnsn.ai')
+  expect(links).toContain('https://bnsn.ai')
   expect(links).toContain('https://www.youtube.com/watch?v=j058ugnLtUE')
   await ui.unmount()
 })
@@ -674,6 +684,356 @@ test('SkillKey is the first app, BNSN second', async ($, on) => {
   const plates = (await ui.findAll({ type: 'Svg' })).filter(p => p.props.width !== undefined && p.props.alt !== 'Thumbnail').map(p => p.props.alt)
   expect(plates.slice(0, 2)).toEqual(['skillkey', 'bnsn'])
   await ui.unmount()
+})
+
+// The app buttons (card #32). Fake connectors: none, SkillKey only, SkillKey and BNSN.
+test('OfferBuilder shows its presale date, never the old Oct 14 opening', async ($, on) => {
+  sessionStubs(on)
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'tab-home' })
+  expect(await ui.find({ type: 'Text', text: 'Presale Wed Oct 28' })).toBeDefined()
+  expect((await ui.findAll({ type: 'Text' })).some(t => /Oct 14/.test(JSON.stringify(t.props.children)))).toBe(false)
+  await ui.unmount()
+})
+
+// Buyer-facing text: no long dash, and no sentence opens on a digit.
+const LONG_DASH = String.fromCharCode(8212)
+function plainText(t: string) {
+  expect(t.includes(LONG_DASH)).toBe(false)
+  expect(t).not.toMatch(/(^|[.!?]\s+)\d/)
+}
+
+// Every app's buttons in the desktop panel: Link label and target, and Button keys.
+async function appButtons(ui) {
+  const card = (await ui.findAll({ type: 'Svg' })).find(p => p.props.alt === 'Your BNSN apps')
+  expect(card).toBeDefined()
+  const links = (await ui.findAll({ type: 'Link' })).map(l => String(l.props.label) + ' ' + String(l.props.href))
+  const buttons = (await ui.findAll({ type: 'Button' })).map(b => String(b.props.key))
+  return { links, buttons }
+}
+
+test('no connectors: SkillKey says Connect, BNSN says Get BNSN and Connect, the other apps Open and Get it', async ($, on) => {
+  sessionStubs(on, { skillKey: null })
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'tab-home' })
+  const { links, buttons } = await appButtons(ui)
+  expect(buttons).toContain('app-skillkey-connect')
+  expect(buttons).toContain('app-bnsn-connect')
+  expect(links).toContain('Get BNSN https://bnsn.ai')
+  expect(links).not.toContain('Open https://app.bnsn.ai')
+  for (const app of ['bookbuilder', 'improver', 'coursebuilder']) {
+    expect(links).toContain('Open https://' + app + '.bnsn.ai')
+    expect(links).toContain('Get it https://' + app + '.bnsn.ai')
+  }
+  expect(links).toContain('Join https://collective.bnsn.ai')
+  await ui.unmount()
+})
+
+test('SkillKey only: SkillKey shows Connected and Open, BNSN still Get BNSN and Connect', async ($, on) => {
+  sessionStubs(on)
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'tab-home' })
+  const { links, buttons } = await appButtons(ui)
+  expect(await ui.find({ type: 'Text', text: 'Connected' })).toBeDefined()
+  expect(links).toContain('Open https://skills.bnsn.ai')
+  expect(buttons).not.toContain('app-skillkey-connect')
+  expect(buttons).toContain('app-bnsn-connect')
+  expect(links).toContain('Get BNSN https://bnsn.ai')
+  await ui.unmount()
+})
+
+test('Connect starts the connect job in the chat with the connector address and Claude\'s Connectors steps', async ($, on) => {
+  const submitted: string[] = []
+  const { clock } = sessionStubs(on, { skillKey: null })
+  on('prompt.submit', ($, e) => { submitted.push(String(e.text)); return { text: String(e.text) } })
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'tab-home' })
+  await ui.press({ key: 'app-bnsn-connect' })
+  await ui.press({ key: 'app-skillkey-connect' })
+  await clock.advance(10)
+  const bnsnJob = submitted.find(t => t.startsWith('Connect BNSN')) || ''
+  expect(bnsnJob).toContain('https://api.bnsn.ai/v1/mcp/bnsn/mcp')
+  expect(bnsnJob).toContain('open Customize, then Connectors, click Add, then Add custom connector')
+  expect(bnsnJob).toContain('check my BNSN words')
+  expect(bnsnJob).toContain('Get BNSN')
+  const skJob = submitted.find(t => t.startsWith('Connect SkillKey')) || ''
+  expect(skJob).toContain('https://skills.bnsn.ai/claude')
+  for (const t of submitted) plainText(t)
+  await ui.unmount()
+})
+
+test('the dashboard reads every app\'s buttons from state.json: pages are https links, Connect carries its job and address', async ($, on) => {
+  const { writes, clock } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' } })
+  on('http.fetch', () => ({ value: { status: 404, ok: false, headers: {}, text: '' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  await clock.advance(3000)
+  const state = JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}')
+  expect(state.skillKey).toBe(true)
+  expect(state.apps.map(a => a.key)).toEqual(['skillkey', 'bnsn', 'bookbuilder', 'improver', 'coursebuilder', 'offerbuilder', 'aic'])
+  for (const a of state.apps) for (const b of a.buttons) {
+    if (b.kind === 'open' || b.kind === 'get') expect(b.href).toMatch(/^https:\/\//)
+    if (b.kind === 'connect') expect(b.job).toBe('/youcloned connect ' + a.key)
+  }
+  const bn = state.apps.find(a => a.key === 'bnsn')
+  expect(bn.buttons.map(b => b.label)).toEqual(['Get BNSN', 'Connect'])
+  expect(bn.buttons[1].copy).toBe('https://api.bnsn.ai/v1/mcp/bnsn/mcp')
+  expect(state.apps.find(a => a.key === 'offerbuilder').buttons).toEqual([{ kind: 'soon', label: 'Presale Wed Oct 28' }])
+})
+
+test('a Connect job queued by the dashboard reaches the chat', async ($, on) => {
+  const submitted: string[] = []
+  let queued = JSON.stringify({ text: '/youcloned connect bnsn', at: 1 }) + '\n'
+  const { writes, clock } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' },
+    exists: (path) => path.endsWith('/jobs.jsonl') || undefined, read: (path) => path.endsWith('/jobs.jsonl') ? (writes.has(path) ? writes.get(path) : queued) : undefined })
+  on('prompt.submit', ($, e) => { submitted.push(String(e.text)); return { text: String(e.text) } })
+  on('http.fetch', () => ({ value: { status: 404, ok: false, headers: {}, text: '' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  await clock.advance(2000)
+  expect(submitted.filter(t => t.startsWith('Connect BNSN') && t.includes('https://api.bnsn.ai/v1/mcp/bnsn/mcp')).length).toBe(1)
+})
+
+test('SkillKey and BNSN: BNSN is found by its tools and shows Connected and Open, with no Get BNSN', async ($, on) => {
+  const { writes, clock } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' }, bnsn: { server: BN, tools: BN_TOOLS } } as any)
+  on('http.fetch', () => ({ value: { status: 404, ok: false, headers: {}, text: '' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  await clock.advance(3000)
+  const state = JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}')
+  expect(state.bnsn).toBe(true)
+  expect(state.apps.find(a => a.key === 'bnsn').buttons).toEqual([{ kind: 'connected', label: 'Connected' }, { kind: 'open', label: 'Open', href: 'https://app.bnsn.ai' }])
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'tab-home' })
+  const { links, buttons } = await appButtons(ui)
+  expect(links).toContain('Open https://app.bnsn.ai')
+  expect(links).not.toContain('Get BNSN https://bnsn.ai')
+  expect(buttons).not.toContain('app-bnsn-connect')
+  await ui.unmount()
+})
+
+test('in the desktop app BNSN is found from the context breakdown when its tools wait behind ToolSearch', async ($, on) => {
+  const { writes, clock } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' } })
+  on('session.usage', () => ({ value: { startedAt: 0, context: { breakdown: { mcpTools: bnTools().map(t => ({ name: t.name, serverName: 'BNSN', tokens: 1, isLoaded: false })) } } } }))
+  on('http.fetch', () => ({ value: { status: 404, ok: false, headers: {}, text: '' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  await clock.advance(3000)
+  expect(JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}').bnsn).toBe(true)
+})
+
+test('BNSN shows Connected the moment Claude uses one of its writers, even when no list named it', async ($, on) => {
+  const { writes } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' } })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  await $.tool.call({ tool: 'mcp__claude_ai_BNSN__ask_vslAgent', format: 'long' })
+  expect(JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}').bnsn).toBe(true)
+})
+
+test('a connector with a word balance but none of BNSN\'s writers is not BNSN', async ($, on) => {
+  const { writes, clock } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' }, bnsn: { server: 'other-app', tools: ['check-word-balance', 'list-books'] } } as any)
+  on('http.fetch', () => ({ value: { status: 404, ok: false, headers: {}, text: '' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  await $.tool.call({ tool: 'mcp__other-app__check-word-balance' })
+  await clock.advance(3000)
+  expect(JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}').bnsn).toBe(false)
+})
+
+test('words: SkillKey words are labeled SkillKey, and BNSN words come from BNSN\'s balance tool when it is connected', async ($, on) => {
+  const calls: string[] = []
+  const { writes, clock } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' }, bnsn: { server: BN, tools: BN_TOOLS, words: 31500, calls } } as any)
+  on('http.fetch', () => ({ value: { status: 404, ok: false, headers: {}, text: '' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  await clock.advance(3000)
+  const state = JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}')
+  expect(state.words).toBe(4200)
+  expect(state.bnsnWords).toBe(31500)
+  expect(calls).toContain('check-word-balance')
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'tab-home' })
+  const hero = (await ui.findAll({ type: 'Svg' })).find(p => /Your day/.test(String(p.props.alt)))
+  expect(hero.props.source).toContain('SkillKey words · BNSN 31,500')
+  expect(hero.props.source).not.toContain('>BNSN words<')
+  await ui.unmount()
+  const term = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await term.press({ key: 'tab-home' })
+  expect(await term.find({ type: 'Text', text: /SkillKey words: 4,200 {3}BNSN words: 31,500/ })).toBeDefined()
+  await term.unmount()
+})
+
+test('words with SkillKey only: no BNSN number anywhere, and the SkillKey number never says BNSN', async ($, on) => {
+  const { writes, clock } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' } })
+  on('http.fetch', () => ({ value: { status: 404, ok: false, headers: {}, text: '' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  await clock.advance(3000)
+  const state = JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}')
+  expect(state.words).toBe(4200)
+  expect(state.bnsnWords ?? null).toBe(null)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'tab-home' })
+  const hero = (await ui.findAll({ type: 'Svg' })).find(p => /Your day/.test(String(p.props.alt)))
+  expect(hero.props.source).toContain('>SkillKey words<')
+  expect(hero.props.source).not.toContain('BNSN')
+  await ui.unmount()
+})
+
+test('any BNSN answer that names the balance updates the BNSN gauge; YouCloned\'s own balance look-up asks no question', async ($, on) => {
+  const { writes } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' }, bnsn: { server: BN, tools: BN_TOOLS },
+    toolCall: (e) => e.tool === 'mcp__' + BN + '__ask_vslAgent' ? { result: 'ok', text: 'Your VSL is ready. {"wordsRemaining": 1200}' } : undefined } as any)
+  on('tool.check', () => ({ decision: 'ask' }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  await $.tool.call({ tool: 'mcp__' + BN + '__ask_vslAgent', format: 'long' })
+  expect(JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}').bnsnWords).toBe(1200)
+  expect((await $.tool.check({ tool: 'mcp__' + BN + '__check-word-balance', input: {} })).decision).toBe('allow')
+  expect((await $.tool.check({ tool: 'mcp__' + BN + '__ask_vslAgent', input: {} })).decision).toBe('ask')
+  expect((await $.tool.check({ tool: 'mcp__other__check-word-balance', input: {} })).decision).toBe('ask')
+})
+
+// Runs one job the way the dashboard queues it (POST /do writes jobs.jsonl) and returns what reached the chat.
+async function dashboardJob($, on, text: string, opts: Record<string, unknown> = {}) {
+  const submitted: string[] = []
+  let queued = JSON.stringify({ text, at: 1 }) + '\n'
+  const { writes, clock } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' },
+    exists: (path) => path.endsWith('/jobs.jsonl') || undefined, read: (path) => path.endsWith('/jobs.jsonl') ? (writes.has(path) ? writes.get(path) : queued) : undefined, ...opts } as any)
+  on('prompt.submit', ($, e) => { submitted.push(String(e.text)); return { text: String(e.text) } })
+  on('http.fetch', () => ({ value: { status: 404, ok: false, headers: {}, text: '' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  await clock.advance(2000)
+  return submitted
+}
+
+test('setup step 5 with no connectors: SkillKey first, then BNSN for a BNSN owner, the other apps open in the browser', async ($, on) => {
+  const [job] = await dashboardJob($, on, '/youcloned connect', { skillKey: null })
+  expect(job).toMatch(/^Connect my apps to Claude, one at a time\. Start with SkillKey\./)
+  expect(job.indexOf('https://skills.bnsn.ai/claude')).toBeLessThan(job.indexOf('https://api.bnsn.ai/v1/mcp/bnsn/mcp'))
+  expect(job).toContain('whether I have a BNSN plan')
+  expect(job).toContain('BookBuilder, CourseBuilder and Improver have no Claude connector yet')
+  plainText(job)
+})
+
+test('setup step 5 with SkillKey only skips SkillKey and goes on to BNSN', async ($, on) => {
+  const [job] = await dashboardJob($, on, '/youcloned connect')
+  expect(job).toContain('SkillKey is already connected, so skip it.')
+  expect(job).toContain('https://api.bnsn.ai/v1/mcp/bnsn/mcp')
+})
+
+test('setup step 5 with SkillKey and BNSN both on names them connected and connects nothing again', async ($, on) => {
+  const [job] = await dashboardJob($, on, '/youcloned connect', { bnsn: { server: BN, tools: BN_TOOLS } })
+  expect(job).toContain('SkillKey is already connected, so skip it.')
+  expect(job).toContain('BNSN is already connected too.')
+  expect(job).not.toContain('https://api.bnsn.ai/v1/mcp/bnsn/mcp')
+})
+
+// Presses copy jobs in the Skills tab and returns what reached the chat for each, plus the state.json copy tags.
+async function pressCopy($, on, keys: string[], opts: Record<string, unknown> = {}) {
+  const submitted: string[] = []
+  const { writes, clock } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' }, ...opts } as any)
+  on('prompt.submit', ($, e) => { submitted.push(String(e.text)); return { text: String(e.text) } })
+  on('http.fetch', () => ({ value: { status: 404, ok: false, headers: {}, text: '' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  await clock.advance(3000)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'tab-skills' })
+  const out: Record<string, string> = {}
+  for (const k of keys) {
+    const before = submitted.length
+    await ui.press({ key: 'skill-' + k })
+    await clock.advance(1600)
+    out[k] = submitted.slice(before).join('\n')
+    plainText(out[k])
+  }
+  await ui.unmount()
+  const tags = Object.fromEntries((JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}').copy || []).map(c => [c.key, c.by]))
+  return { out, tags }
+}
+
+test('copy routing with no connectors: Claude writes from the rules file and the draft says so', async ($, on) => {
+  const { out, tags } = await pressCopy($, on, ['vsl-lead-writer', 'sales-page'], { skillKey: null })
+  expect(out['vsl-lead-writer']).toMatch(/^Write my VSL lead for one of my offers\./)
+  expect(out['vsl-lead-writer']).toContain('No BNSN or SkillKey writer for this job is connected, so write it yourself from my YouCloned rules.')
+  expect(out['sales-page']).toContain('"Written by Claude from my YouCloned rules"')
+  expect(out['sales-page']).not.toContain('start_skill')
+  expect(tags).toEqual({ 'vsl-lead-writer': 'Claude', 'sales-page': 'Claude', 'sales-letter': 'Claude', 'email-series': 'Claude', 'ads': 'Claude', 'opt-in-page': 'Claude' })
+})
+
+test('copy routing with SkillKey only: the VSL lead goes to Jon\'s SkillKey writer, then Claude; a job SkillKey lacks goes to Claude', async ($, on) => {
+  const { out, tags } = await pressCopy($, on, ['vsl-lead-writer', 'sales-page'])
+  expect(out['vsl-lead-writer']).toContain('The writer for this job is Jon\'s VSL Lead Writer on SkillKey: run Jon\'s VSL Lead Writer on SkillKey (start_skill with skill "vsl-lead-writer").')
+  expect(out['vsl-lead-writer']).toContain('tell me in one line and write it yourself from my YouCloned rules instead.')
+  expect(out['vsl-lead-writer']).toContain('"Written by Jon\'s VSL Lead Writer on SkillKey"')
+  expect(out['vsl-lead-writer']).not.toContain('BNSN\'s')
+  expect(out['sales-page']).toContain('write it yourself from my YouCloned rules')
+  expect(tags['vsl-lead-writer']).toBe('SkillKey')
+  expect(tags['sales-page']).toBe('Claude')
+})
+
+test('copy routing with SkillKey and BNSN: BNSN first, then SkillKey, then Claude; BNSN\'s paused writers fall through', async ($, on) => {
+  const { out, tags } = await pressCopy($, on, ['vsl-lead-writer', 'sales-page', 'ads'], { bnsn: { server: BN, tools: BN_TOOLS } })
+  const vsl = out['vsl-lead-writer']
+  expect(vsl).toContain('The writer for this job is BNSN\'s VSL agent: call mcp__' + BN + '__ask_vslAgent with the offer facts from my YouCloned rules')
+  expect(vsl).toContain('check back with get-generation-task-status')
+  expect(vsl.indexOf('mcp__' + BN + '__ask_vslAgent')).toBeLessThan(vsl.indexOf('start_skill with skill "vsl-lead-writer"'))
+  expect(vsl.indexOf('start_skill')).toBeLessThan(vsl.indexOf('if that says no too, write it yourself'))
+  expect(vsl).toContain('"Written by BNSN\'s VSL agent"')
+  // BNSN's sales page and ad writers are off on its connector today, so those buttons skip BNSN.
+  expect(out['sales-page']).not.toContain('ask_salesPageAgent')
+  expect(out['ads']).toMatch(/^Write ads for one of my offers\. Ask me which offer and which platform first\./)
+  expect(tags).toEqual({ 'vsl-lead-writer': 'BNSN', 'sales-page': 'Claude', 'sales-letter': 'Claude', 'email-series': 'Claude', 'ads': 'Claude', 'opt-in-page': 'Claude' })
+})
+
+test('when BNSN lists its sales page, email, ad and opt-in writers again, those buttons route to BNSN on their own', async ($, on) => {
+  const tools = [...BN_TOOLS, 'ask_salesPageAgent', 'ask_emailAgent', 'ask_adCopyAgent', 'ask_optInPageAgent']
+  const { out, tags } = await pressCopy($, on, ['sales-letter', 'email-series', 'opt-in-page'], { bnsn: { server: BN, tools } })
+  expect(out['sales-letter']).toContain('call mcp__' + BN + '__ask_salesPageAgent')
+  expect(out['email-series']).toContain('call mcp__' + BN + '__ask_emailAgent')
+  expect(out['email-series']).toContain('Ask me first whether it is a welcome, launch or promo series')
+  expect(out['opt-in-page']).toContain('call mcp__' + BN + '__ask_optInPageAgent')
+  expect(Object.values(tags).every(by => by === 'BNSN')).toBe(true)
+})
+
+test('the dashboard\'s copy buttons route the same way: /youcloned write <job>', async ($, on) => {
+  const [job] = await dashboardJob($, on, '/youcloned write vsl-lead-writer', { bnsn: { server: BN, tools: BN_TOOLS } })
+  expect(job).toMatch(/^Write my VSL lead for one of my offers\./)
+  expect(job).toContain('call mcp__' + BN + '__ask_vslAgent')
+})
+
+test('Ads and Opt-in page are copy jobs in Skills, each card naming its writer', async ($, on) => {
+  sessionStubs(on)
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'tab-skills' })
+  expect(await ui.find({ key: 'skill-ads' })).toBeDefined()
+  expect(await ui.find({ key: 'skill-opt-in-page' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^A page that turns visitors into leads · Writer: Claude$/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('job view: Save to my project saves to the folder, and to BNSN\'s project only when BNSN is connected', async ($, on) => {
+  const [without] = await dashboardJob($, on, '/youcloned save')
+  expect(without).toMatch(/^Save the draft you just wrote to my project: as a file in my YouCloned folder/)
+  expect(without).not.toContain('save-content-to-project')
+  plainText(without)
+})
+
+test('job view: Save to my project with BNSN connected saves to the BNSN project too', async ($, on) => {
+  const [withBnsn] = await dashboardJob($, on, '/youcloned save', { bnsn: { server: BN, tools: BN_TOOLS } })
+  expect(withBnsn).toContain('mcp__' + BN + '__save-content-to-project')
+})
+
+test('Plan an offer is gone: not in Skills, not on the Dashboard even from an old pin, and no job plans an offer', async ($, on) => {
+  const { store } = sessionStubs(on)
+  store.set('pins', ['offer', 'vsl-lead-writer'])
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await ui.press({ key: 'tab-skills' })
+    expect(await ui.findAll({ key: 'skill-offer' })).toHaveLength(0)
+    expect(await ui.findAll({ key: 'pin-offer' })).toHaveLength(0)
+    expect(await ui.findAll({ type: 'Text', text: /Plan an offer/ })).toHaveLength(0)
+    await ui.press({ key: 'tab-home' })
+    expect(await ui.findAll({ key: 'home-job-offer' })).toHaveLength(0)
+    expect(await ui.find({ key: 'home-job-vsl-lead-writer' })).toBeDefined()
+    await ui.unmount()
+  }
 })
 
 // A fresh Mac: no developer tools, so /usr/bin/python3 is only Apple's stand-in.

@@ -29,6 +29,7 @@ const crewIds = new Map()   // agentId -> crew name
 const notCrew = new Set()
 const gatePassed = new Set() // tool_use_ids of crew calls the gate allowed
 let skillKey = false        // the SkillKey connector is on in this session
+let bnsn = null             // the BNSN connector in this session: { prefix, server, tools }, found by its tools
 let skillKeyServer = null   // its name for $.mcp.call: "claude.ai SkillKey" in the terminal, an id in the desktop app
 const crewReady = new Set() // crew members registered with their instructions from SkillKey
 let sessionStartedAt = 0     // when this session began; connectors can take a minute to connect after it
@@ -53,17 +54,70 @@ const CARD = '#161d29'     // the dashboard's navy card, its border, and the sta
 const CARD_LINE = '#283346'
 const AMBER = '#e8b25c'
 const BLUE_INK = '#8fb6f4'
-// The BNSN apps on the Dashboard. Which ones the owner has is not looked up yet, so OWNED_SAMPLE stands in.
+// The BNSN apps on the Dashboard and in the panel. open = the web app, get = its sales page, connector =
+// the address a buyer pastes into Claude's Connectors (only SkillKey and BNSN have one today).
+const SK_CONNECTOR = 'https://skills.bnsn.ai/claude'
+const BNSN_CONNECTOR = 'https://api.bnsn.ai/v1/mcp/bnsn/mcp'
 const APPS = [
-  { key: 'skillkey', open: 'https://skills.bnsn.ai', get: SKILLKEY_INSTALL },
-  { key: 'bnsn', open: 'https://app.bnsn.ai', get: 'https://bnsn.ai' },
-  { key: 'bookbuilder', open: 'https://bookbuilder.bnsn.ai', get: 'https://bookbuilder.bnsn.ai' },
-  { key: 'improver', open: 'https://improver.bnsn.ai', get: 'https://improver.bnsn.ai' },
-  { key: 'coursebuilder', open: 'https://coursebuilder.bnsn.ai', get: 'https://coursebuilder.bnsn.ai' },
-  { key: 'offerbuilder', soon: 'Opens Oct 14' },
-  { key: 'aic', open: 'https://community.bnsn.ai', get: 'https://collective.bnsn.ai', join: true },
+  { key: 'skillkey', name: 'SkillKey', open: 'https://skills.bnsn.ai', get: SKILLKEY_INSTALL, connector: SK_CONNECTOR, free: true },
+  { key: 'bnsn', name: 'BNSN', open: 'https://app.bnsn.ai', get: 'https://bnsn.ai', connector: BNSN_CONNECTOR, getLabel: 'Get BNSN' },
+  { key: 'bookbuilder', name: 'BookBuilder', open: 'https://bookbuilder.bnsn.ai', get: 'https://bookbuilder.bnsn.ai' },
+  { key: 'improver', name: 'Improver', open: 'https://improver.bnsn.ai', get: 'https://improver.bnsn.ai' },
+  { key: 'coursebuilder', name: 'CourseBuilder', open: 'https://coursebuilder.bnsn.ai', get: 'https://coursebuilder.bnsn.ai' },
+  // OfferBuilder's presale opens Wed Oct 28 (Jon, Oct 12). Its page is not public yet, so no link until it is.
+  { key: 'offerbuilder', name: 'OfferBuilder', soon: 'Presale Wed Oct 28' },
+  { key: 'aic', name: 'AI Collective', open: 'https://community.bnsn.ai', get: 'https://collective.bnsn.ai', getLabel: 'Join' },
 ]
-const OWNED_SAMPLE = ['bnsn', 'bookbuilder', 'improver']
+// Which apps the owner bought. Nothing looks it up yet (card #32 piece B), so it stays null and an app
+// that can't be told apart shows both Open and Get it. When the lookup ships it saves the list as "ownedApps".
+let ownedApps = null
+
+// Each app's buttons, from what is known: a connected app says Connected and opens; SkillKey (free with
+// Command) connects; BNSN is paid only, so it offers Get BNSN and, for owners, Connect; the others open
+// in the browser until their connectors ship.
+function appStates() {
+  return APPS.map(a => {
+    const connected = a.key === 'skillkey' ? skillKey : a.key === 'bnsn' ? !!bnsn : false
+    const owns = connected ? true : ownedApps ? ownedApps.includes(a.key) : null
+    const open = { kind: 'open', label: 'Open', href: a.open }
+    const get = { kind: 'get', label: a.getLabel || 'Get it', href: a.get }
+    const connect = { kind: 'connect', label: 'Connect', job: '/youcloned connect ' + a.key, copy: a.connector }
+    let buttons
+    if (a.soon) buttons = [{ kind: 'soon', label: a.soon }]
+    else if (connected) buttons = [{ kind: 'connected', label: 'Connected' }, open]
+    else if (a.connector && a.free) buttons = [{ ...connect, primary: true }]
+    else if (a.connector) buttons = owns === true ? [{ ...connect, primary: true }] : owns === false ? [{ ...get, primary: true }] : [get, connect]
+    else buttons = owns === true ? [open] : owns === false ? [{ ...get, primary: true }] : [open, get]
+    return { key: a.key, name: a.name, connected, owns, buttons }
+  })
+}
+
+// The connect job a Connect button starts in the chat: Claude walks the owner through Claude's own
+// Connectors screen, since a connector lives in their Claude account and only they can add it.
+const CONNECT_STEPS = (name, address, signIn, check) => 'Walk me through it one step at a time and wait for me after each step. ' +
+  'Show me this address in a code block so I can copy it: ' + address + ' (the YouCloned dashboard copied it for me too). ' +
+  'In Claude, open Customize, then Connectors, click Add, then Add custom connector. Type ' + name + ' in the first box and paste the address in the second. ' +
+  'Click Connect. ' + signIn + ' Then open a new chat and type "' + check + '". The balance coming back means it worked. ' +
+  'The first time each ' + name + ' tool runs, Claude asks to allow it: allow the ones that read, and keep the ones that save or change something on ask.'
+
+function connectJobText(key) {
+  const sk = 'Connect SkillKey to my Claude account. SkillKey comes with YouCloned and carries Jon\'s skills and my SkillKey words. ' +
+    CONNECT_STEPS('SkillKey', SK_CONNECTOR, 'A browser tab opens SkillKey\'s sign-in: I sign in with my email and the code SkillKey sends.', 'check my SkillKey words')
+  const bn = 'Connect BNSN to my Claude account so BNSN\'s agents write my copy from my blueprints. ' +
+    CONNECT_STEPS('BNSN', BNSN_CONNECTOR, 'A browser tab opens BNSN\'s sign-in: I sign in with the BNSN login I bought BNSN with, then click Approve.', 'check my BNSN words') +
+    ' BNSN needs an active BNSN plan. If I don\'t have one, say so in one line: the Get BNSN button on my dashboard shows the plans, and until then Jon\'s SkillKey writers write my copy.'
+  if (key === 'skillkey') return skillKey ? 'SkillKey is already connected in this Claude account. Tell me that in one line and check my SkillKey words.' : sk
+  if (key === 'bnsn') return bnsn ? 'BNSN is already connected in this Claude account. Tell me that in one line and check my BNSN words.' : bn
+  const app = APPS.find(a => a.key === key)
+  if (app && app.open) return 'Open ' + app.name + ' for me: ' + app.open + '. ' + app.name + ' has no Claude connector yet, so it opens in the browser.'
+  // Setup step 5: SkillKey first, then each app the owner has.
+  return 'Connect my apps to Claude, one at a time. ' +
+    (skillKey ? 'SkillKey is already connected, so skip it. ' : 'Start with SkillKey. ' + sk + ' ') +
+    (bnsn ? 'BNSN is already connected too. '
+      : 'When SkillKey is done, ask me in one short question whether I have a BNSN plan. If I do, connect BNSN next. ' + bn + ' ') +
+    'BookBuilder, CourseBuilder and Improver have no Claude connector yet: tell me they open from the Open buttons on my YouCloned dashboard.'
+}
+
 const DASH_PORT = 4600
 const DASH_URL = 'http://localhost:' + DASH_PORT
 const SERVICE = 'ai.bnsn.youcloned.dashboard'
@@ -91,12 +145,73 @@ const BUILT_IN = [
     text: 'Write a sales letter for one of my offers. If I sell more than one thing, ask me which one first. Follow my YouCloned rules for voice and brand, and save it as a file in my YouCloned folder.' },
   { key: 'email-series', label: 'Email series', what: 'Welcome, launch or promo',
     text: 'Write an email series for my business. Ask me first whether it is a welcome, launch or promo series and which offer it is for. Follow my YouCloned rules, and save it as a file in my YouCloned folder.' },
+  { key: 'ads', label: 'Ads', what: 'Ad copy for one of your offers',
+    text: 'Write ads for one of my offers. Ask me which offer and which platform first. Follow my YouCloned rules, and save them as a file in my YouCloned folder.' },
+  { key: 'opt-in-page', label: 'Opt-in page', what: 'A page that turns visitors into leads',
+    text: 'Write an opt-in page for one of my offers or free gifts. Ask me which one first. Follow my YouCloned rules, and save it as a file in my YouCloned folder.' },
   { key: 'web-page', label: 'Web page', what: 'Your copy and your brand, one page',
     text: 'Build me a one-page website for my business as a single HTML file in my YouCloned folder. Use my YouCloned rules for the copy, colors and fonts, and show me how to open it when it is done.' },
-  { key: 'offer', label: 'Plan an offer', what: 'Price, bonuses and guarantee',
-    text: 'Help me plan a new offer for my audience: what it is, the price, the bonuses and the guarantee. Ask me a few questions first, then write the plan to a file in my YouCloned folder.' },
 ]
+// No offer planning here: YouCloned never plans offers (Jon's Oct 1 split); OfferBuilder does.
 const DEFAULT_PINS = ['vsl-lead-writer', 'sales-page', 'youtube-video', 'inbox']
+
+// Copy jobs go to the best writer the owner has: BNSN's matching agent when BNSN is connected and lists it,
+// then Jon's SkillKey writer for the job, then Claude from the rules file. The draft names its writer.
+// BNSN's sales page, email, ad and opt-in agents are off on BNSN's connector today (bnsn#1423, #1292); the
+// moment BNSN lists one again, its button routes there with no new add-on version.
+const COPY = {
+  'vsl-lead-writer': { ask: 'my VSL lead', bnsn: 'ask_vslAgent', agent: 'VSL agent', skill: 'vsl-lead-writer', match: /vsl lead/i, known: true },
+  'sales-page': { ask: 'a sales page', bnsn: 'ask_salesPageAgent', agent: 'sales page agent', skill: 'sales-page', match: /^sales page( writer)?$/i },
+  'sales-letter': { ask: 'a sales letter', bnsn: 'ask_salesPageAgent', agent: 'sales page agent', skill: 'sales-letter', match: /sales letter/i },
+  'email-series': { ask: 'an email series', bnsn: 'ask_emailAgent', agent: 'email agent', skill: 'email-series', match: /email (series|sequence)/i,
+    first: 'Ask me first whether it is a welcome, launch or promo series and which offer it is for.' },
+  'ads': { ask: 'ads', bnsn: 'ask_adCopyAgent', agent: 'ad copy agent', skill: 'ad-copy', match: /ad copy|\bads\b/i, first: 'Ask me which offer and which platform first.' },
+  'opt-in-page': { ask: 'an opt-in page', bnsn: 'ask_optInPageAgent', agent: 'opt-in page agent', skill: 'opt-in-page', match: /opt-?in page/i,
+    first: 'Ask me which offer or free gift it is for first.' },
+}
+
+// The writers for one copy job, best first; the last one is always Claude, which every owner has.
+function copyWriters(key) {
+  const c = COPY[key]
+  const out = []
+  if (bnsn && bnsn.tools.includes(c.bnsn)) out.push({ by: 'BNSN', name: 'BNSN\'s ' + c.agent, tool: 'mcp__' + bnsn.prefix + '__' + c.bnsn })
+  if (skillKey) {
+    const sk = skillKeySkills.find(x => x.key === c.skill || (c.match.test(x.label) && !/audit|check/i.test(x.label)))
+    if (sk) out.push({ by: 'SkillKey', name: 'Jon\'s ' + sk.label + ' on SkillKey', slug: sk.key })
+    else if (c.known && !skillKeySkills.length) out.push({ by: 'SkillKey', name: 'Jon\'s VSL Lead Writer on SkillKey', slug: c.skill })
+  }
+  out.push({ by: 'Claude', name: 'Claude from my YouCloned rules' })
+  return out
+}
+
+function copyJobText(key) {
+  const c = COPY[key]
+  const [first, ...rest] = copyWriters(key)
+  const how = (w) => w.by === 'BNSN'
+    ? 'call ' + w.tool + ' with the offer facts from my YouCloned rules, using my BNSN project and blueprint for this offer (make them with BNSN\'s create-project and create-blueprint tools if I have none). Long BNSN jobs take a few minutes: check back with get-generation-task-status until it is done'
+    : w.by === 'SkillKey' ? 'run ' + w.name + ' (start_skill with skill "' + w.slug + '")'
+    : 'write it yourself from my YouCloned rules'
+  let t = 'Write ' + c.ask + ' for one of my offers. ' + (c.first || 'Ask me which offer first if I sell more than one.') + ' '
+  t += first.by === 'Claude' ? 'No BNSN or SkillKey writer for this job is connected, so write it yourself from my YouCloned rules. '
+    : 'The writer for this job is ' + first.name + ': ' + how(first) + '. '
+  if (rest.length) t += 'If that writer says no (no active plan, no words left, or no such tool), tell me in one line and ' + how(rest[0]) + ' instead' +
+    (rest[1] ? '; if that says no too, ' + how(rest[1]) : '') + '. '
+  t += 'Follow my YouCloned rules for voice and brand, and save the draft as a file in my YouCloned folder. ' +
+    'The draft\'s first line names the writer that wrote it, like "Written by ' + first.name + '".'
+  return t
+}
+
+// The job view's "Save to my project": the folder always, BNSN's project too when BNSN is connected.
+function saveJobText() {
+  return 'Save the draft you just wrote to my project: as a file in my YouCloned folder if it is not there yet' +
+    (bnsn ? ', and to my BNSN project with mcp__' + bnsn.prefix + '__save-content-to-project (ask me which project if I have more than one)' : '') +
+    '. Then tell me where each copy went, one short line each.'
+}
+
+// Who writes each copy job right now, for the buttons that say so.
+function copyStates() {
+  return Object.keys(COPY).map(key => ({ key, label: (BUILT_IN.find(b => b.key === key) || {}).label || key, by: copyWriters(key)[0].by }))
+}
 const MAX_PINS = 6
 let skillKeySkills = []     // { key, label, what, text } for each skill SkillKey says this account owns
 let pins = DEFAULT_PINS.slice()
@@ -208,6 +323,13 @@ async function runJob($, text) {
   if (word === 'setup') return startSetup($)
   if (word === 'codex') return codexButton($)
   if (word === 'crew') { $.ui.toast(await crewNow($, (args.split(/\s+/)[1] || '').toLowerCase())); return }
+  if (word === 'save') { try { await checkBnsn($) } catch {} await $.prompt.submit({ text: saveJobText(), asUser: true }); return }
+  if (word === 'write') {
+    const key = (args.split(/\s+/)[1] || '').toLowerCase()
+    if (COPY[key]) { try { await checkBnsn($) } catch {} await $.prompt.submit({ text: copyJobText(key), asUser: true }) }
+    return
+  }
+  if (word === 'connect') { await $.prompt.submit({ text: connectJobText((args.split(/\s+/)[1] || '').toLowerCase()), asUser: true }); return }
 }
 
 // Going through a helper's drafts with the owner, one at a time; nothing goes out without their yes.
@@ -226,7 +348,10 @@ function pressJob($, job) {
 async function sendPressed($) {
   while (pressed.length) {
     const job = pressed.shift()
-    try { await runJob($, job.text); await logPress($, 'sent: ' + job.label) }
+    try {
+      if (COPY[job.key]) { try { await checkBnsn($) } catch {} }
+      await runJob($, COPY[job.key] ? copyJobText(job.key) : job.text); await logPress($, 'sent: ' + job.label)
+    }
     catch (err) { await logPress($, 'failed: ' + job.label + ': ' + String((err && err.message) || err).slice(0, 300)) }
   }
 }
@@ -274,6 +399,9 @@ async function refreshLive($, withWords) {
     }
   } catch {}
   if (withWords) {
+    try { await checkBnsn($) } catch {}
+    if (bnsn) { const n = bnsnWordsIn(await bnsnCall($, 'check-word-balance', {})); if (n != null) live.bnsnWords = n }
+    else live.bnsnWords = null
     try {
       const r = await skillKeyCall($, 'word_balance', {})
       const txt = (r.content || []).map(c => c.text || '').join(' ')
@@ -322,7 +450,7 @@ async function writeState($) {
     if (!deskSession) {
       try { const old = JSON.parse(await $.fs.read(dataDir() + '/state.json')); mine = { session: old.session, listening: !!old.listening } } catch { mine = {} }
     }
-    await $.fs.write(dataDir() + '/state.json', JSON.stringify({ ...live, name: lastName, ...mine, at: await $.clock.now() }))
+    await $.fs.write(dataDir() + '/state.json', JSON.stringify({ ...live, name: lastName, ...mine, skillKey, bnsn: !!bnsn, apps: appStates(), copy: copyStates(), at: await $.clock.now() }))
   } catch {}
 }
 
@@ -640,6 +768,67 @@ function skillKeyFrom(names) {
   return null
 }
 
+// BNSN's connector is the one with check-word-balance and one of BNSN's own writers or its agent. Like
+// SkillKey, the desktop app names it by an id, so it is found by its tools. servers maps a tool prefix to
+// the connector's name for $.mcp.call, when the app reports it.
+const BNSN_MARKS = ['ask_vslAgent', 'ask_salesPageAgent', 'bnsn', 'ask_bnsn_agent', 'vsl_planner', 'list-blueprints']
+const TOOL_NAME = /^mcp__(.+)__([^_](?:(?!__).)*)$/
+function bnsnFrom(names, servers = {}) {
+  const byServer = new Map()
+  for (const n of names) {
+    const m = TOOL_NAME.exec(n)
+    if (!m || /youcloned/.test(m[1])) continue
+    if (!byServer.has(m[1])) byServer.set(m[1], new Set())
+    byServer.get(m[1]).add(m[2])
+  }
+  for (const [prefix, tools] of byServer) {
+    if (tools.has('check-word-balance') && BNSN_MARKS.some(t => tools.has(t))) {
+      return { prefix, server: servers[prefix] || (prefix === 'claude_ai_BNSN' ? 'claude.ai BNSN' : prefix), tools: [...tools] }
+    }
+  }
+  return null
+}
+
+let bnsnSeen = false         // Claude itself used BNSN in this session, so it stays Connected even when a list leaves it out
+async function checkBnsn($) {
+  const names = []
+  const servers = {}
+  try { for (const t of await $.tool.list()) names.push(typeof t === 'string' ? t : t.name || '') } catch {}
+  // In the desktop app a connector's tools wait behind ToolSearch; the context breakdown lists them all.
+  try {
+    for (const row of (await $.session.usage({ breakdown: 'summary' }))?.context?.breakdown?.mcpTools || []) {
+      names.push(row.name)
+      const m = TOOL_NAME.exec(row.name || '')
+      if (m && row.serverName) servers[m[1]] = row.serverName
+    }
+  } catch {}
+  const found = bnsnFrom(names, servers)
+  if (found) bnsn = found
+  else if (!bnsnSeen) bnsn = null
+  try { const saved = await $.store.get('ownedApps'); ownedApps = Array.isArray(saved) ? saved.filter(k => typeof k === 'string') : null } catch {}
+}
+
+// Calls one of BNSN's tools for YouCloned: straight to the connector, or, where the desktop app keeps its
+// connectors to itself, the way the model calls it. The text of the answer, or null.
+async function bnsnCall($, tool, args) {
+  if (!bnsn) return null
+  try {
+    const r = await $.mcp.call(bnsn.server, tool, args || {})
+    if (r && !r.isError) return (r.content || []).map(c => c.text || '').join('\n')
+  } catch {}
+  try {
+    const r = await $.tool.call({ tool: 'mcp__' + bnsn.prefix + '__' + tool, ...(args || {}) })
+    if (r && !r.deny && !r.isError && String(r.text ?? '').trim()) return String(r.text)
+  } catch {}
+  return null
+}
+
+// BNSN's check-word-balance answers {"canProceed": true, "wordsRemaining": 25000}.
+function bnsnWordsIn(text) {
+  const m = /"?wordsRemaining"?\s*[:=]\s*(-?[\d,]+)/i.exec(String(text || ''))
+  return m ? Math.max(0, Number(m[1].replace(/,/g, ''))) : null
+}
+
 async function checkSkillKey($) {
   try {
     const names = (await $.tool.list()).map(t => typeof t === 'string' ? t : t.name || '')
@@ -658,6 +847,7 @@ async function checkSkillKey($) {
   }
   if (!skillKeyServer) { const saved = await $.store.get('skillKeyServer'); if (typeof saved === 'string' && saved) skillKeyServer = saved }
   skillKey = !!skillKeyServer
+  await checkBnsn($)
 }
 
 async function skillKeyCall($, tool, args) {
@@ -965,6 +1155,12 @@ export function register(on) {
     return next(e)
   })
 
+  on('tool.check', { tool: /^mcp__.+__check-word-balance$/ }, async ($, e, next) => {
+    const m = TOOL_NAME.exec(e.tool || '')
+    if (m && bnsn && m[1] === bnsn.prefix) return { decision: 'allow', reason: 'a BNSN word balance look-up by YouCloned' }
+    return next(e)
+  })
+
   // A crew call the gate allowed runs without a permission question, since the crew works
   // while nobody watches. A rule of the customer's that denies the call still wins.
   on('tool.check', async ($, e, next) => {
@@ -1176,6 +1372,28 @@ export function register(on) {
     return r
   })
 
+  // Learns BNSN's connector the moment Claude uses one of BNSN's writers or its agent.
+  on('tool.call', { tool: /^mcp__.+__(ask_vslAgent|ask_salesPageAgent|ask_emailAgent|ask_adCopyAgent|ask_optInPageAgent|bnsn|ask_bnsn_agent|vsl_planner|check-word-balance)$/ }, async ($, e, next) => {
+    const m = TOOL_NAME.exec(e.tool || '')
+    if (m && !/youcloned/.test(m[1]) && m[1] !== skillKeyServer) {
+      if (bnsn && bnsn.prefix === m[1]) { if (!bnsn.tools.includes(m[2])) bnsn.tools.push(m[2]) }
+      else if (m[2] !== 'check-word-balance') {
+        bnsn = { prefix: m[1], server: m[1] === 'claude_ai_BNSN' ? 'claude.ai BNSN' : m[1], tools: [m[2]] }
+        bnsnSeen = true
+        try { await writeState($) } catch {}
+        $.ui.invalidate('ui.render')
+      }
+    }
+    const r = await next(e)
+    const n = bnsn && m && m[1] === bnsn.prefix ? bnsnWordsIn(String(r?.text ?? '')) : null
+    if (n != null) {
+      live.bnsnWords = n
+      try { await writeState($) } catch {}
+      $.ui.invalidate('ui.render')
+    }
+    return r
+  })
+
   // The helper tool runs inside the model's request, where Auto mode lets YouCloned reach SkillKey.
   on('tool.call', { tool: 'mcp__youcloned__helper' }, async ($, e) => {
     return { result: await runCrew($, String(e.name || '').toLowerCase()) }
@@ -1282,7 +1500,7 @@ export function register(on) {
         ] })
         const row = (children) => Box({ flexDirection: 'row', flexWrap: 'wrap', columnGap: 1, rowGap: 1, alignItems: 'center', children })
 
-        body.push(pic('Your day: plan left, Codex and BNSN words', heroSvg({ name, left, reset, span: live.claudeSpan, words: live.words, codex: codexReady, codexPlan: live.codex || null, lines })))
+        body.push(pic('Your day: plan left, Codex and your words', heroSvg({ name, left, reset, span: live.claudeSpan, words: live.words, bnsnWords: live.bnsnWords, codex: codexReady, codexPlan: live.codex || null, lines })))
         body.push(Client
           ? Client({ key: 'talk', module: './talk.js', props: { listening } })
           : ycButton('home-talk', listening ? 'Isaac is listening · press to stop' : 'Talk to Isaac', () => pressTalk($), true))
@@ -1325,11 +1543,14 @@ export function register(on) {
             ] })
           })))
 
-        const owned = new Set([...OWNED_SAMPLE, ...(skillKey ? ['skillkey'] : [])])
-        body.push(card({ icon: 'apps', color: '#5a92ea', title: 'Your BNSN apps' }, [row(APPS.map(a => Box({ flexDirection: 'column', rowGap: 1, alignItems: 'stretch', children: [
+        // Each app's buttons come from appStates(): a page opens in the browser, Connect starts the connect job.
+        const appButton = (a, b) => b.kind === 'soon' ? Text({ dimColor: true, children: [b.label] })
+          : b.kind === 'connected' ? Text({ bold: true, color: BLUE_INK, children: [b.label] })
+          : b.kind === 'connect' ? ycButton('app-' + a.key + '-connect', b.label, () => pressJob($, { label: 'Connect ' + a.name, text: b.job }), !!b.primary)
+          : ycLink(b.href, b.label, !!b.primary)
+        body.push(card({ icon: 'apps', color: '#5a92ea', title: 'Your BNSN apps' }, [row(appStates().map(a => Box({ flexDirection: 'column', rowGap: 1, alignItems: 'stretch', children: [
           Svg({ alt: a.key, source: plateSvg(a.key), width: PLATE.w, height: PLATE.h }),
-          a.soon ? Text({ dimColor: true, children: [a.soon] })
-            : owned.has(a.key) ? ycLink(a.open, 'Open', false) : ycLink(a.get, a.join ? 'Join' : 'Get it', true),
+          ...a.buttons.map(b => appButton(a, b)),
         ] })))]))
 
         body.push(card({ icon: 'play', color: '#5a92ea', title: 'New from Jon' }, [Box({ flexDirection: 'row', columnGap: 2, alignItems: 'center', children: [
@@ -1347,7 +1568,8 @@ export function register(on) {
         body.push(Text({ dimColor: true, children: ['The full ', Text({ bold: true, color: BLUE_INK, children: ['YouCloned'] }), ' dashboard: click the globe at the top right'] }))
       } else {
         body.push(Text({ bold: true, color: BLUE, children: ['YouCloned'] }))
-        body.push(Text({ children: ['Claude plan left: ' + (left == null ? '?' : Math.round(left) + '%') + '   BNSN words: ' + (live.words == null ? 'not linked' : Number(live.words).toLocaleString('en-US'))] }))
+        body.push(Text({ children: ['Claude plan left: ' + (left == null ? '?' : Math.round(left) + '%') + '   SkillKey words: ' + (live.words == null ? 'not linked' : Number(live.words).toLocaleString('en-US')) +
+          (live.bnsnWords == null ? '' : '   BNSN words: ' + Number(live.bnsnWords).toLocaleString('en-US'))] }))
         body.push(Box({ flexDirection: 'row', flexWrap: 'wrap', columnGap: 1, rowGap: 0, children: [
           ...pinnedSkills().map(j => Button({ key: 'home-job-' + j.key, label: j.label, onPress: () => pressJob($, j) })),
           Button({ key: 'home-all', label: 'All skills', plain: true, onPress: () => { tab = 'skills'; redraw() } }),
@@ -1388,7 +1610,7 @@ export function register(on) {
         const isPinned = pins.includes(sk.key)
         return Box({ key: 'card-' + sk.key, flexDirection: 'column', borderStyle: 'round', paddingX: 1, width: cardWidth, children: [
           Text({ bold: true, children: [sk.label] }),
-          Text({ dimColor: true, wrap: 'wrap', children: [sk.what] }),
+          Text({ dimColor: true, wrap: 'wrap', children: [sk.what + (COPY[sk.key] ? ' · Writer: ' + copyWriters(sk.key)[0].by : '')] }),
           Box({ flexDirection: 'row', columnGap: 2, children: [
             Button({ key: 'skill-' + sk.key, label: 'Start', onPress: () => pressJob($, sk) }),
             Button({ key: 'pin-' + sk.key, label: isPinned ? 'Unpin' : 'Pin to Dashboard', plain: true, dimColor: true, onPress: () => togglePin($, sk.key) }),
