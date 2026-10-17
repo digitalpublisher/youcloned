@@ -12,10 +12,11 @@ import { RULES_NAME, checkSetup, rulesMarkdown } from './rules.js'
 import { STEPS, STEP_IDS, EXTRA_STEPS, CAN_SKIP, setupText, nextStep, onlyText } from './steps.js'
 import { HELPERS, parseAgent, gmailReads, helperJudge, helperGate, helperDenyText } from './helpers.js'
 import { UNIVERSAL_RULES } from './universal.js'
-import { topSvg, heroSvg, moneySvg, cardHeadSvg, plateSvg, thumbSvg, PLATE, THUMB, setWidth } from './panel.js'
+import { topSvg, heroSvg, cardHeadSvg, plateSvg, thumbSvg, PLATE, THUMB, setWidth } from './panel.js'
 
 const PANE = 'youcloned'
-const TABS = [['home', 'Dashboard'], ['skills', 'Skills'], ['crew', 'Crew'], ['money', 'Money'], ['setup', 'Setup']]
+// No Money tab: there's no sales or time data to show yet, and a buyer never sees made-up numbers (Oct 17).
+const TABS = [['home', 'Dashboard'], ['skills', 'Skills'], ['crew', 'Crew'], ['setup', 'Setup']]
 const CREW = [
   { name: 'support', title: 'Support', what: 'Drafts answers to customer questions in your voice' },
   { name: 'inbox', title: 'Inbox', what: 'Sorts your new email and drafts the replies that need you' },
@@ -58,7 +59,7 @@ const CARD = '#161d29'     // the dashboard's navy card, its border, and the sta
 const CARD_LINE = '#283346'
 const AMBER = '#e8b25c'
 const BLUE_INK = '#8fb6f4'
-// The BNSN apps on the Dashboard. Which ones the owner has is not looked up yet, so OWNED_SAMPLE stands in.
+// The BNSN apps on the Dashboard. Which ones the owner has isn't looked up, so each one just opens.
 const APPS = [
   { key: 'skillkey', open: 'https://skills.bnsn.ai', get: SKILLKEY_INSTALL },
   { key: 'bnsn', open: 'https://app.bnsn.ai', get: 'https://bnsn.ai' },
@@ -68,7 +69,6 @@ const APPS = [
   { key: 'offerbuilder', soon: 'Opens Oct 14' },
   { key: 'aic', open: 'https://community.bnsn.ai', get: 'https://collective.bnsn.ai', join: true },
 ]
-const OWNED_SAMPLE = ['bnsn', 'bookbuilder', 'improver']
 const DASH_PORT = 4600
 const DASH_URL = 'http://localhost:' + DASH_PORT
 const SERVICE = 'ai.bnsn.youcloned.dashboard'
@@ -198,11 +198,6 @@ async function readCodexPlan($) {
       label: 'Codex' + (d ? ' · resets ' + d.toLocaleDateString('en-US', { weekday: 'short' }) + ' ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : span ? ' · ' + span : '') }
   } catch {}
 }
-
-// Made or saved this week. Sample figures, labelled Sample, until the owner's Stripe and job hours are wired.
-const MONEY_SAMPLE = { total: 7514, up: 17, sample: true, parts: [
-  { label: 'Sales', value: 4120, color: '#5a92ea' }, { label: 'Time', value: 3180, color: '#a598f5' }, { label: 'Bills', value: 214, color: '#e8b25c' },
-] }
 
 function dataDir() {
   return home + '/.youcloned'
@@ -1817,8 +1812,6 @@ export function register(on) {
           Button({ key: 'home-all', label: 'All skills', plain: true, dimColor: true, onPress: () => { tab = 'skills'; redraw() } }),
         ])]))
 
-        body.push(pic('Made or saved this week (sample)', moneySvg(MONEY_SAMPLE)))
-
         const need = CREW.filter(c => crew[c.name].drafts.length).length
         body.push(card({ icon: 'crew', color: AMBER, title: 'Your crew', meta: need ? need + (need === 1 ? ' needs you' : ' need you') : 'All caught up' },
           CREW.map(c => {
@@ -1835,11 +1828,10 @@ export function register(on) {
             ] })
           })))
 
-        const owned = new Set([...OWNED_SAMPLE, ...(skillKey ? ['skillkey'] : [])])
         body.push(card({ icon: 'apps', color: '#5a92ea', title: 'Your BNSN apps' }, [row(APPS.map(a => Box({ flexDirection: 'column', rowGap: 1, alignItems: 'stretch', children: [
           Svg({ alt: a.key, source: plateSvg(a.key), width: PLATE.w, height: PLATE.h }),
           a.soon ? Text({ dimColor: true, children: [a.soon] })
-            : owned.has(a.key) ? ycLink(a.open, 'Open', false) : ycLink(a.get, a.join ? 'Join' : 'Get it', true),
+            : a.key === 'skillkey' && !skillKey ? ycLink(a.get, 'Connect', true) : ycLink(a.open, 'Open', false),
         ] })))]))
 
         body.push(card({ icon: 'play', color: '#5a92ea', title: 'New from Jon' }, [Box({ flexDirection: 'row', columnGap: 2, alignItems: 'center', children: [
@@ -1926,11 +1918,6 @@ export function register(on) {
         Text({ dimColor: true, wrap: 'wrap', children: ['Jon\'s voice, VSL and conversion skills show up here once SkillKey is connected.'] }),
         Link({ href: SKILLKEY_INSTALL, label: 'Connect SkillKey' }),
       ] }))
-    }
-    if (tab === 'money') {
-      if (e.surface === 'desktop') body.push(pic('Made or saved this week (sample)', moneySvg(MONEY_SAMPLE)))
-      else body.push(Text({ children: ['Made or saved this week (sample): $' + MONEY_SAMPLE.total.toLocaleString('en-US')] }))
-      body.push(Text({ dimColor: true, wrap: 'wrap', children: ['These numbers are a sample. Your own sales from Stripe and the time your clone saves you show here once they are connected.'] }))
     }
     if (tab === 'setup') {
       body.push(Text({ bold: true, children: ['Your clone'] }))

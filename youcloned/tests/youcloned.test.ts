@@ -578,8 +578,7 @@ test('the pane draws every tab in the terminal and the desktop app', async ($, o
     await ui.press({ key: 'tab-crew' })
     expect(await ui.find({ key: 'run-support' })).toBeDefined()
     expect(await ui.find({ key: 'every-inbox' })).toBeDefined()
-    await ui.press({ key: 'tab-money' })
-    expect(await ui.find({ type: 'Text', text: /These numbers are a sample/ })).toBeDefined()
+    expect(await ui.find({ key: 'tab-money' })).toBeUndefined()
     await ui.press({ key: 'tab-setup' })
     expect(await ui.find({ key: 'setup' })).toBeDefined()
     expect(await ui.find({ key: 'codex' })).toBeDefined()
@@ -783,7 +782,7 @@ test('the desktop panel pictures: full-width cards have no fixed size, logos and
   await ui.unmount()
 })
 
-test('the desktop Dashboard: greeting, job card, money (Sample), crew with its buttons, apps with theirs, newest video', async ($, on) => {
+test('the desktop Dashboard: greeting, job card, crew with its buttons, apps with theirs, newest video, and no made-up numbers', async ($, on) => {
   sessionStubs(on)
   await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
@@ -791,8 +790,7 @@ test('the desktop Dashboard: greeting, job card, money (Sample), crew with its b
   const alts = (await ui.findAll({ type: 'Svg' })).map(p => String(p.props.alt))
   expect(alts[0]).toBe('YouCloned')
   for (const a of ['Start a job', 'Your crew', 'Your BNSN apps', 'New from Jon']) expect(alts).toContain(a)
-  const money = (await ui.findAll({ type: 'Svg' })).find(p => /Made or saved/.test(String(p.props.alt)))
-  expect(money.props.source).toMatch(/>Sample</)
+  expect(alts.some(a => /Made or saved|sample/i.test(a))).toBe(false)
   expect(await ui.find({ key: 'home-job-vsl-lead-writer' })).toBeDefined()
   expect(await ui.find({ key: 'home-run-support' })).toBeDefined()
   expect(await ui.find({ key: 'home-new' })).toBeDefined()
@@ -824,7 +822,7 @@ test('no tab, job or skill button carries a keyboard letter or number', async ($
   sessionStubs(on)
   await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  for (const t of ['home', 'skills', 'crew', 'money', 'setup']) {
+  for (const t of ['home', 'skills', 'crew', 'setup']) {
     await ui.press({ key: 'tab-' + t })
     for (const b of await ui.findAll({ type: 'Button' })) expect(b.props.hotkey).toBeUndefined()
   }
