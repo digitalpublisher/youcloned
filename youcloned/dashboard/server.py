@@ -21,12 +21,16 @@ OPEN_SITES = ("bnsn.ai", "youtube.com", "youtu.be", "openai.com")
 
 
 def can_open(url):
+    # A browser reads a backslash as a slash and anything before an @ as a login, so "https://x.org\\@bnsn.ai"
+    # goes to x.org: such addresses are refused outright (Codex review 6).
+    if not isinstance(url, str) or len(url) > 2000 or any(c in url for c in "\\@") or any(ord(c) < 33 or ord(c) == 127 for c in url):
+        return False
     try:
-        u = urllib.parse.urlparse(url)
+        u = urllib.parse.urlsplit(url)
     except Exception:
         return False
     host = (u.hostname or "").lower()
-    return u.scheme == "https" and any(host == d or host.endswith("." + d) for d in OPEN_SITES)
+    return u.scheme == "https" and u.netloc.lower() == host and any(host == d or host.endswith("." + d) for d in OPEN_SITES)
 
 
 def open_in_browser(url):

@@ -1,10 +1,11 @@
 // The night-one setup, in the only order that works: each step needs the ones before it.
 // register.js checks every step on this computer (never assumed) and setup_next hands Claude the first
 // one that isn't done, so a buyer goes from a fresh Claude to a clone that knows them in one evening.
+//   skillkey   first, because it's how setup knows they bought YouCloned (Jon, Oct 17 4:48pm: everything we sell is
+//              protected): nothing else runs until a SkillKey account that owns YouCloned is connected
 //   tools      Git, Node, Python, ffmpeg, Obsidian and the GitHub tool; everything after needs them
 //   home       the clone's folder (an Obsidian vault); the rules file, backups and the env file live here
 //   protection the key check on every commit, before anything is saved to GitHub
-//   skillkey   Jon's skills and the interview's own steps come from SkillKey
 //   interview  who they are, what they sell, who buys, how they sound: the rules file
 //   skills     the starter skills pack
 //   backup     a private GitHub copy of the folder, every night
@@ -13,10 +14,10 @@
 //   feed       "feed me": the clone's first sources go into the library
 
 export const STEPS = [
+  { id: 'skillkey', title: 'SkillKey', why: 'Connects your YouCloned account with the code from your purchase email. It\'s how your clone knows you bought it, and Jon\'s skills and the interview come from it.' },
   { id: 'tools', title: 'Your tools', why: 'Installs Git, Node, Python, the video tools, Obsidian and GitHub\'s tool. Skips anything you already have.' },
   { id: 'home', title: 'Your clone\'s home', why: 'A folder that becomes your Obsidian vault, where your clone keeps your rules, notes and work.' },
   { id: 'protection', title: 'Protection', why: 'Checks every save for passwords and keys before anything leaves your computer.' },
-  { id: 'skillkey', title: 'SkillKey', why: 'Connects Jon\'s skills. The interview\'s steps come from here too.' },
   { id: 'interview', title: 'Teach your clone', why: 'A ten-minute interview: your business, offers, buyers, voice, brand and two pieces of your writing.' },
   { id: 'skills', title: 'Jon\'s starter skills', why: 'The skills pack your clone writes and builds with.' },
   { id: 'backup', title: 'Back up to GitHub', why: 'A private copy of your clone folder, saved every night.' },
@@ -105,9 +106,9 @@ export function stepText(step, ctx) {
     case 'voice': {
       // The voice setup asks questions and needs Claude closed for a moment, so it runs in its own Terminal
       // (PowerShell) window, never inside this chat (Codex review 1, Oct 17).
-      const as = (x) => String(x).replace(/(["\\])/g, '\\$1')
       const open = ctx.mac
-        ? "/usr/bin/osascript -e 'tell application \"Terminal\" to do script \"/bin/bash \\\"" + as(ctx.root + '/voice/setup-voice.sh') + "\\\"\"' -e 'tell application \"Terminal\" to activate'"
+        // The path goes in as an argument and AppleScript quotes it for Terminal, so nothing in it is ever run (Codex review 6).
+        ? "/usr/bin/osascript -e 'on run argv' -e 'tell application \"Terminal\" to do script \"/bin/bash \" & quoted form of (item 1 of argv)' -e 'tell application \"Terminal\" to activate' -e 'end run' " + q(ctx.root + '/voice/setup-voice.sh')
         : 'powershell -NoProfile -Command "Start-Process powershell -ArgumentList \'-NoExit\',\'-NoProfile\',\'-ExecutionPolicy\',\'Bypass\',\'-File\',\'\\\"' + String(ctx.root + '\\voice\\setup-voice.ps1').replace(/'/g, "''") + '\\\"\'"'
       return 'The voice setup runs in its own window because it asks two quick questions and needs Claude closed for a moment. Run this with Bash to open it: ' + open + '. ' +
         'Tell them, in two short sentences: a window opens and asks them to pick a man\'s or a woman\'s voice, then asks them to quit Claude (Command Q on a Mac); when it says the voice is ready, they open Claude again and type "' + (ctx.only ? 'set up my voice' : 'finish my setup') + '". ' +

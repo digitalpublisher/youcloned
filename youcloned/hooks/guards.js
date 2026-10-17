@@ -43,7 +43,8 @@ export function firstKey(text) {
 
 // The text with every key it holds swapped for its kind, for output that goes back into a chat.
 export function redactKeys(text) {
-  let out = String(text ?? '')
+  // A private key goes as a whole block, its body and end line too, even when the output is cut off mid-key.
+  let out = String(text ?? '').replace(/-----BEGIN (?:[A-Z0-9 ]+ )?PRIVATE KEY-----[\s\S]*?(?:-----END (?:[A-Z0-9 ]+ )?PRIVATE KEY-----|$)/g, '[pem-private-key removed]')
   for (const [rule, expression] of KEY_SHAPE_RULES) { expression.lastIndex = 0; out = out.replace(expression, '[' + rule + ' removed]') }
   DATABASE_URL_RULE.lastIndex = 0
   out = out.replace(DATABASE_URL_RULE, (m, user, pass) => isPlaceholder(pass) ? m : m.replace(':' + pass + '@', ':[password removed]@'))

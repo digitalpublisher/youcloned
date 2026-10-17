@@ -186,7 +186,7 @@ def main():
                         "setup": {"hc-setup": False, "hc-crew": True, "hc-lib": True, "homecards": True, "today": True}}[name]
                 if cards != want:
                     problems.append("%s: home cards %r, wanted %r" % (name, cards, want))
-                for line in {"empty": [], "fresh": ["Next setup step: Your tools (0 of 10 done)"],
+                for line in {"empty": [], "fresh": ["Next setup step: SkillKey (0 of 10 done)"],
                              "setup": ["Support helper: 2 drafts waiting for you", "Your library holds 4 sources", "New from Jon: Over My Shoulder: the new crew"]}[name]:
                     if line not in today:
                         problems.append("%s: today is missing %r (it says %r)" % (name, line, today))

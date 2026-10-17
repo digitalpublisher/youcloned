@@ -386,8 +386,8 @@ body{padding:0;background:var(--ground)}
   // Links open in this computer's own web browser (server.py opens only BNSN, YouTube and OpenAI addresses).
   function openUrl(url) {
     fetch("/open", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: url }) })
-      .then(function (r) { if (r.ok) say("Opening in your browser"); else window.open(url, "_blank", "noopener"); })
-      .catch(function () { window.open(url, "_blank", "noopener"); });
+      .then(function (r) { say(r.ok ? "Opening in your browser" : "That link can't be opened from here"); })
+      .catch(function () { say("Could not reach YouCloned"); });
   }
   var JOBS = {
     setup: "Set me up with YouCloned. Use the youcloned:setup skill.",
@@ -484,7 +484,7 @@ body{padding:0;background:var(--ground)}
     var lines = [];
     if (cur) lines.push("Next setup step: " + cur.title + " (" + setupDone(su) + " of " + su.steps.length + " done)");
     crew.forEach(function (c) { if (c.running) lines.push(c.title + " helper is working"); else if (c.drafts) lines.push(c.title + " helper: " + c.drafts + (c.drafts === 1 ? " draft" : " drafts") + " waiting for you"); });
-    if (crew.length && !crew.some(function (c) { return c.drafts || c.running; })) lines.push("Your crew is caught up");
+    if (crew.length && crew.every(function (c) { return c.lastRun && !c.drafts && !c.running; })) lines.push("Your crew is caught up");
     if (sources) lines.push("Your library holds " + fmt(sources) + (sources === 1 ? " source" : " sources"));
     if (feedTitle) lines.push("New from Jon: " + feedTitle);
     var today = $("today"); today.textContent = "";
@@ -498,7 +498,7 @@ body{padding:0;background:var(--ground)}
     $("hc-crew").hidden = !crew.length;
     if (crew.length) {
       var need = crew.filter(function (c) { return c.drafts; }).length;
-      $("hcr-meta").textContent = need ? need + (need === 1 ? " needs you" : " need you") : "All caught up";
+      $("hcr-meta").textContent = need ? need + (need === 1 ? " needs you" : " need you") : crew.some(function (c) { return c.lastRun; }) ? "All caught up" : "Not run yet";
       var list = $("hcr-list"); list.textContent = "";
       crew.forEach(function (c) {
         var row = el("div", "need"), d = el("div");
@@ -603,7 +603,7 @@ body{padding:0;background:var(--ground)}
           img.src = src;
         }
         if (go) { go.textContent = item.button || "Start"; go.dataset.feedjob = item.job; }
-        if (watch) { var ok = /^https:\/\//.test(item.watch || ""); watch.hidden = !ok; if (ok) watch.dataset.open = item.watch; }
+        if (watch) { var ok = /^https:\/\/([a-z0-9-]+\.)*(bnsn\.ai|youtube\.com|youtu\.be)\/[^\\@\s]*$/i.test(item.watch || ""); watch.hidden = !ok; if (ok) watch.dataset.open = item.watch; }
       });
       renderHome();
     }).catch(function () {});

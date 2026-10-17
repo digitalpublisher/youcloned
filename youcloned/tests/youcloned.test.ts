@@ -274,9 +274,10 @@ test('dashboard setup steps are Done only when this computer has them', async ($
   await clock.advance(25000)
   const state = JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}')
   expect({ home: state.setup.home, tools: state.setup.tools, backup: state.setup.backup }).toEqual({ home: true, tools: false, backup: false })
-  expect(state.setup.steps.map((x: any) => x.id)).toEqual(['tools', 'home', 'protection', 'skillkey', 'interview', 'skills', 'backup', 'library', 'voice', 'feed'])
-  expect(state.setup.steps.filter((x: any) => x.done).map((x: any) => x.id)).toEqual(['home', 'skillkey', 'interview'])
-  expect(state.setup.next).toBe('tools')
+  expect(state.setup.steps.map((x: any) => x.id)).toEqual(['skillkey', 'tools', 'home', 'protection', 'interview', 'skills', 'backup', 'library', 'voice', 'feed'])
+  // SkillKey counts only once setup_next has asked it whether this account owns YouCloned (never from a timer).
+  expect(state.setup.steps.filter((x: any) => x.done).map((x: any) => x.id)).toEqual(['home', 'interview'])
+  expect(state.setup.next).toBe('skillkey')
 })
 
 test('setup_next walks the night-one steps in order and checks each one on this computer', async ($, on) => {
@@ -285,34 +286,34 @@ test('setup_next walks the night-one steps in order and checks each one on this 
   const present = new Set<string>()
   let toolsOk = false
   let verifyOk = false
-  const { writes } = sessionStubs(on, { cwd: '/Users/pat/', skillKey: null,
+  const { writes } = sessionStubs(on, { cwd: '/Users/pat/',
     read: (path) => files[path] ?? writes.get(path),
     exists: (path) => present.has(path) || writes.has(path) || (path.endsWith('/setup/install-tools.sh') ? true : undefined),
     process: (argv) => ({ exitCode: argv[1]?.endsWith('install-tools.sh') ? (toolsOk ? 0 : 1) : argv.join(' ').includes('--verify') ? (verifyOk ? 0 : 1) : 1, stdout: '', stderr: '' }) })
   await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/Users/pat/' })
   let out = (await $.tool.call({ tool: 'mcp__youcloned__setup_next' })).result
-  expect(out).toMatch(/0 of 10 steps done/)
-  expect(out).toMatch(/Next is step 1, Your tools/)
+  expect(out).toMatch(/1 of 10 steps done/)
+  expect(out).toMatch(/1\. SkillKey: done/)
+  expect(out).toMatch(/Next is step 2, Your tools/)
   expect(out).toMatch(/install-tools\.sh/)
   toolsOk = true
   out = (await $.tool.call({ tool: 'mcp__youcloned__setup_next' })).result
-  expect(out).toMatch(/Next is step 2, Your clone's home/)
+  expect(out).toMatch(/Next is step 3, Your clone's home/)
   expect(out).toContain(vault)
   out = (await $.tool.call({ tool: 'mcp__youcloned__setup_next', folder: 'Documents/Somewhere' })).result
   expect(out).toMatch(/must be a full path/)
   out = (await $.tool.call({ tool: 'mcp__youcloned__setup_next', folder: '~/Documents/Obsidian Vault/' })).result
   expect(writes.has(vault + '/.youcloned-folder')).toBe(true)
   expect(writes.get('/Users/pat/.youcloned/vault-path')).toBe(vault + '\n')
-  expect(out).toMatch(/Next is step 3, Protection/)
+  expect(out).toMatch(/Next is step 4, Protection/)
   expect(out).toMatch(/install-git-hooks\.mjs" --install/)
   present.add('/Users/pat/.youcloned/git-hooks/pre-commit'); present.add('/Users/pat/.youcloned/lib/secret-rules.mjs')
   // The hook files alone don't count: the check must prove a planted key gets refused.
   out = (await $.tool.call({ tool: 'mcp__youcloned__setup_next' })).result
-  expect(out).toMatch(/Next is step 3, Protection/)
+  expect(out).toMatch(/Next is step 4, Protection/)
   verifyOk = true
   out = (await $.tool.call({ tool: 'mcp__youcloned__setup_next' })).result
-  expect(out).toMatch(/Next is step 4, SkillKey/)
-  expect(out).toMatch(/Copy SkillKey address/)
+  expect(out).toMatch(/Next is step 5, Teach your clone/)
   // The interview can't be put off, and neither can anything else but voice and feed.
   out = (await $.tool.call({ tool: 'mcp__youcloned__setup_next', skip: 'interview' })).result
   expect(out).toMatch(/can't be put off/)
@@ -321,6 +322,28 @@ test('setup_next walks the night-one steps in order and checks each one on this 
   expect(writes.size).toBeGreaterThan(0)
   const back = (await $.tool.call({ tool: 'mcp__youcloned__setup_next', resume: true })).result
   expect(back).not.toMatch(/put off/)
+})
+
+test('nothing in setup runs until a SkillKey account that owns YouCloned is connected (Jon, Oct 17 4:48pm)', async ($, on) => {
+  sessionStubs(on, { cwd: '/Users/pat/', skillKey: null, process: () => ({ exitCode: 0, stdout: '', stderr: '' }) })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/Users/pat/' })
+  let out = String((await $.tool.call({ tool: 'mcp__youcloned__setup_next' })).result)
+  expect(out).toMatch(/Next is step 1, SkillKey/)
+  expect(out).toMatch(/Copy SkillKey address/)
+  out = String((await $.tool.call({ tool: 'mcp__youcloned__setup_next', only: 'library' })).result)
+  expect(out).toMatch(/Before anything else, SkillKey/)
+  expect(out).not.toMatch(/Adding just one step, Your library/)
+})
+
+test('a SkillKey account without YouCloned is stopped and pointed to the purchase email or the sales page', async ($, on) => {
+  sessionStubs(on, { cwd: '/Users/pat/', owns: (slug) => slug !== 'youcloned-setup', process: () => ({ exitCode: 0, stdout: '', stderr: '' }) })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/Users/pat/' })
+  const out = String((await $.tool.call({ tool: 'mcp__youcloned__setup_next' })).result)
+  expect(out).toMatch(/does not include YouCloned/)
+  expect(out).toMatch(/youcloned\.bnsn\.ai/)
+  expect(out).not.toMatch(/install-tools/)
+  const one = String((await $.tool.call({ tool: 'mcp__youcloned__setup_next', only: 'voice' })).result)
+  expect(one).toMatch(/does not include YouCloned/)
 })
 
 test('someone who likes their clone can add just one step, and is told what it needs first', async ($, on) => {
@@ -509,7 +532,7 @@ test('codex_job hands Codex a whole job in the background and brings its answer 
 
 test('setup_next takes only: codex, outside the ten, and says when Codex is signed in', async ($, on) => {
   let signedIn = false
-  sessionStubs(on, { cwd: '/Users/pat/', skillKey: null,
+  sessionStubs(on, { cwd: '/Users/pat/',
     process: (argv) => argv[0] === 'codex' ? (argv[1] === 'login' ? { exitCode: signedIn ? 0 : 1, stdout: signedIn ? 'Logged in using ChatGPT' : 'Not logged in', stderr: '' } : { exitCode: 0, stdout: 'codex-cli 1.0', stderr: '' }) : { exitCode: 1, stdout: '', stderr: '' } })
   await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/Users/pat/' })
   let out = String((await $.tool.call({ tool: 'mcp__youcloned__setup_next', only: 'codex' })).result)

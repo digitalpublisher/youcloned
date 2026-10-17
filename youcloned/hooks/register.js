@@ -70,6 +70,7 @@ const APPS = [
   { key: 'aic', open: 'https://community.bnsn.ai', get: 'https://collective.bnsn.ai', join: true },
 ]
 const DASH_PORT = 4600
+const SALES_PAGE = 'https://youcloned.bnsn.ai' // where someone who hasn't bought YouCloned goes
 const DASH_URL = 'http://localhost:' + DASH_PORT
 const SERVICE = 'ai.bnsn.youcloned.dashboard'
 // Jon's voice relay, on his computer only: a message sent to /say for this session is typed into it as
@@ -448,7 +449,7 @@ async function setNoPrompts($, allow) {
     ', then walk them through two clicks, one at a time: in the Claude app open Settings, then Claude Code, and switch on "Allow bypass permissions mode"; then in this chat, click the mode menu next to the message box and pick "Bypass permissions". Claude remembers it for this folder, so every new chat here starts that way. If Claude shows a warning the first time, they click to accept it. Then go on with setup.'
     + (skipped.length ? ' One more short sentence for them: their editor settings file (' + skipped.join(', ') + ') has notes in it YouCloned won\'t touch, so for the Claude panel in Cursor they open Cursor\'s settings, search "Claude Code", tick "Allow Dangerously Skip Permissions" and set "Initial Permission Mode" to bypassPermissions.' : '')
 }
-async function checkSetupSteps($) {
+async function checkSetupSteps($, ask = false) {
   const has = async (paths) => { for (const p of paths) { if (await $.fs.exists(p)) return true } return false }
   const folder = await cloneFolder($)
   const root = $.plugin.root
@@ -480,7 +481,9 @@ async function checkSetupSteps($) {
     st.protection = r.exitCode === 0
   }
   if (!skillKeyServer) { try { await checkSkillKey($) } catch {} }
-  st.skillkey = !!skillKeyServer
+  // Connected is not enough: the account must own YouCloned (its setup skill), or nothing else runs.
+  st.skillkey = !!skillKeyServer && (await paidAccount($, ask))
+  if (skillKeyServer && !st.skillkey && ask) detail.skillkey = 'SkillKey is connected, but this SkillKey account does not include YouCloned'
   st.interview = !!folder && (await $.fs.exists(folder + '/' + RULES_NAME))
   st.skills = false
   try {
@@ -554,11 +557,16 @@ async function setupNext($, e) {
     if (!s.includes(e.skip)) s.push(e.skip)
     await $.store.set('skipped', s)
   }
-  const { st, skipped, folder, detail } = await checkSetupSteps($)
+  const { st, skipped, folder, detail } = await checkSetupSteps($, true)
   await writeState($)
   $.ui.invalidate('ui.render')
   const f = folder || nightFolder()
   const next = nextStep(st, skipped)
+  // Nothing runs for an account that hasn't bought YouCloned (Jon, Oct 17 4:48pm), the one-step mode included.
+  if (!st.skillkey) {
+    if (detail.skillkey) return 'Stop here. ' + detail.skillkey + '. Ask them which email they bought YouCloned with, and have them connect the SkillKey account for that email (the code is in their purchase email). If they haven\'t bought YouCloned, it\'s at ' + SALES_PAGE + '. Don\'t run any other step.'
+    if (e && e.only && e.only !== 'skillkey') return 'Before anything else, SkillKey: it\'s how YouCloned knows they bought it, so no step runs until it\'s connected. Do this first:\n' + onlyText('skillkey', st, { ...ctxBase($, f), detail })
+  }
   const target = e && e.only ? String(e.only) : next ? next.id : ''
   if (target === 'codex') {
     const c = await codexStatus($)
@@ -567,13 +575,13 @@ async function setupNext($, e) {
     codexReady = c.ready
   }
   if (target === 'feed') { try { await registerHelpers($) } catch (err) { $.ui.log('feed-me helpers not registered: ' + String(err).slice(0, 200)) } }
-  const ctx = {
-    root: $.plugin.root, home, folder: f, mac: onMac(), defaultFolder: nightFolder(),
-    needsSkillKey: NEEDS_SKILLKEY, envFile: f + sep() + '.env', detail, scratch: home + sep() + '.youcloned' + sep() + 'feeding',
-    python: target === 'feed' && onMac() ? await findPython($) : '',
-  }
+  const ctx = { ...ctxBase($, f), detail, python: target === 'feed' && onMac() ? await findPython($) : '' }
   if (e && e.only) return onlyText(target, st, ctx)
   return setupText(st, skipped, ctx)
+}
+
+function ctxBase($, f) {
+  return { root: $.plugin.root, home, folder: f, mac: onMac(), defaultFolder: nightFolder(), needsSkillKey: NEEDS_SKILLKEY, envFile: f + sep() + '.env', scratch: home + sep() + '.youcloned' + sep() + 'feeding' }
 }
 
 // The night-one default: the same Obsidian Vault folder Jon's clone uses, so the skills pack, the
@@ -998,6 +1006,17 @@ async function skillKeyCall($, tool, args) {
   throw new Error('SkillKey did not answer: ' + why.slice(0, 600))
 }
 
+// A paid YouCloned account (Starter or Command) owns the YouCloned setup skill on SkillKey. SkillKey is asked
+// only inside setup_next (a request the owner made): a call from a timer pops up a permission box (Oct 17).
+// A yes is remembered; a no is asked again next time, so a buyer who just connected gets in.
+async function paidAccount($, ask) {
+  try { if (await $.store.get('paidAccount')) return true } catch {}
+  if (!ask) return false
+  const yes = !!(await fromSkillKey($, 'youcloned-setup', true))
+  if (yes) { try { await $.store.set('paidAccount', true) } catch {} }
+  return yes
+}
+
 // Jon's instructions for one YouCloned skill, from SkillKey. Only the part between the markers
 // is used, so SkillKey's own notes (word balance, run_skill) never reach the crew.
 async function fromSkillKey($, slug, quiet = false) {
@@ -1077,8 +1096,15 @@ async function lastAnswer($) {
   return ''
 }
 
-// Runs the customer's own Codex, read-only, and returns what it said.
+// Runs the customer's own Codex, read-only, and returns what it said, with any key in it removed. Every way in
+// (the button, /youcloned codex, codex_check) goes through here, so no key is sent to Codex (Codex review 6).
 async function codexCheck($, question) {
+  const key = firstKey(String(question || ''))
+  if (key) return 'Not sent: the question holds a ' + key + '. Never hand Codex a key or password.'
+  return redactKeys(await codexCheckRun($, question))
+}
+
+async function codexCheckRun($, question) {
   const bin = await findCodex($)
   if (!bin) return 'Codex is not installed on this computer. Install the Codex app (or the ChatGPT desktop app) from openai.com, sign in once, then press Check with Codex again.'
   const cwd = await $.session.cwd()
@@ -1094,6 +1120,7 @@ async function codexCheck($, question) {
       return text || 'Codex finished without a review. What it printed: ' + (r.stderr || '').trim().slice(-1500)
     }
     const work = await lastAnswer($)
+    if (!question && firstKey(work)) return 'Not sent: your last answer holds a ' + firstKey(work) + ', and a key never goes to Codex. Take it out and press Check with Codex again.'
     const prompt = question
       ? question
       : 'You are checking work another AI (Claude) just did in this folder. Its last answer was:\n\n<<<\n' + work + '\n>>>\n\n' +
