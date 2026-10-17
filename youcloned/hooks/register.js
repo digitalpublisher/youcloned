@@ -271,6 +271,8 @@ async function refreshLive($, withWords) {
       }
       live.claudeLabel = label
       live.claudeSpan = w.kind === 'seven_day' ? 'Weekly plan' : w.kind === 'five_hour' ? '5-hour plan' : 'Claude plan'
+      // A failed read keeps the last numbers; claudeAt lets the dashboard say how old they are (fixes.json bridge-12).
+      live.claudeAt = await $.clock.now()
     }
   } catch {}
   if (withWords) {

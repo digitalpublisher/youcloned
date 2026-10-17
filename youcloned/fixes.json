@@ -190,11 +190,15 @@
       "fix": "Usage pill always shows the last reading, dead connections dropped, readings every 5 minutes",
       "jon_file": "bridge.html (team Bridge) and crew_bus.py (Isaac crew folder) on Jon's Mac",
       "card": "bnsnstack#311",
-      "buyer_file": "Bridge in the dashboard (youcloned#29)",
+      "buyer_file": "dashboard plan gauge: dashboard/index.html + hooks/register.js (claudeAt); the Bridge build (youcloned#29) grows from this dashboard",
       "buyers": "yes",
-      "mac": "to-port",
-      "pc": "to-port",
-      "check": null
+      "mac": "in-pr",
+      "pc": "in-pr",
+      "check": {
+        "mac": "grep -q \"not read since\" dashboard/index.html && grep -q \"live.claudeAt\" hooks/register.js",
+        "pc": "if ((Select-String -Quiet -Path dashboard\\index.html -Pattern 'not read since') -and (Select-String -Quiet -Path hooks\\register.js -Pattern 'live.claudeAt')) { exit 0 } else { exit 1 }"
+      },
+      "note": "Oct 17 (adapted): the buyer gauge already kept its last reading and reads every 20 seconds; it now also says \"not read since <time>\" once no reading has come in for 10 minutes (Claude closed or the read failing). Dead database connections are n/a: a buyer's dashboard has no database. Checked in Firefox at 1280 and 390 wide."
     },
     {
       "id": "agent-13",

@@ -584,6 +584,27 @@ test('the plan gauge shows the tightest limit: a nearly spent week beats a fresh
   expect(st.claudeLabel).toMatch(/this week · resets/)
 })
 
+test('a failed plan read keeps the last numbers and the time they were read, for the dashboard to show', async ($, on) => {
+  const { writes, clock } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' } })
+  on('http.fetch', () => ({ value: { status: 200, ok: true, headers: {}, text: '{}' } }))
+  let down = false
+  on('session.usage', () => {
+    if (down) throw new Error('usage read failed')
+    return { value: { rateLimits: [{ kind: 'five_hour', percentUsed: 40, resetsAt: '2026-10-05T18:50:00Z' }] } }
+  })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  await clock.advance(2000)
+  const first = JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}')
+  expect(first.claudePct).toBe(40)
+  expect(typeof first.claudeAt).toBe('number')
+  down = true
+  await clock.advance(60000)
+  const later = JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}')
+  expect(later.at).toBeGreaterThan(first.at)
+  expect(later.claudePct).toBe(40)
+  expect(later.claudeAt).toBe(first.claudeAt)
+})
+
 test('on a Mac the dashboard runs as a background service and launch.json opens its address', async ($, on) => {
   const argvs: string[][] = []
   const { writes, clock } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' },

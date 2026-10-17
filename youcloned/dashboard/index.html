@@ -515,7 +515,11 @@ body{padding:0;background:var(--ground)}
         var y = 94 - 88 * left / 100;
         document.getElementById("claudeFill").setAttribute("transform", "translate(0," + (y - 64).toFixed(1) + ")");
       }
-      if (s.claudeLabel) document.getElementById("claudeL").textContent = s.claudeLabel;
+      // The gauge always shows the last reading, and says when it was taken once reads stop coming (10 minutes).
+      if (s.claudeLabel) {
+        var stale = s.claudeAt && Date.now() - s.claudeAt > 600000;
+        document.getElementById("claudeL").textContent = s.claudeLabel + (stale ? " · not read since " + new Date(s.claudeAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) : "");
+      }
       document.getElementById("words").textContent = s.words != null ? fmt(s.words) : "Connect";
       document.getElementById("wordsL").textContent = s.words != null ? "BNSN words" : "Connect SkillKey to see your words";
       if (s.codex && s.codex.left != null) {
