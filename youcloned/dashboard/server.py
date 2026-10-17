@@ -7,6 +7,9 @@ POST /do          {"text": "..."} queues a job; the add-on puts it into Claude's
 POST /talk        asks Isaac's voice relay to start a voice conversation in the owner's YouCloned chat
 """
 import json, os, sys, time, urllib.request
+
+# The add-on writes its files as UTF-8 with \n line ends on every computer. Windows Python would read them
+# in the PC's own code page and write \r\n, so every file here names UTF-8 and \n.
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -30,7 +33,7 @@ class Handler(SimpleHTTPRequestHandler):
                 if self.path.startswith("/feed.json"):
                     body, kind = open(os.path.join(DATA, "feed.json"), "rb").read(), "application/json"
                 else:
-                    body, kind = open(open(os.path.join(DATA, "feed-thumb.txt")).read().strip(), "rb").read(), "image/jpeg"
+                    body, kind = open(open(os.path.join(DATA, "feed-thumb.txt"), encoding="utf-8").read().strip(), "rb").read(), "image/jpeg"
             except Exception:
                 self.send_error(404)
                 return
@@ -55,7 +58,7 @@ class Handler(SimpleHTTPRequestHandler):
         if self.path == "/talk":
             # The talk goes to the chat the add-on last wrote into state.json, through the voice relay.
             try:
-                state = json.load(open(os.path.join(DATA, "state.json")))
+                state = json.load(open(os.path.join(DATA, "state.json"), encoding="utf-8"))
                 body = json.dumps({"session": state["session"], "text": TALK}).encode()
                 req = urllib.request.Request(RELAY, data=body, headers={"Content-Type": "application/json"})
                 urllib.request.urlopen(req, timeout=3).read()
@@ -77,7 +80,7 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_error(400)
             return
         os.makedirs(DATA, exist_ok=True)
-        with open(os.path.join(DATA, "jobs.jsonl"), "a") as f:
+        with open(os.path.join(DATA, "jobs.jsonl"), "a", encoding="utf-8", newline="\n") as f:
             f.write(json.dumps({"text": text, "at": time.time()}) + "\n")
         self.send_response(204)
         self.end_headers()

@@ -20,18 +20,21 @@ const SK = '4a62845f-77ec-431f-8b76-2d42902a60fb'
 const skTools = (server = SK) => ['list_skills', 'start_skill', 'run_skill', 'word_balance'].map(t => ({ name: 'mcp__' + server + '__' + t, description: '', mcp: true }))
 const fromSk = (body: string) => ({ content: [{ type: 'text', text: 'You are short on words.\n\n<<<YOUCLONED>>>\n' + body + '\n<<<END YOUCLONED>>>\n\nWhen you have everything the steps ask for, call run_skill with skill "x".' }], isError: false })
 
-function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[]) => unknown, toasts?: string[], lists?: Record<string, string[]>, cwd?: string, root?: string, skillKey?: string | null, mcpCalls?: { server: string, tool: string, args: Record<string, unknown> }[], registered?: { name: string, prompt: string }[], owns?: (slug: string) => boolean, opened?: string[], browser?: string[], toolCall?: (e: any) => unknown, read?: (path: string) => string | undefined, exists?: (path: string) => boolean | undefined, mcpThrow?: string, logs?: string[], listed?: boolean, appOwned?: boolean, connected?: () => boolean } = {}) {
+function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[], init?: { env?: Record<string, string> }) => unknown, toasts?: string[], lists?: Record<string, string[]>, dirs?: Record<string, string[]>, env?: Record<string, string | undefined>, spawned?: string[][], cwd?: string, root?: string, skillKey?: string | null, mcpCalls?: { server: string, tool: string, args: Record<string, unknown> }[], registered?: { name: string, prompt: string }[], owns?: (slug: string) => boolean, opened?: string[], browser?: string[], toolCall?: (e: any) => unknown, read?: (path: string, as?: string) => unknown, exists?: (path: string) => boolean | undefined, mcpThrow?: string, logs?: string[], listed?: boolean, appOwned?: boolean, connected?: () => boolean } = {}) {
   const writes = new Map<string, string>()
+  // This test host is a Mac, where the engine reads a Windows path as relative to the working folder; the
+  // stubs see the path the add-on asked for.
+  const fsPath = (p: string) => { const m = /[A-Za-z]:[\\/]/.exec(p); return m ? p.slice(m.index) : p }
   const store = new Map<string, unknown>(opts.project ? [['project', opts.project]] : [])
   const clock = mock.clock(on)
-  on('env.get', ($, e) => ({ value: e.name === 'HOME' ? '/Users/pat' : undefined }))
+  on('env.get', ($, e) => ({ value: opts.env ? opts.env[e.name] : e.name === 'HOME' ? '/Users/pat' : undefined }))
   on('store.get', ($, e) => ({ value: store.get(e.key) }))
   on('store.set', ($, e) => { store.set(e.key, e.value); return { value: undefined } })
-  on('fs.exists', ($, e) => ({ value: opts.exists?.(e.path) ?? (e.path in (opts.files || {}) || e.path.endsWith('/skills')) }))
-  on('fs.list', ($, e) => ({ value: e.path.endsWith('/skills') ? [{ name: 'setup', kind: 'dir', size: 0, mtimeMs: 0, isLink: false }, { name: 'notes.txt', kind: 'file', size: 1, mtimeMs: 0, isLink: false }]
-    : (opts.lists?.[e.path] || []).map(name => ({ name, kind: 'file', size: 1, mtimeMs: 0, isLink: false })) }))
-  on('fs.read', ($, e) => ({ value: opts.read?.(e.path) ?? (opts.files || {})[e.path] ?? (e.path.endsWith('SKILL.md') ? 'description: Set up YouCloned. More.' : 'crew prompt') }))
-  on('fs.write', ($, e) => { writes.set(e.path, e.text); return { value: undefined } })
+  on('fs.exists', ($, e) => { const path = fsPath(e.path); return { value: opts.exists?.(path) ?? (path in (opts.files || {}) || path.endsWith('/skills')) } })
+  on('fs.list', ($, e) => ({ value: opts.dirs?.[fsPath(e.path)] ? opts.dirs[fsPath(e.path)].map(name => ({ name, kind: 'dir', size: 0, mtimeMs: 0, isLink: false })) : e.path.endsWith('/skills') ? [{ name: 'setup', kind: 'dir', size: 0, mtimeMs: 0, isLink: false }, { name: 'notes.txt', kind: 'file', size: 1, mtimeMs: 0, isLink: false }]
+    : (opts.lists?.[fsPath(e.path)] || []).map(name => ({ name, kind: 'file', size: 1, mtimeMs: 0, isLink: false })) }))
+  on('fs.read', ($, e) => ({ value: opts.read?.(fsPath(e.path), e.as) ?? (opts.files || {})[fsPath(e.path)] ?? (e.path.endsWith('SKILL.md') ? 'description: Set up YouCloned. More.' : 'crew prompt') }))
+  on('fs.write', ($, e) => { writes.set(fsPath(e.path), e.text); return { value: undefined } })
   const sk = opts.skillKey === undefined ? SK : opts.skillKey
   on('tool.list', () => ({ value: sk && opts.listed !== false ? skTools(sk) : [] }))
   on('mcp.call', ($, e) => {
@@ -57,7 +60,8 @@ function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: 
   on('session.cwd', () => ({ value: opts.cwd || '/work' }))
   on('session.root', () => ({ value: opts.root || opts.cwd || '/work' }))
   on('session.messages', () => ({ value: [{ role: 'assistant', text: 'I wrote copy/letter.md', toolUses: [] }] }))
-  on('process.run', ($, e) => ({ value: opts.process ? opts.process(e.argv) : { exitCode: 1, stdout: '', stderr: '' } }))
+  on('process.run', ($, e) => ({ value: opts.process ? opts.process(e.argv, e.init) : { exitCode: 1, stdout: '', stderr: '' } }))
+  on('process.spawn', async function* ($, e) { opts.spawned?.push([...e.argv]); return { value: { code: 0, signal: null } } })
   on('tool.call', ($, e) => (opts.toolCall?.(e) as any) ?? { result: 'ran' })
   on('session.id', () => ({ value: 'sess-1' }))
   return { writes, store, clock }
@@ -201,7 +205,7 @@ test('dashboard setup steps 1 to 3 are Done only when this computer has them', a
   await $.session.start({ surface: 'desktop', isInteractive: false, cwd: here })
   await clock.advance(25000)
   const state = JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}')
-  expect(state.setup).toEqual({ home: true, tools: false, backup: false })
+  expect(state.setup).toEqual({ home: true, tools: false, backup: false, pc: false })
 })
 
 test('a conversation open in the home folder itself still sets up in ~/YouCloned', async ($, on) => {
@@ -818,4 +822,270 @@ test('the words gauge updates from any SkillKey answer that names the balance', 
   await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
   await $.tool.call({ tool: 'mcp__' + SK + '__list_skills' })
   expect(JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}').words).toBe(1234)
+})
+
+// Windows: the Claude app on a PC. The profile folder is home, programs live in Program Files and
+// %LOCALAPPDATA%, and Windows' own tools (curl.exe, certutil.exe, tar.exe, PowerShell) are in System32.
+const WIN_HOME = 'C:\\Users\\pat'
+const WIN_PROJECT = WIN_HOME + '\\YouCloned'
+const WIN_DATA = WIN_HOME + '/.youcloned'
+const LOCAL = WIN_HOME + '\\AppData\\Local'
+const ROAMING = WIN_HOME + '\\AppData\\Roaming'
+const SYS = 'C:\\Windows\\System32\\'
+const winEnv = (more: Record<string, string> = {}) => ({ OS: 'Windows_NT', USERPROFILE: WIN_HOME, LOCALAPPDATA: LOCAL, APPDATA: ROAMING,
+  ProgramFiles: 'C:\\Program Files', SystemRoot: 'C:\\Windows', PROCESSOR_ARCHITECTURE: 'AMD64', ...more })
+const answer = (stdout: string, exitCode = 0) => ({ exitCode, stdout, stderr: '' })
+const noAnswer = () => answer('', 1)
+// Windows' python.exe and python3.exe stand-ins: they point at the Microsoft Store and give no version.
+const STORE_STUB = answer('Python was not found; run without arguments to install from the Microsoft Store, or disable this shortcut from Settings > Manage App Execution Aliases.', 9009)
+const MAC_ONLY = /^\/(?:usr|bin|opt|Library|Applications)\//
+
+test('on a PC the dashboard starts with the py launcher, launch.json names py -3, and nothing Mac-only runs', async ($, on) => {
+  const argvs: string[][] = []
+  const spawned: string[][] = []
+  const { writes, clock } = sessionStubs(on, { env: winEnv(), project: WIN_PROJECT, cwd: WIN_PROJECT, files: { [WIN_PROJECT + '/YOUCLONED.md']: '# rules' }, spawned,
+    process: (argv) => { argvs.push([...argv]); return argv[0] === 'py' && argv[1] === '-3' && argv[2] === '--version' ? answer('Python 3.12.6\r\n') : noAnswer() } })
+  on('http.fetch', () => ({ value: { status: 404, ok: false, headers: {}, text: '' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: WIN_PROJECT })
+  await clock.advance(2500)
+  const launch = JSON.parse(writes.get(WIN_PROJECT + '/.claude/launch.json') || '{}').configurations.find(c => c.name === 'YouCloned')
+  expect(launch.runtimeExecutable).toBe('py')
+  expect(launch.runtimeArgs[0]).toBe('-3')
+  expect(launch.runtimeArgs[1]).toMatch(/[\\/]dashboard[\\/]server\.py$/)
+  expect(launch.runtimeArgs[2]).toBe('4600')
+  expect(spawned.some(a => a[0] === 'py' && a[1] === '-3' && /server\.py$/.test(a[2]) && a[3] === '4600')).toBe(true)
+  expect([...writes.keys()].some(k => /LaunchAgents|\.plist$/.test(k))).toBe(false)
+  expect(argvs.some(a => MAC_ONLY.test(a[0]) || /launchctl|xcode-select/.test(a[0]))).toBe(false)
+})
+
+test('on a PC the Microsoft Store stand-ins never count as Python; python3 is tried after python', async ($, on) => {
+  const { writes, clock } = sessionStubs(on, { env: winEnv(), project: WIN_PROJECT, cwd: WIN_PROJECT, files: { [WIN_PROJECT + '/YOUCLONED.md']: '# rules' },
+    process: (argv) => argv[0] === 'python' ? STORE_STUB : argv[0] === 'python3' && argv[1] === '--version' ? answer('Python 3.11.9') : noAnswer() })
+  on('http.fetch', () => ({ value: { status: 404, ok: false, headers: {}, text: '' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: WIN_PROJECT })
+  await clock.advance(2500)
+  const launch = JSON.parse(writes.get(WIN_PROJECT + '/.claude/launch.json') || '{}').configurations.find(c => c.name === 'YouCloned')
+  expect(launch.runtimeExecutable).toBe('python3')
+  expect(launch.runtimeArgs[0]).toMatch(/server\.py$/)
+})
+
+test('on a PC a Python installed after the Claude app started is found in its install folder, newest first', async ($, on) => {
+  const base = LOCAL + '\\Programs\\Python'
+  const newest = base + '\\Python312\\python.exe'
+  const { writes, clock } = sessionStubs(on, { env: winEnv(), project: WIN_PROJECT, cwd: WIN_PROJECT, files: { [WIN_PROJECT + '/YOUCLONED.md']: '# rules' },
+    dirs: { [base]: ['Python311', 'Python312', 'Launcher-old'] },
+    exists: (path) => path === newest || path === base + '\\Python311\\python.exe' || undefined,
+    process: (argv) => argv[0] === 'python' || argv[0] === 'python3' ? STORE_STUB : argv[0].endsWith('\\python.exe') && argv[1] === '--version' ? answer('Python 3.12.6') : noAnswer() })
+  on('http.fetch', () => ({ value: { status: 404, ok: false, headers: {}, text: '' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: WIN_PROJECT })
+  await clock.advance(2500)
+  const launch = JSON.parse(writes.get(WIN_PROJECT + '/.claude/launch.json') || '{}').configurations.find(c => c.name === 'YouCloned')
+  expect(launch.runtimeExecutable).toBe(newest)
+})
+
+// A fresh PC: no Python at all, so YouCloned fetches its own with a checksummed uv for Windows.
+function freshPC(on, sum: string, arch = 'AMD64') {
+  const argvs: string[][] = []
+  const envs: (Record<string, string> | undefined)[] = []
+  let uvInstalled = false
+  const uv = WIN_DATA + '/bin/uv.exe'
+  const ownPython = WIN_DATA + '/python/cpython-3.12-windows-x86_64-none/python.exe'
+  const stubs = sessionStubs(on, { env: winEnv({ PROCESSOR_ARCHITECTURE: arch }), project: WIN_PROJECT, cwd: WIN_PROJECT, files: { [WIN_PROJECT + '/YOUCLONED.md']: '# rules' },
+    exists: (path) => path === uv ? uvInstalled : undefined,
+    process: (argv, init) => {
+      argvs.push([...argv])
+      if (argv[0] === 'python' || argv[0] === 'python3') return STORE_STUB
+      if (argv[0] === SYS + 'certutil.exe') return answer('SHA256 hash of ' + argv[2] + ':\r\n' + sum + '\r\nCertUtil: -hashfile command completed successfully.\r\n')
+      if (argv[0] === SYS + 'tar.exe' && argv.at(-1) === 'uv.exe') { uvInstalled = true; return answer('') }
+      if (argv[0] === uv) { envs.push(init?.env); return argv[2] === 'find' ? (uvInstalled ? answer(ownPython + '\r\n') : answer('', 2)) : answer('') }
+      if (argv[0] === SYS + 'curl.exe' || argv[0].endsWith('powershell.exe')) return answer('')
+      return noAnswer()
+    } })
+  on('http.fetch', () => ({ value: { status: 404, ok: false, headers: {}, text: '' } }))
+  return { ...stubs, argvs, envs, ownPython, uv }
+}
+
+test('on a fresh PC with no Python the dashboard gets YouCloned\'s own Python from a checksummed uv for Windows', async ($, on) => {
+  const { writes, clock, argvs, envs, ownPython, uv } = freshPC(on, '477bd99a84e34891f2bd4c9152ddeb74e971accccbc59c0f0301f11f08a32d46')
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: WIN_PROJECT })
+  await clock.advance(2500)
+  expect(argvs.some(a => a[0] === SYS + 'curl.exe' && a.at(-1) === 'https://github.com/astral-sh/uv/releases/download/0.12.15/uv-x86_64-pc-windows-msvc.zip')).toBe(true)
+  expect(argvs.some(a => a[0] === SYS + 'tar.exe' && a.includes('-C') && a.includes(WIN_DATA + '/bin'))).toBe(true)
+  expect(argvs.some(a => a[0] === uv && a[1] === 'python' && a[2] === 'install')).toBe(true)
+  // uv keeps the PC's own program path and profile: no Mac PATH or HOME is forced on it.
+  expect(envs.every(e => e && !('PATH' in e) && !('HOME' in e) && e.UV_PYTHON_INSTALL_DIR === WIN_DATA + '/python')).toBe(true)
+  const launch = JSON.parse(writes.get(WIN_PROJECT + '/.claude/launch.json') || '{}').configurations.find(c => c.name === 'YouCloned')
+  expect(launch.runtimeExecutable).toBe(ownPython)
+  expect(argvs.some(a => a[0].endsWith('powershell.exe') && a.at(-1).includes("Remove-Item -LiteralPath '" + WIN_DATA + "/uv-download'"))).toBe(true)
+  expect(argvs.some(a => MAC_ONLY.test(a[0]))).toBe(false)
+})
+
+test('on an ARM PC the uv download is the ARM build', async ($, on) => {
+  const { clock, argvs } = freshPC(on, 'a37c8e96cb1260488c8510b64c848533a3a82a2fdf9e905de7c2700ceebf6437', 'ARM64')
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: WIN_PROJECT })
+  await clock.advance(2500)
+  expect(argvs.some(a => a[0] === SYS + 'curl.exe' && a.at(-1) === 'https://github.com/astral-sh/uv/releases/download/0.12.15/uv-aarch64-pc-windows-msvc.zip')).toBe(true)
+  expect(argvs.some(a => a[0] === SYS + 'tar.exe')).toBe(true)
+})
+
+test('on a PC a uv download that fails its checksum is never unpacked or run, and no dashboard is named', async ($, on) => {
+  const { writes, clock, argvs, uv } = freshPC(on, '0'.repeat(64))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: WIN_PROJECT })
+  await clock.advance(2500)
+  expect(argvs.some(a => a[0] === SYS + 'curl.exe')).toBe(true)
+  expect(argvs.some(a => a[0] === SYS + 'tar.exe')).toBe(false)
+  expect(argvs.some(a => a[0] === uv && a[2] === 'install')).toBe(false)
+  expect(writes.has(WIN_PROJECT + '/.claude/launch.json')).toBe(false)
+})
+
+test('on a PC the setup check marks the tools step Done from Git, Obsidian, Node and ffmpeg, with no Wispr Flow', async ($, on) => {
+  const tools = ['C:\\Program Files\\Git\\cmd\\git.exe', LOCAL + '\\Obsidian\\Obsidian.exe', 'C:\\Program Files\\nodejs\\node.exe', LOCAL + '\\Microsoft\\WinGet\\Links\\ffmpeg.exe']
+  let have = new Set(tools)
+  const { writes, clock } = sessionStubs(on, { env: winEnv(), project: WIN_PROJECT, cwd: WIN_PROJECT, files: { [WIN_PROJECT + '/YOUCLONED.md']: '# rules' },
+    exists: (path) => have.has(path) || path === WIN_PROJECT + '/YOUCLONED.md' || undefined, process: noAnswer })
+  on('http.fetch', () => ({ value: { status: 404, ok: false, headers: {}, text: '' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: WIN_PROJECT })
+  await clock.advance(2500)
+  expect(JSON.parse(writes.get(WIN_DATA + '/state.json') || '{}').setup).toEqual({ home: true, tools: true, backup: false, pc: true })
+  have = new Set(tools.slice(0, 3))
+  await clock.advance(300000)
+  expect(JSON.parse(writes.get(WIN_DATA + '/state.json') || '{}').setup.tools).toBe(false)
+})
+
+test('on a PC the tools on the program path count too, checked by asking each for its version', async ($, on) => {
+  const asked: string[] = []
+  const { writes, clock } = sessionStubs(on, { env: winEnv(), project: WIN_PROJECT, cwd: WIN_PROJECT, files: { [WIN_PROJECT + '/YOUCLONED.md']: '# rules' },
+    exists: (path) => path === 'C:\\Program Files\\Obsidian\\Obsidian.exe' || path === WIN_PROJECT + '/YOUCLONED.md' || undefined,
+    process: (argv) => { asked.push(argv.join(' ')); return ['git --version', 'node --version', 'ffmpeg -version'].includes(argv.join(' ')) ? answer('ok') : noAnswer() } })
+  on('http.fetch', () => ({ value: { status: 404, ok: false, headers: {}, text: '' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: WIN_PROJECT })
+  await clock.advance(2500)
+  expect(JSON.parse(writes.get(WIN_DATA + '/state.json') || '{}').setup.tools).toBe(true)
+  expect(asked).toContain('ffmpeg -version')
+})
+
+test('on a PC the New from Jon thumbnail downloads with Windows\' curl.exe and is read as bytes, with no base64 program', async ($, on) => {
+  const feed = JSON.stringify({ items: [{ id: 'pc-1', title: 'Your clone on a PC', note: 'n', button: 'Go', job: 'Show me.', thumb: 'https://cdn.bnsn.ai/t.jpg' }] })
+  const argvs: string[][] = []
+  let downloaded = false
+  const thumb = WIN_DATA + '/feed-pc-1.jpg'
+  const { writes, clock } = sessionStubs(on, { env: winEnv(), project: WIN_PROJECT, cwd: WIN_PROJECT, files: { [WIN_PROJECT + '/YOUCLONED.md']: '# rules' },
+    exists: (path) => (path === thumb ? downloaded : undefined),
+    read: (path, as) => path === thumb && as === 'bytes' ? { base64: 'QUJDRA==' } : undefined,
+    process: (argv) => { argvs.push([...argv]); if (argv[0] === SYS + 'curl.exe' && argv.includes(thumb)) downloaded = true; return noAnswer() } })
+  on('http.fetch', ($, e) => ({ value: e.url.endsWith('/feed.json') ? { status: 200, ok: true, headers: {}, text: feed } : { status: 404, ok: false, headers: {}, text: '' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: WIN_PROJECT })
+  await clock.advance(1000)
+  expect(argvs.some(a => a[0] === SYS + 'curl.exe' && a.at(-1) === 'https://cdn.bnsn.ai/t.jpg' && a.includes(thumb))).toBe(true)
+  expect(argvs.some(a => /base64/.test(a[0]))).toBe(false)
+  expect(writes.get(WIN_DATA + '/feed-thumb.txt')).toBe(thumb)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'tab-home' })
+  const pic = (await ui.findAll({ type: 'Svg' })).find(p => p.props.alt === 'Thumbnail')
+  expect(String(pic.props.source)).toContain('data:image/jpeg;base64,QUJDRA==')
+  await ui.unmount()
+})
+
+test('on a PC the Codex meter reads Codex\'s newest session log with Windows PowerShell', async ($, on) => {
+  const line = JSON.stringify({ type: 'event_msg', payload: { rate_limits: { primary: { used_percent: 30, window_minutes: 300, resets_at: 1760000000 } } } })
+  const scripts: string[] = []
+  const { writes, clock } = sessionStubs(on, { env: winEnv(), project: WIN_PROJECT, cwd: WIN_PROJECT, files: { [WIN_PROJECT + '/YOUCLONED.md']: '# rules' },
+    process: (argv) => {
+      if (argv[0] === SYS + 'WindowsPowerShell\\v1.0\\powershell.exe' && argv.includes('-Command')) { scripts.push(argv.at(-1)); return /rate_limits/.test(argv.at(-1)) ? answer(line + '\r\n') : answer('') }
+      return noAnswer()
+    } })
+  on('http.fetch', () => ({ value: { status: 404, ok: false, headers: {}, text: '' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: WIN_PROJECT })
+  await clock.advance(2500)
+  expect(JSON.parse(writes.get(WIN_DATA + '/state.json') || '{}').codex.left).toBe(70)
+  const script = scripts.find(s => /rate_limits/.test(s)) || ''
+  expect(script).toContain("-LiteralPath 'C:\\Users\\pat\\.codex\\sessions'")
+  // No double quote in the script: Windows PowerShell's command line drops them.
+  expect(script).not.toContain('"')
+})
+
+test('a PowerShell path keeps an apostrophe in the user name safe', async ($, on) => {
+  const scripts: string[] = []
+  const home = 'C:\\Users\\o\'brien'
+  const { clock } = sessionStubs(on, { env: winEnv({ USERPROFILE: home, LOCALAPPDATA: home + '\\AppData\\Local' }), project: home + '\\YouCloned', cwd: home + '\\YouCloned', files: { [home + '\\YouCloned/YOUCLONED.md']: '# rules' },
+    process: (argv) => { if (argv[0].endsWith('powershell.exe')) scripts.push(argv.at(-1)); return noAnswer() } })
+  on('http.fetch', () => ({ value: { status: 404, ok: false, headers: {}, text: '' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: home + '\\YouCloned' })
+  await clock.advance(2500)
+  expect(scripts.some(s => s.includes("'C:\\Users\\o''brien\\.codex\\sessions'"))).toBe(true)
+})
+
+test('on a PC Check with Codex runs the npm Codex through Node, since codex.cmd needs a shell', async ($, on) => {
+  const calls: string[][] = []
+  const js = ROAMING + '\\npm\\node_modules\\@openai\\codex\\bin\\codex.js'
+  const node = 'C:\\Program Files\\nodejs\\node.exe'
+  sessionStubs(on, { env: winEnv(), project: WIN_PROJECT,
+    exists: (path) => path === js || path === node || undefined,
+    process: (argv) => { calls.push([...argv]); return argv[0] === 'codex' ? noAnswer() : answer('') },
+    files: { [WIN_DATA + '/codex-last.md']: 'Line 3 promises a refund the offer does not have.' } })
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: WIN_PROJECT })
+  const out = await $.command.run({ command: 'youcloned', args: 'codex' })
+  expect(out.text).toMatch(/promises a refund/)
+  const exec = calls.find(a => a[2] === 'exec')
+  expect(exec.slice(0, 5)).toEqual([node, js, 'exec', '--sandbox', 'read-only'])
+})
+
+test('on a PC with no Codex, Check with Codex says how to get it', async ($, on) => {
+  sessionStubs(on, { env: winEnv(), project: WIN_PROJECT })
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: WIN_PROJECT })
+  const out = await $.command.run({ command: 'youcloned', args: 'codex' })
+  expect(out.text).toMatch(/Codex is not installed/)
+})
+
+test('on a PC home is the profile folder and setup paths read with backslashes', async ($, on) => {
+  const { writes, store } = sessionStubs(on, { env: winEnv({ HOME: '/c/Users/pat' }), cwd: WIN_HOME })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: WIN_HOME })
+  const steps = await $.tool.call({ tool: 'mcp__youcloned__load_setup' })
+  expect(steps.result).toContain('Folder: the default is C:\\Users\\pat\\YouCloned ')
+  expect(steps.result).not.toMatch(/developer tools|Dock/)
+  const ok = await $.tool.call({ tool: 'mcp__youcloned__save_setup', ...SETUP })
+  expect(ok.result).toContain('Rules file: C:\\Users\\pat\\YouCloned\\YOUCLONED.md.')
+  expect(ok.result).toContain('C:\\Users\\pat\\YouCloned\\crew\\support and C:\\Users\\pat\\YouCloned\\crew\\inbox')
+  expect(writes.has(WIN_PROJECT + '/YOUCLONED.md')).toBe(true)
+  expect(store.get('project')).toBe(WIN_PROJECT)
+})
+
+test('on a PC a chat in the clone folder spelled with / and other capitals still gets the rules', async ($, on) => {
+  sessionStubs(on, { env: winEnv(), project: WIN_PROJECT, cwd: 'c:/users/pat/youcloned/notes', files: { [WIN_PROJECT + '/YOUCLONED.md']: '# Who I am\n\nPat Doe' },
+    read: (path) => path === WIN_PROJECT + '/YOUCLONED.md' ? '# Who I am\r\n\r\nPat Doe\r\n' : undefined })
+  on('prompt.context', ($, e) => ({ blocks: e.blocks }))
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: 'c:/users/pat/youcloned/notes' })
+  const out = await $.prompt.context({ blocks: [] })
+  expect(out.blocks.map(b => b.name)).toContain('youcloned')
+  expect(out.blocks.find(b => b.name === 'youcloned').text).toContain('from C:\\Users\\pat\\YouCloned\\YOUCLONED.md')
+})
+
+test('on a PC the support crew skips a question whose draft names it with a Windows path', async ($, on) => {
+  const dir = WIN_PROJECT + '\\crew\\support'
+  const spawned: string[] = []
+  sessionStubs(on, { env: winEnv(), project: WIN_PROJECT,
+    files: { [dir + '/inbox']: '', [dir + '/drafts']: '', [dir + '/drafts/a.md']: 'Question: ' + dir + '\\inbox\\maria.txt\r\nCustomer: Maria\r\n\r\nHi' },
+    lists: { [dir + '/inbox']: ['maria.txt', 'tom.txt', '.keep'], [dir + '/drafts']: ['a.md'] } })
+  on('agent.spawn', ($, e) => { spawned.push(e.prompt); return { agentId: 'a1', model: 'x' } })
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: WIN_PROJECT })
+  await $.command.run({ command: 'youcloned', args: 'crew support' })
+  expect(spawned[0]).toMatch(/tom\.txt/)
+  expect(spawned[0]).not.toMatch(/maria\.txt/)
+  expect(spawned[0]).toContain('Rules file: C:\\Users\\pat\\YouCloned\\YOUCLONED.md')
+})
+
+test('on a PC a key may go in an ignored .env with Git in Program Files; with no Git at all there is no repository to leak from', async ($, on) => {
+  const key = 'xoxb-' + 'M1'.repeat(10)
+  const git = 'C:\\Program Files\\Git\\cmd\\git.exe'
+  let ignored = 0
+  let hasGit = true
+  sessionStubs(on, { env: winEnv(), project: WIN_PROJECT, exists: (path) => (path === git ? hasGit : undefined),
+    process: (argv) => argv[0] === git && argv[1] === 'check-ignore' ? answer('', ignored) : noAnswer() })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: WIN_PROJECT })
+  const env = WIN_PROJECT + '\\.env'
+  expect((await $.tool.call({ tool: 'Write', file_path: env, content: 'SLACK=' + key })).result).toBe('ran')
+  ignored = 1
+  expect((await $.tool.call({ tool: 'Write', file_path: env, content: 'SLACK=' + key })).deny).toMatch(/slack-token/)
+  hasGit = false
+  expect((await $.tool.call({ tool: 'Write', file_path: env, content: 'SLACK=' + key })).result).toBe('ran')
 })
