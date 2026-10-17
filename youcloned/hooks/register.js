@@ -469,7 +469,7 @@ async function checkSetupSteps($) {
       st.library = /^YOUCLONED_LIBRARY_URL=\S+/m.test(env) && /^YOUCLONED_LIBRARY_TOKEN=\S+/m.test(env)
         && (await (async () => { // library/smoke-test.py writes env= and url= after add, find and remove all passed
           try {
-            const ok = await $.fs.read(dataDir() + '/library-ok')
+            const ok = (await $.fs.read(dataDir() + '/library-ok')).replace(/\r/g, '')
             const url = (env.match(/^YOUCLONED_LIBRARY_URL=(\S+)/m) || [])[1]
             return ok.includes('env=' + folder + sep() + '.env\n') && !!url && ok.includes('url=' + url + '\n')
           } catch { return false }
@@ -480,12 +480,13 @@ async function checkSetupSteps($) {
   st.voice = (await $.fs.exists(home + '/.voicemode/voicemode.env'))
     && (await has([home + '/.local/bin/voicemode', home + '/.local/bin/voicemode.exe', home + '/AppData/Roaming/uv/tools/voice-mode']))
     && (await $.fs.exists(home + '/.voicemode/services/whisper')) && (await $.fs.exists(home + '/.voicemode/services/kokoro'))
+    && (await $.fs.exists(home + '/.voicemode/youcloned-voice-ok')) // written by the voice setup only after its speak test passes
   st.feed = false
   if (folder) {
     try { // an index page with something on it, and at least one source recorded as fed
       const index = await $.fs.read(folder + '/Library/index.md')
       const fed = JSON.parse(await $.fs.read(folder + '/Library/.fed.json'))
-      const n = Array.isArray(fed) ? fed.length : Object.keys((fed && (fed.sources || fed)) || {}).length
+      const n = ['files', 'hashes', 'parts'].reduce((a, k) => a + (fed && fed[k] && typeof fed[k] === 'object' ? Object.keys(fed[k]).length : 0), 0)
       st.feed = index.trim().length > 40 && n > 0
     } catch {}
   }

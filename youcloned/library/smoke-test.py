@@ -94,7 +94,8 @@ def main():
     else:
         marker.parent.mkdir(parents=True, exist_ok=True)
         # Bound to this env file and this library, so a pass for one clone folder never counts for another.
-        marker.write_text("env=" + str(env_file) + "\nurl=" + url + "\n")
+        with open(marker, "w", encoding="utf-8", newline="\n") as f:  # LF on Windows too: the add-on matches exact lines
+            f.write("env=" + str(env_file) + "\nurl=" + url + "\n")
     sys.exit(1 if failed else 0)
 
 
