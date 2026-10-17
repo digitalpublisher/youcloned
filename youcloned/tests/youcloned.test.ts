@@ -2,6 +2,9 @@ import { expect, mock, test } from 'claude-code/testing'
 import { judge } from '../hooks/gate.js'
 import { claimProblems } from '../hooks/claims.js'
 import { checkSetup } from '../hooks/rules.js'
+import { setupText, STEPS } from '../hooks/steps.js'
+import { helperJudge, helperLinkReason, feedCommandReason, parseAgent } from '../hooks/helpers.js'
+import { normalize } from '../hooks/gate.js'
 
 const PROJECT = '/Users/pat/YouCloned'
 const SAMPLE = 'Hey friend, '.repeat(40)
@@ -21,7 +24,53 @@ const SK = '4a62845f-77ec-431f-8b76-2d42902a60fb'
 const skTools = (server = SK) => ['list_skills', 'start_skill', 'run_skill', 'word_balance'].map(t => ({ name: 'mcp__' + server + '__' + t, description: '', mcp: true }))
 const fromSk = (body: string) => ({ content: [{ type: 'text', text: 'You are short on words.\n\n<<<YOUCLONED>>>\n' + body + '\n<<<END YOUCLONED>>>\n\nWhen you have everything the steps ask for, call run_skill with skill "x".' }], isError: false })
 
-function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[]) => unknown, toasts?: string[], lists?: Record<string, string[]>, cwd?: string, root?: string, skillKey?: string | null, mcpCalls?: { server: string, tool: string, args: Record<string, unknown> }[], registered?: { name: string, prompt: string }[], owns?: (slug: string) => boolean, opened?: string[], browser?: string[], toolCall?: (e: any) => unknown, read?: (path: string) => string | undefined, exists?: (path: string) => boolean | undefined, mcpThrow?: string, logs?: string[], listed?: boolean, appOwned?: boolean, connected?: () => boolean } = {}) {
+// A small file system for the link tests: 'file', 'dir', { link: where it points } or { size, mtimeMs } (a file) by full path.
+// Folders above any entry are there too. stat follows links the way the engine's $.fs.stat with resolve does.
+type Node = 'file' | 'dir' | { link: string } | { size: number, mtimeMs: number }
+function fakeFs(tree: Record<string, Node>) {
+  const isLinkAt = (p: string) => { const n = tree[p]; return typeof n === 'object' && 'link' in n }
+  const there = (p: string) => p === '/' || (p in tree && !isLinkAt(p)) || Object.keys(tree).some(k => k.startsWith(p + '/'))
+  const follow = (p: string, depth = 0): string | null => {
+    const parts = p.split('/').filter(Boolean)
+    let cur = ''
+    for (let i = 0; i < parts.length; i++) {
+      cur += '/' + parts[i]
+      const n = tree[cur]
+      if (typeof n === 'object' && 'link' in n) {
+        if (depth > 20) return null
+        const to = n.link.startsWith('/') ? n.link : cur.replace(/\/[^/]+$/, '') + '/' + n.link
+        return follow(normalize(to + '/' + parts.slice(i + 1).join('/')) as string, depth + 1)
+      }
+    }
+    return cur || '/'
+  }
+  const missing = () => Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' })
+  return {
+    async stat(path: string) {
+      const p = normalize(path) as string
+      const lands = follow(p)
+      if (!lands || !there(lands)) {
+        if (isLinkAt(p)) return { kind: 'other', size: 0, mtimeMs: 0, isLink: true }
+        throw missing()
+      }
+      const n = tree[lands]
+      const kind = n === 'file' || (typeof n === 'object' && 'size' in n) ? 'file' : 'dir'
+      const size = typeof n === 'object' && 'size' in n ? n.size : 1
+      const mtimeMs = typeof n === 'object' && 'mtimeMs' in n ? n.mtimeMs : 1000 + Object.keys(tree).indexOf(lands)
+      return { kind, size, mtimeMs, isLink: isLinkAt(p), realPath: lands }
+    },
+    async list(path: string) {
+      const d = follow(normalize(path) as string) as string
+      const names = new Set(Object.keys(tree).filter(k => k.startsWith(d + '/')).map(k => k.slice(d.length + 1).split('/')[0]))
+      return [...names].map(name => {
+        const k = d + '/' + name
+        return { name, kind: isLinkAt(k) ? 'other' : there(k) && tree[k] !== 'file' && !(typeof tree[k] === 'object') ? 'dir' : 'file', size: 1, mtimeMs: 0, isLink: isLinkAt(k) }
+      })
+    },
+  }
+}
+
+function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: Record<string, string>, process?: (argv: string[]) => unknown, toasts?: string[], lists?: Record<string, string[]>, cwd?: string, root?: string, skillKey?: string | null, mcpCalls?: { server: string, tool: string, args: Record<string, unknown> }[], registered?: { name: string, prompt: string, model?: string, tools?: readonly string[] }[], extraTools?: string[], owns?: (slug: string) => boolean, opened?: string[], browser?: string[], toolCall?: (e: any) => unknown, read?: (path: string) => string | undefined, exists?: (path: string) => boolean | undefined, mcpThrow?: string, logs?: string[], listed?: boolean, appOwned?: boolean, connected?: () => boolean, fsx?: ReturnType<typeof fakeFs> } = {}) {
   const writes = new Map<string, string>()
   const store = new Map<string, unknown>(opts.project ? [['project', opts.project]] : [])
   const clock = mock.clock(on)
@@ -31,10 +80,13 @@ function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: 
   on('fs.exists', ($, e) => ({ value: opts.exists?.(e.path) ?? (e.path in (opts.files || {}) || e.path.endsWith('/skills')) }))
   on('fs.list', ($, e) => ({ value: e.path.endsWith('/skills') ? [{ name: 'setup', kind: 'dir', size: 0, mtimeMs: 0, isLink: false }, { name: 'notes.txt', kind: 'file', size: 1, mtimeMs: 0, isLink: false }]
     : (opts.lists?.[e.path] || []).map(name => ({ name, kind: 'file', size: 1, mtimeMs: 0, isLink: false })) }))
-  on('fs.read', ($, e) => ({ value: opts.read?.(e.path) ?? (opts.files || {})[e.path] ?? (e.path.endsWith('SKILL.md') ? 'description: Set up YouCloned. More.' : 'crew prompt') }))
+  // Most tests run as a buyer who said yes to working without prompts (the SkillKey look-ups only run ahead then).
+  on('fs.read', ($, e) => ({ value: opts.read?.(e.path) ?? (opts.files || {})[e.path] ?? (e.path.endsWith('SKILL.md') ? 'description: Set up YouCloned. More.' : e.path.endsWith('/.claude/settings.json') ? '{"permissions":{"defaultMode":"bypassPermissions"}}' : 'crew prompt') }))
   on('fs.write', ($, e) => { writes.set(e.path, e.text); return { value: undefined } })
+  const fsx = opts.fsx || fakeFs({})
+  on('fs.stat', async ($, e) => fsx.stat(e.path).then(value => ({ value }), (err: Error) => ({ deny: err.message })))
   const sk = opts.skillKey === undefined ? SK : opts.skillKey
-  on('tool.list', () => ({ value: sk && opts.listed !== false ? skTools(sk) : [] }))
+  on('tool.list', () => ({ value: [...(sk && opts.listed !== false ? skTools(sk) : []), ...(opts.extraTools || []).map(name => ({ name, description: '', mcp: true }))] }))
   on('mcp.call', ($, e) => {
     opts.mcpCalls?.push(e)
     if (opts.mcpThrow) return { value: { content: [{ type: 'text', text: 'YouCloned MCP call: ' + opts.mcpThrow }], isError: true } }
@@ -48,7 +100,7 @@ function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: 
     return { value: { content: [], isError: true } }
   })
   on('tool.register', () => ({ value: undefined }))
-  on('agent.register', ($, e) => { opts.registered?.push({ name: e.name, prompt: e.prompt }); return { value: { agent: 'youcloned:' + e.name } } })
+  on('agent.register', ($, e) => { opts.registered?.push({ name: e.name, prompt: e.prompt, model: e.model, tools: e.tools }); return { value: { agent: 'youcloned:' + e.name } } })
   on('agent.list', () => ({ value: opts.agents || [] }))
   on('command.register', () => ({ value: undefined }))
   on('ui.open', ($, e) => { opts.opened?.push(e.id); return { value: { isPlaced: true } } })
@@ -210,7 +262,7 @@ test('after setup the result tells Claude to have the buyer switch on Sync autom
   expect(ok.result).toMatch(/Sync automatically/)
 })
 
-test('dashboard setup steps 1 to 3 are Done only when this computer has them', async ($, on) => {
+test('dashboard setup steps are Done only when this computer has them', async ($, on) => {
   const here = '/Users/pat/Documents/Garden'
   const files: Record<string, string> = {}
   const { writes, clock } = sessionStubs(on, { project: here, cwd: here, files: { [here + '/YOUCLONED.md']: '# rules' },
@@ -220,7 +272,76 @@ test('dashboard setup steps 1 to 3 are Done only when this computer has them', a
   await $.session.start({ surface: 'desktop', isInteractive: false, cwd: here })
   await clock.advance(25000)
   const state = JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}')
-  expect(state.setup).toEqual({ home: true, tools: false, backup: false })
+  expect({ home: state.setup.home, tools: state.setup.tools, backup: state.setup.backup }).toEqual({ home: true, tools: false, backup: false })
+  expect(state.setup.steps.map((x: any) => x.id)).toEqual(['tools', 'home', 'protection', 'skillkey', 'interview', 'skills', 'backup', 'library', 'voice', 'feed'])
+  expect(state.setup.steps.filter((x: any) => x.done).map((x: any) => x.id)).toEqual(['home', 'skillkey', 'interview'])
+  expect(state.setup.next).toBe('tools')
+})
+
+test('setup_next walks the night-one steps in order and checks each one on this computer', async ($, on) => {
+  const vault = '/Users/pat/Documents/Obsidian Vault'
+  const files: Record<string, string> = {}
+  const present = new Set<string>()
+  let toolsOk = false
+  let verifyOk = false
+  const { writes } = sessionStubs(on, { cwd: '/Users/pat/', skillKey: null,
+    read: (path) => files[path] ?? writes.get(path),
+    exists: (path) => present.has(path) || writes.has(path) || (path.endsWith('/setup/install-tools.sh') ? true : undefined),
+    process: (argv) => ({ exitCode: argv[1]?.endsWith('install-tools.sh') ? (toolsOk ? 0 : 1) : argv.join(' ').includes('--verify') ? (verifyOk ? 0 : 1) : 1, stdout: '', stderr: '' }) })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/Users/pat/' })
+  let out = (await $.tool.call({ tool: 'mcp__youcloned__setup_next' })).result
+  expect(out).toMatch(/0 of 10 steps done/)
+  expect(out).toMatch(/Next is step 1, Your tools/)
+  expect(out).toMatch(/install-tools\.sh/)
+  toolsOk = true
+  out = (await $.tool.call({ tool: 'mcp__youcloned__setup_next' })).result
+  expect(out).toMatch(/Next is step 2, Your clone's home/)
+  expect(out).toContain(vault)
+  out = (await $.tool.call({ tool: 'mcp__youcloned__setup_next', folder: 'Documents/Somewhere' })).result
+  expect(out).toMatch(/must be a full path/)
+  out = (await $.tool.call({ tool: 'mcp__youcloned__setup_next', folder: '~/Documents/Obsidian Vault/' })).result
+  expect(writes.has(vault + '/.youcloned-folder')).toBe(true)
+  expect(writes.get('/Users/pat/.youcloned/vault-path')).toBe(vault + '\n')
+  expect(out).toMatch(/Next is step 3, Protection/)
+  expect(out).toMatch(/install-git-hooks\.mjs" --install/)
+  present.add('/Users/pat/.youcloned/git-hooks/pre-commit'); present.add('/Users/pat/.youcloned/lib/secret-rules.mjs')
+  // The hook files alone don't count: the check must prove a planted key gets refused.
+  out = (await $.tool.call({ tool: 'mcp__youcloned__setup_next' })).result
+  expect(out).toMatch(/Next is step 3, Protection/)
+  verifyOk = true
+  out = (await $.tool.call({ tool: 'mcp__youcloned__setup_next' })).result
+  expect(out).toMatch(/Next is step 4, SkillKey/)
+  expect(out).toMatch(/Copy SkillKey address/)
+  // The interview can't be put off, and neither can anything else but voice and feed.
+  out = (await $.tool.call({ tool: 'mcp__youcloned__setup_next', skip: 'interview' })).result
+  expect(out).toMatch(/can't be put off/)
+  // Voice and feeding can be put off, and "finish my setup" brings them back.
+  await $.tool.call({ tool: 'mcp__youcloned__setup_next', skip: 'voice' })
+  expect(writes.size).toBeGreaterThan(0)
+  const back = (await $.tool.call({ tool: 'mcp__youcloned__setup_next', resume: true })).result
+  expect(back).not.toMatch(/put off/)
+})
+
+test('the interview saves into the folder setup_next chose, without asking again', async ($, on) => {
+  const vault = '/Users/pat/Documents/Obsidian Vault'
+  const { writes } = sessionStubs(on, { cwd: '/Users/pat/Documents/Garden' })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/Users/pat/Documents/Garden' })
+  await $.tool.call({ tool: 'mcp__youcloned__setup_next', folder: vault })
+  const steps = await $.tool.call({ tool: 'mcp__youcloned__load_setup' })
+  expect(steps.result).toMatch(/they already chose \/Users\/pat\/Documents\/Obsidian Vault in setup/)
+  await $.tool.call({ tool: 'mcp__youcloned__save_setup', ...SETUP })
+  expect(writes.has(vault + '/YOUCLONED.md')).toBe(true)
+})
+
+test('voice and feeding can be put off, and setup says all set once the rest is done', async ($, on) => {
+  const all = Object.fromEntries(STEPS.map(s => [s.id, true]))
+  const ctx = { root: '/p', home: '/Users/pat', folder: '/f', mac: true, defaultFolder: '/f', needsSkillKey: 'x', envFile: '/f/.env' }
+  expect(setupText(all, new Set(), ctx)).toMatch(/10 of 10 steps done/)
+  const most = { ...all, voice: false, feed: false }
+  const out = setupText(most, new Set(['voice', 'feed']), ctx)
+  expect(out).toMatch(/put off: voice, feed/)
+  expect(out).toMatch(/finish my setup/)
+  expect(setupText(most, new Set(['voice']), ctx)).toMatch(/Next is step 10, Feed me/)
 })
 
 test('a conversation open in the home folder itself still sets up in ~/YouCloned', async ($, on) => {
@@ -254,6 +375,46 @@ test('every conversation in the clone folder gets the rules file', async ($, on)
   const out = await $.prompt.context({ blocks: [{ name: 'currentDate', text: 'today' }] })
   expect(out.blocks.length).toBe(2)
   expect(out.blocks[1].text).toMatch(/My YouCloned rules\nPat/)
+})
+
+test('a new chat already has the owner\'s saved lessons, so its first answer follows them', async ($, on) => {
+  sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: {
+    [PROJECT + '/YOUCLONED.md']: '# My YouCloned rules\nPat',
+    [PROJECT + '/memory/INDEX.md']: '- [Call buyers members](call-buyers-members.md): never say users\n',
+    [PROJECT + '/memory/call-buyers-members.md']: 'Oct 17: call the people who buy from me members, never users.',
+  } })
+  on('prompt.context', ($, e) => ({ blocks: e.blocks }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/work' })
+  const text = (await $.prompt.context({ blocks: [] })).blocks.find(b => b.name === 'youcloned').text
+  expect(text).toMatch(/Lessons the owner taught you \(follow every one, starting with your first reply\)/)
+  expect(text).toContain('call the people who buy from me members, never users')
+})
+
+test('every clone, Mac or PC, is told to say when it is time to change chats and how to hand off', async ($, on) => {
+  sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# My YouCloned rules\nPat' } })
+  on('prompt.context', ($, e) => ({ blocks: e.blocks }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/work' })
+  const text = (await $.prompt.context({ blocks: [] })).blocks.find(b => b.name === 'youcloned').text
+  expect(text).toMatch(/My YouCloned rules\nPat[\s\S]*Rules every YouCloned clone follows/)
+  expect(text).toContain('"Hey, it\'s time to change chats."')
+  expect(text).toMatch(/never in the middle of one/)
+  for (const part of ['Start here', 'newest first', "what's open", 'every file you touched', 'the Done list']) expect(text).toContain(part)
+  expect(text).toContain('handoffs/<project>/')
+  expect(text).toMatch(/latest project chat/)
+  expect(text).toContain('Automatic chat switching: off')
+  expect(text).toMatch(/every three hours, sooner, later/)
+  expect(text).toMatch(/timer, reminder or watcher still running/)
+  expect(text).toMatch(/promise still owed/)
+  expect(text).toMatch(/first save anything worth remembering/)
+  // Jon's own working habits and the memory habit ship to every clone (Oct 17)
+  expect(text).toContain('## How you work for the owner')
+  expect(text).toMatch(/A yes on the wording is not a yes to send/)
+  expect(text).toMatch(/Never change, reset or set a password/)
+  expect(text).toContain('memory/INDEX.md')
+  // Jon, Oct 17 (to-do 646): the kickoff offer and the better-model line ship to every clone
+  expect(text).toMatch(/offer the kickoff once before you build/)
+  expect(text).toMatch(/better or cheaper on a different Claude model, say so in one line/)
+  expect(text).toContain('past about 200,000 tokens, or 3 hours since it started')
 })
 
 test('the clone folder conversation is told which YouCloned version is running', async ($, on) => {
@@ -382,6 +543,10 @@ test('crew instructions come from SkillKey, never from a file in the add-on', as
   const mcpCalls: { server: string, tool: string, args: Record<string, unknown> }[] = []
   sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' }, registered, mcpCalls })
   await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  // Nothing is fetched from SkillKey until the owner runs a helper (no unasked permission boxes).
+  expect(registered.length).toBe(0)
+  expect(mcpCalls.length).toBe(0)
+  await $.command.run({ command: 'youcloned', args: 'crew support' })
   expect(registered.map(r => r.name).sort()).toEqual(['inbox', 'support'])
   expect(registered.find(r => r.name === 'support').prompt).toBe('Instructions for youcloned-crew-support')
   expect(mcpCalls.every(c => c.server === SK)).toBe(true)
@@ -402,6 +567,97 @@ test('load_setup hands Claude the setup interview from SkillKey, markers and Ski
   await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
   const out = await $.tool.call({ tool: 'mcp__youcloned__load_setup' })
   expect(out.result).toMatch(/^Instructions for youcloned-setup\n\nFolder: the default is /)
+})
+
+const SETTINGS = '/Users/pat/.claude/settings.json'
+
+test('setup asks once whether the clone may work without permission prompts', async ($, on) => {
+  const { store } = sessionStubs(on, { read: (path) => path.endsWith('/.claude/settings.json') ? '{}' : undefined })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/work' })
+  const first = await $.tool.call({ tool: 'mcp__youcloned__load_setup' })
+  expect(first.result).toMatch(/"Let your clone work without stopping to ask permission at every step\?"/)
+  expect(first.result).toMatch(/work_without_prompts/)
+  store.set('noPromptsAsked', 'no')
+  const again = await $.tool.call({ tool: 'mcp__youcloned__load_setup' })
+  expect(again.result).not.toMatch(/work_without_prompts/)
+})
+
+test('setup does not ask when bypass permission mode is already on', async ($, on) => {
+  sessionStubs(on, { files: { [SETTINGS]: JSON.stringify({ permissions: { defaultMode: 'bypassPermissions' } }) } })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/work' })
+  const out = await $.tool.call({ tool: 'mcp__youcloned__load_setup' })
+  expect(out.result).not.toMatch(/work_without_prompts/)
+})
+
+test('a yes merges bypass mode into the settings file, keeps every other setting and backs the file up', async ($, on) => {
+  const old = JSON.stringify({ model: 'opus', permissions: { allow: ['Bash(ls:*)'], defaultMode: 'default' }, hooks: { PreToolUse: [] } }, null, 2)
+  const { writes, store } = sessionStubs(on, { files: { [SETTINGS]: old } })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/work' })
+  const out = await $.tool.call({ tool: 'mcp__youcloned__work_without_prompts', allow: true })
+  expect(out.result).toMatch(/^Done/)
+  const saved = JSON.parse(writes.get(SETTINGS) as string)
+  expect(saved.permissions.defaultMode).toBe('bypassPermissions')
+  expect(saved.permissions.allow).toEqual(['Bash(ls:*)', 'mcp__youcloned__*', 'mcp__plugin_youcloned_youcloned__*'])
+  expect(saved.model).toBe('opus')
+  expect(saved.hooks).toEqual({ PreToolUse: [] })
+  expect(saved.skipDangerousModePermissionPrompt).toBe(true)
+  const backups = [...writes.keys()].filter(k => k.startsWith(SETTINGS + '.youcloned-backup-'))
+  expect(backups.length).toBe(1)
+  expect(writes.get(backups[0])).toBe(old)
+  expect(store.get('noPromptsAsked')).toBe('yes')
+})
+
+test('a yes with no settings file yet creates one with bypass mode on', async ($, on) => {
+  const { writes } = sessionStubs(on)
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/work' })
+  await $.tool.call({ tool: 'mcp__youcloned__work_without_prompts', allow: true })
+  expect(JSON.parse(writes.get(SETTINGS) as string)).toEqual({ permissions: { defaultMode: 'bypassPermissions', allow: ['mcp__youcloned__*', 'mcp__plugin_youcloned_youcloned__*'] }, skipDangerousModePermissionPrompt: true })
+})
+
+test('a no changes nothing, and a settings file that is not valid JSON is left alone', async ($, on) => {
+  const { writes, store } = sessionStubs(on, { files: { [SETTINGS]: '{ not json' } })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/work' })
+  const no = await $.tool.call({ tool: 'mcp__youcloned__work_without_prompts', allow: false })
+  expect(no.result).toMatch(/^Left as it is/)
+  expect(store.get('noPromptsAsked')).toBe('no')
+  const bad = await $.tool.call({ tool: 'mcp__youcloned__work_without_prompts', allow: true })
+  expect(bad.result).toMatch(/^Nothing changed/)
+  expect([...writes.keys()].some(k => k.startsWith(SETTINGS))).toBe(false)
+})
+
+const CURSOR_DIR = '/Users/pat/Library/Application Support/Cursor/User'
+const CURSOR = CURSOR_DIR + '/settings.json'
+const cursorOn = (files: Record<string, string>) => (p: string) => p === CURSOR_DIR ? true : (p in files ? true : undefined)
+
+test('a yes also lets the Claude panel in Cursor skip prompts, keeping the other Cursor settings', async ($, on) => {
+  const files = { [CURSOR]: JSON.stringify({ 'editor.fontSize': 14 }) }
+  const { writes } = sessionStubs(on, { files, exists: cursorOn(files) })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/work' })
+  const out = await $.tool.call({ tool: 'mcp__youcloned__work_without_prompts', allow: true })
+  expect(out.result).toMatch(/^Done/)
+  expect(out.result).not.toMatch(/won't touch/)
+  expect(JSON.parse(writes.get(CURSOR) as string)).toEqual({ 'editor.fontSize': 14, 'claudeCode.allowDangerouslySkipPermissions': true, 'claudeCode.initialPermissionMode': 'bypassPermissions' })
+  expect([...writes.keys()].filter(k => k.startsWith(CURSOR + '.youcloned-backup-')).length).toBe(1)
+  expect([...writes.keys()].some(k => k.includes('/Code/User/'))).toBe(false)
+})
+
+test('a Cursor settings file with comments is left alone and the person gets the two settings to tick', async ($, on) => {
+  const files = { [CURSOR]: '{\n  // my font\n  "editor.fontSize": 14,\n}' }
+  const { writes } = sessionStubs(on, { files, exists: cursorOn(files) })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/work' })
+  const out = await $.tool.call({ tool: 'mcp__youcloned__work_without_prompts', allow: true })
+  expect(out.result).toMatch(/^Done/)
+  expect(out.result).toMatch(/Allow Dangerously Skip Permissions/)
+  expect([...writes.keys()].some(k => k.startsWith(CURSOR))).toBe(false)
+  expect(JSON.parse(writes.get(SETTINGS) as string).permissions.defaultMode).toBe('bypassPermissions')
+})
+
+test('setup still asks when only the terminal skips prompts and the Cursor panel does not', async ($, on) => {
+  const files = { [SETTINGS]: JSON.stringify({ permissions: { defaultMode: 'bypassPermissions' } }), [CURSOR]: '{}' }
+  sessionStubs(on, { files, exists: cursorOn(files) })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/work' })
+  const out = await $.tool.call({ tool: 'mcp__youcloned__load_setup' })
+  expect(out.result).toMatch(/work_without_prompts/)
 })
 
 test('SkillKey is found in the terminal by its usual name too', async ($, on) => {
@@ -450,8 +706,8 @@ test('a helper the SkillKey account does not own stays off and says so', async (
   const registered: { name: string, prompt: string }[] = []
   sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' }, registered, owns: (slug) => slug !== 'youcloned-crew-inbox' })
   await $.session.start({ surface: 'terminal', isInteractive: false, cwd: PROJECT })
-  expect(registered.map(r => r.name)).toEqual(['support'])
   const out = await $.command.run({ command: 'youcloned', args: 'crew inbox' })
+  expect(registered.map(r => r.name)).toEqual(['support'])
   expect(out.text).toMatch(/isn't on your SkillKey account yet/)
 })
 
@@ -653,7 +909,9 @@ test('words come only from SkillKey\'s "Words left" line, never from another num
   on('http.fetch', () => ({ value: { status: 404, ok: false, headers: {}, text: '' } }))
   await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
   await clock.advance(3000)
-  expect(JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}').words).toBe(4200)
+  // The add-on never asks SkillKey for the balance on its own (no unasked permission boxes); the gauge waits for a
+  // SkillKey reply that names it, and never takes another number from a reply.
+  expect(JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}').words ?? null).toBeNull()
 })
 
 test('the New from Jon card shows the online feed, and the saved copy when offline', async ($, on) => {
@@ -829,6 +1087,8 @@ test('in the first minute a SkillKey that is still connecting is not forgotten, 
   expect(store.get('skillKeyServer')).toBe(SK)
   connected = true
   await clock.advance(16000)
+  expect(registered.length).toBe(0) // set up when a helper first runs, never on its own
+  await $.command.run({ command: 'youcloned', args: 'crew support' })
   expect(registered.map(r => r.name).sort()).toEqual(['inbox', 'support'])
   expect(store.get('skillKeyServer')).toBe(SK)
 })
@@ -858,4 +1118,249 @@ test('the words gauge updates from any SkillKey answer that names the balance', 
   await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
   await $.tool.call({ tool: 'mcp__' + SK + '__list_skills' })
   expect(JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}').words).toBe(1234)
+})
+
+// The feed-me helpers: their instructions are the add-on's agents files (frontmatter, then the prompt).
+// A test can't read the disk, so these stand in with the same frontmatter; library/test/feed-e2e.py
+// checks the shipped files say the same.
+const AGENT_FILES: Record<string, string> = {
+  librarian: '---\nname: librarian\ndescription: YouCloned librarian. Collects the history.\nmodel: haiku\n' +
+    'tools: Read, Glob, Grep, Bash, Write, ToolSearch, mcp__claude_ai_Gmail__search_threads, mcp__claude_ai_Gmail__get_thread\n---\n\n' +
+    'You are the YouCloned librarian. Search in:sent newest first.\n',
+  'wiki-writer': '---\nname: wiki-writer\ndescription: YouCloned wiki writer.\nmodel: sonnet\ntools: Read, Glob, Grep, Bash, Write, Edit\n---\n' +
+    'You write Library/index.md last.\n',
+}
+const agentFile = (name: string) => AGENT_FILES[name]
+const helperFiles = {
+  exists: (path: string) => /\/agents\/(librarian|wiki-writer)\.md$/.test(path) || undefined,
+  read: (path: string) => { const m = /\/agents\/(librarian|wiki-writer)\.md$/.exec(path); return m ? agentFile(m[1]) : undefined },
+}
+
+test('the librarian registers on Haiku and the wiki writer on Sonnet, each with only its own tools', async ($, on) => {
+  const registered: { name: string, prompt: string, model?: string, tools?: readonly string[] }[] = []
+  const desktopGmail = 'mcp__7f3c9a10-1111-4222-8333-944455556666__search_threads'
+  sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' }, registered, ...helperFiles,
+    extraTools: [desktopGmail, 'mcp__7f3c9a10-1111-4222-8333-944455556666__send_message', 'mcp__claude_ai_Slack__slack_read_thread'] })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  const lib = registered.find(r => r.name === 'librarian')
+  const wiki = registered.find(r => r.name === 'wiki-writer')
+  expect(lib?.model).toBe('haiku')
+  expect(wiki?.model).toBe('sonnet')
+  expect([...(lib?.tools || [])].sort()).toEqual(['Bash', 'Glob', 'Grep', 'Read', 'ToolSearch', 'Write', desktopGmail,
+    'mcp__claude_ai_Gmail__get_thread', 'mcp__claude_ai_Gmail__search_threads'].sort())
+  expect([...(wiki?.tools || [])].sort()).toEqual(['Bash', 'Edit', 'Glob', 'Grep', 'Read', 'Write'])
+  expect(lib?.prompt).toBe(parseAgent(agentFile('librarian'))?.prompt)
+  expect(lib?.prompt).toMatch(/in:sent/)
+  expect(wiki?.prompt).toMatch(/Library\/index\.md/)
+  // The crew still comes from SkillKey, beside them.
+  expect(registered.map(r => r.name).sort()).toEqual(['librarian', 'wiki-writer'])
+})
+
+test('the helpers\' gate: feed.py only, writes only in their own folder, Gmail look-ups only', () => {
+  const ctx = { feed: '/plug/youcloned/library/feed.py', scratch: '/Users/pat/.youcloned/feeding', library: PROJECT + '/Library' }
+  const run = (cmd: string) => ({ tool: 'Bash', command: cmd })
+  const env = ' --env "' + PROJECT + '/.env" --helper'
+  const feed = 'python3 /plug/youcloned/library/feed.py '
+  expect(helperJudge('librarian', run('python3 "/plug/youcloned/library/feed.py" web "https://pat.example.com" --crawl --max 200' + env), ctx)).toBe(null)
+  expect(helperJudge('librarian', run(feed + "add --kind email --ref gmail:18c2ab --title 'Your $97 course' --file \"/Users/pat/.youcloned/feeding/18c2ab.txt\" --remove" + env), ctx)).toBe(null)
+  expect(helperJudge('librarian', run('uv run --with pypdf python "/plug/youcloned/library/feed.py" doc "' + PROJECT + '/Feed me/book.pdf"' + env), ctx)).toBe(null)
+  expect(helperJudge('librarian', run(feed + 'stats; ls'), ctx)).toMatch(/one plain command/)
+  expect(helperJudge('librarian', run(feed + 'stats | wc -l'), ctx)).toMatch(/one plain command/)
+  expect(helperJudge('librarian', run(feed + 'stats > out.txt'), ctx)).toMatch(/one plain command/)
+  expect(helperJudge('librarian', run(feed + 'add --title "$(whoami)" --stdin'), ctx)).toMatch(/single quotes/)
+  expect(helperJudge('librarian', run('python3 /tmp/feed.py stats'), ctx)).toMatch(/own feed\.py/)
+  expect(helperJudge('librarian', run('ls /Users/pat'), ctx)).toMatch(/only feed\.py/)
+  expect(helperJudge('librarian', run(feed + 'wiki-put a b c'), ctx)).toMatch(/only these feed\.py commands/)
+  expect(helperJudge('wiki-writer', run(feed + 'web https://x.example.com'), ctx)).toMatch(/only these feed\.py commands/)
+  expect(helperJudge('wiki-writer', run(feed + "search 'what I sell' --k 20" + env), ctx)).toBe(null)
+  expect(helperJudge('librarian', { tool: 'Write', file_path: '/Users/pat/.youcloned/feeding/a.txt' }, ctx)).toBe(null)
+  expect(helperJudge('librarian', { tool: 'Write', file_path: PROJECT + '/Library/index.md' }, ctx)).toMatch(/outside/)
+  expect(helperJudge('wiki-writer', { tool: 'Write', file_path: PROJECT + '/Library/offers/garden.md' }, ctx)).toBe(null)
+  expect(helperJudge('wiki-writer', { tool: 'Edit', file_path: PROJECT + '/YOUCLONED.md' }, ctx)).toMatch(/outside/)
+  expect(helperJudge('wiki-writer', { tool: 'Write', file_path: PROJECT + '/Library/../.env' }, ctx)).toMatch(/env file/)
+  expect(helperJudge('librarian', { tool: 'Read', file_path: PROJECT + '/.env' }, ctx)).toMatch(/env file/)
+  expect(helperJudge('librarian', { tool: 'mcp__claude_ai_Gmail__get_thread' }, ctx)).toBe(null)
+  expect(helperJudge('librarian', { tool: 'mcp__claude_ai_Gmail__send_message' }, ctx)).toMatch(/not on the librarian/)
+  expect(helperJudge('librarian', { tool: 'mcp__claude_ai_Gmail__label_thread' }, ctx)).toMatch(/not on the librarian/)
+  expect(helperJudge('wiki-writer', { tool: 'mcp__claude_ai_Gmail__search_threads' }, ctx)).toMatch(/not on the wiki-writer/)
+  expect(feedCommandReason('py -3 "C:\\Users\\pat\\yc\\library\\feed.py" stats', 'C:\\Users\\pat\\yc\\library\\feed.py', ['stats'])).toBe(null)
+})
+
+test('the helpers\' gate keeps every path, glob and feed.py argument inside their own folders and away from env and key files', () => {
+  const ctx = { feed: '/plug/youcloned/library/feed.py', scratch: '/Users/pat/.youcloned/feeding', library: PROJECT + '/Library', folder: PROJECT }
+  const run = (cmd: string) => ({ tool: 'Bash', command: cmd })
+  const feed = 'python3 /plug/youcloned/library/feed.py '
+  const tail = ' --env "' + PROJECT + '/.env" --helper'
+  const feedMe = PROJECT + '/Feed me'
+  // Codex: Grep(path=vault, glob=".env", output_mode=content) read the env file.
+  expect(helperJudge('librarian', { tool: 'Grep', pattern: 'TOKEN', path: PROJECT, glob: '.env', output_mode: 'content' }, ctx)).not.toBe(null)
+  expect(helperJudge('librarian', { tool: 'Grep', pattern: 'TOKEN', path: feedMe, glob: '.env', output_mode: 'content' }, ctx)).toMatch(/env/)
+  expect(helperJudge('librarian', { tool: 'Grep', pattern: 'TOKEN', path: PROJECT, output_mode: 'content' }, ctx)).toMatch(/outside/)
+  expect(helperJudge('librarian', { tool: 'Grep', pattern: 'TOKEN', output_mode: 'content' }, ctx)).toMatch(/missing/)
+  expect(helperJudge('librarian', { tool: 'Grep', pattern: 'x', path: feedMe, glob: '*', output_mode: 'content' }, ctx)).toMatch(/document type/)
+  expect(helperJudge('librarian', { tool: 'Grep', pattern: 'x', path: feedMe, glob: '../*.md' }, ctx)).toMatch(/\.\./)
+  expect(helperJudge('librarian', { tool: 'Grep', pattern: 'x', path: feedMe }, ctx)).toMatch(/document type/)
+  expect(helperJudge('librarian', { tool: 'Grep', pattern: 'x', path: feedMe, glob: '**/*.{md,txt}', output_mode: 'content' }, ctx)).toBe(null)
+  expect(helperJudge('librarian', { tool: 'Grep', pattern: 'x', path: feedMe + '/notes.md', output_mode: 'content' }, ctx)).toBe(null)
+  expect(helperJudge('librarian', { tool: 'Glob', pattern: PROJECT + '/.env', path: feedMe }, ctx)).toMatch(/env/)
+  expect(helperJudge('librarian', { tool: 'Glob', pattern: PROJECT + '/*', path: feedMe }, ctx)).toMatch(/outside/)
+  expect(helperJudge('librarian', { tool: 'Glob', pattern: '**/*', path: feedMe }, ctx)).toBe(null)
+  expect(helperJudge('wiki-writer', { tool: 'Glob', pattern: '**/*.md', path: PROJECT + '/Library' }, ctx)).toBe(null)
+  expect(helperJudge('wiki-writer', { tool: 'Glob', pattern: '**/*.md' }, ctx)).toMatch(/missing/)
+  expect(helperJudge('librarian', { tool: 'Read', file_path: feedMe + '/notes.md' }, ctx)).toBe(null)
+  expect(helperJudge('librarian', { tool: 'Read', file_path: PROJECT + '/YOUCLONED.md' }, ctx)).toMatch(/outside/)
+  expect(helperJudge('librarian', { tool: 'Read', file_path: feedMe + '/.env.local' }, ctx)).toMatch(/env file/)
+  expect(helperJudge('librarian', { tool: 'Read', file_path: feedMe + '/id_rsa' }, ctx)).toMatch(/key file/)
+  expect(helperJudge('wiki-writer', { tool: 'Read', file_path: feedMe + '/notes.md' }, ctx)).toMatch(/outside/)
+  // Codex: add --file <vault>/.env --remove uploaded the env file, then deleted it.
+  expect(helperJudge('librarian', run(feed + "add --kind note --ref x --title 'x' --file \"" + PROJECT + "/.env\" --remove" + tail), ctx)).toMatch(/env file/)
+  expect(helperJudge('librarian', run(feed + "add --kind note --ref x --title 'x' --file=" + PROJECT + "/.env" + tail), ctx)).toMatch(/env file/)
+  expect(helperJudge('librarian', run(feed + "add --kind note --ref x --title 'x' --fil \"" + PROJECT + "/.env\"" + tail), ctx)).toMatch(/does not take --fil/)
+  expect(helperJudge('librarian', run(feed + "add --kind note --ref x --title 'x' --file \"/Users/pat/.youcloned/feeding/../../YouCloned/.env\"" + tail), ctx)).toMatch(/\.\./)
+  expect(helperJudge('librarian', run(feed + "add --kind note --ref x --title 'x' --file \"" + feedMe + "/a.txt\" --remove" + tail), ctx)).toMatch(/--remove/)
+  expect(helperJudge('librarian', run(feed + "add --kind note --ref x --title 'x' --file \"" + feedMe + "/a.txt\"" + tail), ctx)).toBe(null)
+  expect(helperJudge('librarian', run(feed + "add --kind note --ref x --title 'x' --file \"/Users/pat/notes.txt\"" + tail), ctx)).toMatch(/outside/)
+  expect(helperJudge('librarian', run(feed + "add --kind note --ref x --title 'x' --file \"/Users/pat/.youcloned/feeding/a.txt\" --env \"" + PROJECT + "/.env\""), ctx)).toMatch(/--helper/)
+  expect(helperJudge('librarian', run(feed + 'stats --env "/Users/pat/other/.env" --helper'), ctx)).toMatch(/own env file/)
+  expect(helperJudge('librarian', run(feed + 'doc "' + feedMe + '/server.pem"' + tail), ctx)).toMatch(/key file/)
+  expect(helperJudge('librarian', run(feed + 'folder "' + PROJECT + '"' + tail), ctx)).toMatch(/outside/)
+  expect(helperJudge('librarian', run(feed + 'folder "' + feedMe + '"' + tail), ctx)).toBe(null)
+  expect(helperJudge('librarian', run(feed + 'transcribe "' + feedMe + '" --whisper http://upload.example.com' + tail), ctx)).toMatch(/this computer/)
+  expect(helperJudge('librarian', run(feed + 'transcribe "' + feedMe + '" --whisper http://127.0.0.1:2022' + tail), ctx)).toBe(null)
+  expect(helperJudge('librarian', run(feed + 'web "file:///Users/pat/YouCloned/.env"' + tail), ctx)).toMatch(/web addresses/)
+  expect(helperJudge('librarian', run(feed + 'doc "' + feedMe + '/a.txt" "' + feedMe + '/b.txt"' + tail), ctx)).toMatch(/takes 1 value/)
+  // Codex: wiki-put accepted any file.
+  expect(helperJudge('wiki-writer', run(feed + "wiki-put notes 'Notes' \"/Users/pat/notes.md\"" + tail), ctx)).toMatch(/outside/)
+  expect(helperJudge('wiki-writer', run(feed + "wiki-put notes 'Notes' \"" + PROJECT + "/YOUCLONED.md\"" + tail), ctx)).toMatch(/outside/)
+  expect(helperJudge('wiki-writer', run(feed + "wiki-put env 'Env' \"" + PROJECT + "/Library/../.env\"" + tail), ctx)).not.toBe(null)
+  expect(helperJudge('wiki-writer', run(feed + "wiki-put offers/garden 'Garden' \"" + PROJECT + "/Library/offers/garden.md\"" + tail), ctx)).toBe(null)
+})
+
+test('Windows spellings of an env file count as the env file, and stream, short-name and trailing-dot tricks are refused', () => {
+  const ctx = { feed: '/plug/youcloned/library/feed.py', scratch: '/Users/pat/.youcloned/feeding', library: PROJECT + '/Library', folder: PROJECT }
+  const feedMe = PROJECT + '/Feed me'
+  const run = (cmd: string) => ({ tool: 'Bash', command: cmd })
+  const feed = 'python3 /plug/youcloned/library/feed.py '
+  const tail = ' --env "' + PROJECT + '/.env" --helper'
+  // Codex review 2: ".env." and ".env:stream" passed the spelling checks.
+  for (const name of ['.env.', '.env ', '.env:stream', '.env::$DATA', '.ENV', '.Env.Local.', '.env.local:x']) {
+    expect(helperJudge('librarian', { tool: 'Read', file_path: feedMe + '/' + name }, ctx)).toMatch(/env file/)
+    expect(helperJudge('wiki-writer', { tool: 'Write', file_path: PROJECT + '/Library/' + name }, ctx)).toMatch(/env file/)
+    expect(helperJudge('wiki-writer', { tool: 'Edit', file_path: PROJECT + '/Library/' + name }, ctx)).toMatch(/env file/)
+  }
+  expect(helperJudge('librarian', { tool: 'Read', file_path: feedMe + '/notes.md:x' }, ctx)).toMatch(/colon/)
+  expect(helperJudge('wiki-writer', { tool: 'Edit', file_path: PROJECT + '/Library/index.md:hidden' }, ctx)).toMatch(/colon/)
+  expect(helperJudge('librarian', { tool: 'Read', file_path: feedMe + '/ENV~1' }, ctx)).toMatch(/short Windows name/)
+  expect(helperJudge('wiki-writer', { tool: 'Write', file_path: PROJECT + '/Library/NOTES~1.MD' }, ctx)).toMatch(/short Windows name/)
+  expect(helperJudge('librarian', { tool: 'Read', file_path: feedMe + '/notes.md.' }, ctx)).toMatch(/dot or a space/)
+  expect(helperJudge('librarian', { tool: 'Read', file_path: feedMe + '/id_rsa.' }, ctx)).toMatch(/key file/)
+  expect(helperJudge('librarian', { tool: 'Glob', pattern: '**/*.md:x', path: feedMe }, ctx)).toMatch(/colon/)
+  expect(helperJudge('librarian', run(feed + 'doc "' + feedMe + '/.env."' + tail), ctx)).toMatch(/env file/)
+  expect(helperJudge('librarian', run(feed + 'doc "' + feedMe + '/.env:stream"' + tail), ctx)).toMatch(/env file/)
+  expect(helperJudge('librarian', run(feed + 'doc "' + feedMe + '/ENV~1"' + tail), ctx)).toMatch(/short Windows name/)
+  expect(helperJudge('wiki-writer', run(feed + "wiki-put n 'N' \"" + PROJECT + "/Library/n.md:x\"" + tail), ctx)).toMatch(/colon/)
+  const win = { feed: 'C:\\Users\\pat\\yc\\library\\feed.py', scratch: 'C:\\Users\\pat\\.youcloned\\feeding', library: 'C:\\Users\\pat\\YouCloned\\Library', folder: 'C:\\Users\\pat\\YouCloned' }
+  expect(helperJudge('librarian', { tool: 'Read', file_path: 'C:\\Users\\pat\\YouCloned\\Feed me\\.ENV.' }, win)).toMatch(/env file/)
+  expect(helperJudge('librarian', { tool: 'Read', file_path: 'C:\\Users\\pat\\YouCloned\\Feed me\\notes.md' }, win)).toBe(null)
+  expect(helperJudge('librarian', { tool: 'Read', file_path: 'C:\\Users\\pat\\YouCloned\\Feed me\\notes.md:x' }, win)).toMatch(/colon/)
+  expect(helperJudge('librarian', { tool: 'Read', file_path: feedMe + '/notes.md' }, ctx)).toBe(null)
+})
+
+test('the helpers\' gate follows links: a link to the env file, or anywhere, is refused for Read, Edit, Write, Grep and feed.py', async () => {
+  const ctx = { feed: '/plug/youcloned/library/feed.py', scratch: '/Users/pat/.youcloned/feeding', library: PROJECT + '/Library', folder: PROJECT }
+  const feedMe = PROJECT + '/Feed me'
+  const lib = PROJECT + '/Library'
+  const run = (cmd: string) => ({ tool: 'Bash', command: cmd })
+  const feed = 'python3 /plug/youcloned/library/feed.py '
+  const tail = ' --env "' + PROJECT + '/.env" --helper'
+  const fsx = fakeFs({
+    [PROJECT + '/.env']: { size: 120, mtimeMs: 77 },
+    [feedMe + '/book.md']: 'file',
+    [feedMe + '/notes.md']: { link: '../.env' },
+    [feedMe + '/twin.md']: { size: 120, mtimeMs: 77 },
+    [feedMe + '/gone.md']: { link: '../nothing.md' },
+    [feedMe + '/inside.md']: { link: 'book.md' },
+    [feedMe + '/away']: { link: '/Users/pat' },
+    [feedMe + '/sub/a.md']: 'file',
+    [lib + '/index.md']: 'file',
+    [lib + '/notes.md']: { link: '../.env' },
+    [lib + '/offers']: { link: '..' },
+    [lib + '/new.md']: { link: '../.env2' },
+    '/Users/pat/.youcloned/feeding/m1.txt': 'file',
+    '/Users/pat/private.md': 'file',
+  })
+  const gate = async (name: string, call: Record<string, unknown>) => helperJudge(name, call, ctx) || helperLinkReason(name, call, ctx, fsx)
+  // Codex review 2: "Feed me/notes.md -> ../.env" let the librarian Read the env file.
+  expect(await gate('librarian', { tool: 'Read', file_path: feedMe + '/notes.md' })).toMatch(/link/)
+  // Codex review 2: "Library/notes.md -> ../.env" let the wiki writer Edit it.
+  expect(await gate('wiki-writer', { tool: 'Edit', file_path: lib + '/notes.md' })).toMatch(/link/)
+  expect(await gate('wiki-writer', { tool: 'Write', file_path: lib + '/notes.md' })).toMatch(/link/)
+  expect(await gate('wiki-writer', { tool: 'Write', file_path: lib + '/offers/YOUCLONED.md' })).toMatch(/link/)
+  expect(await gate('wiki-writer', { tool: 'Write', file_path: lib + '/new.md' })).toMatch(/link/)
+  expect(await gate('librarian', { tool: 'Read', file_path: feedMe + '/away/private.md' })).toMatch(/link/)
+  expect(await gate('librarian', { tool: 'Read', file_path: feedMe + '/inside.md' })).toMatch(/link/)
+  expect(await gate('librarian', { tool: 'Read', file_path: feedMe + '/gone.md' })).toMatch(/leads nowhere/)
+  expect(await gate('librarian', { tool: 'Read', file_path: feedMe + '/twin.md' })).toMatch(/second name for the env file/)
+  expect(await gate('librarian', { tool: 'Grep', pattern: 'x', path: feedMe, glob: '**/*.md', output_mode: 'content' })).toMatch(/is a link/)
+  expect(await gate('librarian', { tool: 'Grep', pattern: 'x', path: feedMe + '/notes.md', output_mode: 'content' })).toMatch(/link/)
+  expect(await gate('librarian', run(feed + 'doc "' + feedMe + '/notes.md"' + tail))).toMatch(/link/)
+  expect(await gate('librarian', run(feed + "add --kind note --ref x --title 'x' --file \"" + feedMe + "/notes.md\"" + tail))).toMatch(/link/)
+  expect(await gate('wiki-writer', run(feed + "wiki-put n 'N' \"" + lib + "/notes.md\"" + tail))).toMatch(/link/)
+  // Plain files, new files and searches with no link in them still pass.
+  expect(await gate('librarian', { tool: 'Read', file_path: feedMe + '/book.md' })).toBe(null)
+  expect(await gate('librarian', { tool: 'Read', file_path: feedMe + '/sub/a.md' })).toBe(null)
+  expect(await gate('librarian', { tool: 'Grep', pattern: 'x', path: feedMe + '/sub', glob: '**/*.md', output_mode: 'content' })).toBe(null)
+  expect(await gate('librarian', { tool: 'Write', file_path: '/Users/pat/.youcloned/feeding/m2.txt' })).toBe(null)
+  expect(await gate('librarian', run(feed + "add --kind email --ref g:1 --title 'x' --file \"/Users/pat/.youcloned/feeding/m1.txt\" --remove" + tail))).toBe(null)
+  expect(await gate('wiki-writer', { tool: 'Edit', file_path: lib + '/index.md' })).toBe(null)
+  expect(await gate('wiki-writer', { tool: 'Write', file_path: lib + '/people/pat.md' })).toBe(null)
+  expect(await gate('wiki-writer', run(feed + "wiki-put index 'Index' \"" + lib + "/index.md\"" + tail))).toBe(null)
+  // A clone folder that itself sits behind a link (another drive) is fine: only links inside the helper's folders count.
+  const moved = fakeFs({ '/Users/pat/YouCloned': { link: '/Volumes/Data/YouCloned' }, '/Volumes/Data/YouCloned/Feed me/book.md': 'file', '/Volumes/Data/YouCloned/.env': 'file' })
+  expect(await helperLinkReason('librarian', { tool: 'Read', file_path: feedMe + '/book.md' }, ctx, moved)).toBe(null)
+})
+
+test('a running helper is held to the link check: Read and Edit through a link to the env file are refused', async ($, on) => {
+  const vault = '/Users/pat/Documents/Obsidian Vault'
+  const agents = [{ id: 'L1', type: 'youcloned:librarian', description: '', status: 'running' }, { id: 'W1', type: 'youcloned:wiki-writer', description: '', status: 'running' }]
+  const fsx = fakeFs({
+    [vault + '/.env']: 'file',
+    [vault + '/Feed me/notes.md']: { link: '../.env' },
+    [vault + '/Feed me/book.md']: 'file',
+    [vault + '/Library/notes.md']: { link: '../.env' },
+    [vault + '/Library/index.md']: 'file',
+  })
+  sessionStubs(on, { project: vault, cwd: vault, agents, ...helperFiles, fsx, files: { [vault + '/YOUCLONED.md']: '# rules' } })
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: vault })
+  const read = await $.tool.call({ tool: 'Read', file_path: vault + '/Feed me/notes.md', agentId: 'L1' })
+  expect(read.deny).toMatch(/safety gate refused.*link/)
+  const edit = await $.tool.call({ tool: 'Edit', file_path: vault + '/Library/notes.md', old_string: 'a', new_string: 'b', agentId: 'W1' })
+  expect(edit.deny).toMatch(/safety gate refused.*link/)
+  expect((await $.tool.call({ tool: 'Read', file_path: vault + '/Feed me/book.md', agentId: 'L1' })).result).toBe('ran')
+  expect((await $.tool.call({ tool: 'Edit', file_path: vault + '/Library/index.md', old_string: 'a', new_string: 'b', agentId: 'W1' })).result).toBe('ran')
+})
+
+test('a running librarian is held to its gate, and the feed step hands over its paths', async ($, on) => {
+  const vault = '/Users/pat/Documents/Obsidian Vault'
+  const agents = [{ id: 'L1', type: 'youcloned:librarian', description: '', status: 'running' }]
+  const registered: { name: string, prompt: string, model?: string, tools?: readonly string[] }[] = []
+  sessionStubs(on, { project: vault, cwd: vault, agents, registered, ...helperFiles, files: { [vault + '/YOUCLONED.md']: '# rules' } })
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: vault })
+  const sent = await $.tool.call({ tool: 'mcp__claude_ai_Gmail__send_message', agentId: 'L1' })
+  expect(sent.deny).toMatch(/safety gate refused/)
+  const out = await $.tool.call({ tool: 'Write', file_path: vault + '/notes.md', content: 'x', agentId: 'L1' })
+  expect(out.deny).toMatch(/outside \/Users\/pat\/\.youcloned\/feeding/)
+  const shell = await $.tool.call({ tool: 'Bash', command: 'ls', agentId: 'L1' })
+  expect(shell.deny).toMatch(/only feed\.py/)
+  const scratch = await $.tool.call({ tool: 'Write', file_path: '/Users/pat/.youcloned/feeding/m1.txt', content: 'Subject: hi', agentId: 'L1' })
+  expect(scratch.result).toBe('ran')
+  const done = new Set(['tools', 'home', 'protection', 'skillkey', 'interview', 'skills', 'backup', 'library', 'voice'])
+  const text = setupText(Object.fromEntries(STEPS.map(s => [s.id, done.has(s.id)])) as any, new Set(), {
+    root: '/plug/youcloned', home: '/Users/pat', folder: vault, mac: true, defaultFolder: vault, needsSkillKey: '',
+    envFile: vault + '/.env', scratch: '/Users/pat/.youcloned/feeding', detail: {} } as any)
+  expect(text).toMatch(/Next is step 10, Feed me/)
+  expect(text).toMatch(/youcloned:feed-me/)
+  expect(text).toContain('FEED "/plug/youcloned/library/feed.py"')
+  expect(text).toContain('ENV "/Users/pat/Documents/Obsidian Vault/.env"')
+  expect(text).toContain('SCRATCH "/Users/pat/.youcloned/feeding"')
 })

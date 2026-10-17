@@ -44,13 +44,22 @@ function readLines(file) {
   }
 }
 
+// A comment line "# [kind: owner email]" names the kind of every literal under it, so a private hit is
+// reported as denylist:private:owner-email, which says what was found without showing it.
 function loadLiterals(file, source) {
   const lines = readLines(file);
   if (lines === null) return [];
-  return lines
-    .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith('#'))
-    .map((literal) => ({ literal: literal.toLowerCase(), source }));
+  const literals = [];
+  let kind = null;
+  for (const raw of lines) {
+    const line = raw.trim();
+    const named = line.match(/^#\s*\[kind:\s*([^\]]+)\]/i);
+    if (named) kind = named[1].trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    if (!line || line.startsWith('#')) continue;
+    // Private literals are whole-word (no letter or digit touching either end), so a name never hits inside a longer word.
+    literals.push({ literal: line.toLowerCase(), source: kind ? `${source}:${kind}` : source, whole: source === 'denylist:private' });
+  }
+  return literals;
 }
 
 function loadEmailAllowlist() {
@@ -139,7 +148,7 @@ function findInFile(file, root, literals, emailAllowlist) {
   for (const expression of PATH_RULES) {
     expression.lastIndex = 0;
     for (const match of content.matchAll(expression)) {
-      if (match[1].toLowerCase() !== 'you' && match[1] !== '<name>') add(match.index, 'author-machine-path', match[0]);
+      if (!['you', '<you>', '<name>'].includes(match[1].toLowerCase())) add(match.index, 'author-machine-path', match[0]);
     }
   }
   GENERIC_ASSIGNMENT.lastIndex = 0;
@@ -153,11 +162,15 @@ function findInFile(file, root, literals, emailAllowlist) {
     if (!['example.com', 'example.org'].includes(domain) && !emailAllowlist.has(address)) add(match.index, 'email-address', match[0]);
   }
   const lower = content.toLowerCase();
+  const wordChar = (character) => /[a-z0-9]/i.test(character ?? '');
   for (const item of literals) {
     let index = lower.indexOf(item.literal);
     while (index !== -1) {
-      add(index, item.source, content.slice(index, index + item.literal.length), item.source === 'denylist:private');
-      index = lower.indexOf(item.literal, index + item.literal.length);
+      const end = index + item.literal.length;
+      const touches = item.whole && ((wordChar(item.literal[0]) && wordChar(lower[index - 1]))
+        || (wordChar(item.literal[item.literal.length - 1]) && wordChar(lower[end])));
+      if (!touches) add(index, item.source, content.slice(index, end), item.source.startsWith('denylist:private'));
+      index = lower.indexOf(item.literal, index + 1);
     }
   }
   return findings;

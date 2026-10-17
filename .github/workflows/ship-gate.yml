@@ -1,0 +1,97 @@
+# Ship gate for every pull request and every push to main (card youcloned#42).
+# 1. Every commit in the change has an author and committer email on the allow list below. A refused address
+#    is printed masked (first letter only), never in full.
+# 2. The ship gate scans youcloned/ (keys, author paths, emails, the repo denylist, the fix list).
+#    The private identifier list lives only on the author's computer, so it is not part of this run.
+# 3. The ship gate's own tests and the guards' tests pass.
+name: Ship gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  ship-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Commit emails are on the allow list
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.sha }}
+          # Exact addresses, plus every GitHub noreply address (users.noreply.github.com and noreply@github.com).
+          ALLOWED: noreply@bnsn.ai
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "pull_request" ]; then
+            range="$PR_BASE..$PR_HEAD"
+          elif [ -z "$PUSH_BEFORE" ] || [ "$PUSH_BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            range="-1 $PUSH_AFTER"
+          else
+            range="$PUSH_BEFORE..$PUSH_AFTER"
+          fi
+          allowed() {
+            local address
+            address=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+            case "$address" in
+              *@users.noreply.github.com|noreply@github.com) return 0 ;;
+            esac
+            for exact in $ALLOWED; do
+              [ "$address" = "$exact" ] && return 0
+            done
+            return 1
+          }
+          # Read the log first, so a bad range fails the step instead of checking nothing.
+          commits=$(git log --format='%H %ae %ce' $range)
+          bad=0
+          count=0
+          while IFS=' ' read -r sha author committer; do
+            [ -n "$sha" ] || continue
+            count=$((count + 1))
+            for who in author committer; do
+              address=$([ "$who" = author ] && printf '%s' "$author" || printf '%s' "$committer")
+              if ! allowed "$address"; then
+                echo "::error::commit ${sha:0:12}: the $who email (${address:0:1}***) is not on the allow list"
+                bad=$((bad + 1))
+              fi
+            done
+          done <<< "$commits"
+          echo "Checked $count commit(s), $bad email(s) refused."
+          [ "$count" -gt 0 ] && [ "$bad" -eq 0 ]
+
+      - name: Ship gate on youcloned/
+        if: ${{ !cancelled() }}
+        # A pull request fails on anything that would ship: keys, author paths, emails, denylist words.
+        # Two kinds wait for the release gate instead (tools/release): made-up paths in tests/ fixtures,
+        # and fix-list rows still being built. release.mjs refuses a release while either is open.
+        run: |
+          node --input-type=module -e '
+            import { scan } from "./tools/ship-gate/ship-gate.mjs";
+            const all = scan("youcloned");
+            const ships = all.filter(f => !String(f.file).startsWith("tests/") && !String(f.rule).startsWith("fix-list-"));
+            for (const f of ships) console.log(`${f.file}:${f.line} ${f.rule} [masked]`);
+            console.log(`Ship gate: ${ships.length} finding(s) that would ship, ${all.length - ships.length} left for the release gate.`);
+            process.exit(ships.length ? 1 : 0);
+          '
+
+      - name: Ship gate tests
+        if: ${{ !cancelled() }}
+        run: node --test tools/ship-gate
+
+      - name: Guards tests
+        if: ${{ !cancelled() }}
+        run: node --test guards

@@ -148,6 +148,8 @@ bash "$HERE/setup-keys.sh" || say_stop "The voice keys didn't install. Run this 
 say_step "Testing the voice"
 bash "$HERE/check-voice.sh" speak
 RESULT=$?
+# YouCloned's setup counts the voice step done only after this test passes (marker read by the add-on).
+if [ $RESULT -eq 0 ]; then mkdir -p "$HOME/.voicemode" && date > "$HOME/.voicemode/youcloned-voice-ok"; else rm -f "$HOME/.voicemode/youcloned-voice-ok"; fi
 if [ $RESULT -eq 0 ]; then
   printf '\n\033[1;32mAll set. Open the Claude app again and go back to the guide.\033[0m\n'
 else

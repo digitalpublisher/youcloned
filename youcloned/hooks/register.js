@@ -9,6 +9,9 @@
 import { judge, denyText } from './gate.js'
 import { firstKey, writtenText, isEnvFile, commandReason, parseBans, bannedIn } from './guards.js'
 import { RULES_NAME, checkSetup, rulesMarkdown } from './rules.js'
+import { STEPS, CAN_SKIP, setupText, nextStep } from './steps.js'
+import { HELPERS, parseAgent, gmailReads, helperJudge, helperGate, helperDenyText } from './helpers.js'
+import { UNIVERSAL_RULES } from './universal.js'
 import { topSvg, heroSvg, moneySvg, cardHeadSvg, plateSvg, thumbSvg, PLATE, THUMB, setWidth } from './panel.js'
 
 const PANE = 'youcloned'
@@ -31,6 +34,8 @@ const gatePassed = new Set() // tool_use_ids of crew calls the gate allowed
 let skillKey = false        // the SkillKey connector is on in this session
 let skillKeyServer = null   // its name for $.mcp.call: "claude.ai SkillKey" in the terminal, an id in the desktop app
 const crewReady = new Set() // crew members registered with their instructions from SkillKey
+const helperIds = new Map() // agentId -> feed-me helper name (librarian, wiki-writer)
+const notHelper = new Set()
 let sessionStartedAt = 0     // when this session began; connectors can take a minute to connect after it
 const notOwned = new Set()  // YouCloned skills SkillKey says this account does not have (their plan decides)
 let cloneHere = false       // this session runs in the customer's clone folder
@@ -71,6 +76,11 @@ const SERVICE = 'ai.bnsn.youcloned.dashboard'
 // "[Voice] ..." and Claude starts the voice conversation.
 const RELAY = 'http://127.0.0.1:8771/say'
 const SYNC_NOTE = 'Tell them one more thing in a short sentence or two: to get YouCloned updates on their own, open Customize, then Plugins, then + Add, then Manage marketplaces, click the three dots next to youcloned and switch on Sync automatically. The app can show it on when the marketplace is added and still leave it off.'
+// Asked once during setup (Jon's yes, Oct 12, bnsnstack#88): newer Claude Code moved the bypass switch out of /config.
+const NO_PROMPTS_QUESTION = 'Let your clone work without stopping to ask permission at every step?'
+const NO_PROMPTS_NOTE = 'Before the first setup question, ask them this once, in these exact words: "' + NO_PROMPTS_QUESTION + '" '
+  + 'Say in one short sentence what yes means: Claude stops asking before each file change or command on this computer, and they can switch it back in Claude\'s settings any time. '
+  + 'Then call the work_without_prompts tool with allow true for yes or false for no, and go on with setup. Never ask it again.'
 const DEVTOOLS_NOTE = 'Apple\'s developer tools box is waiting behind this window. Click its icon in the Dock (a blue box with a down arrow), then Install. It takes a few minutes and is free.'
 const TALK = 'Talk to Isaac was pressed in YouCloned. Start a voice conversation now: call converse with a short hello and listen (listen_duration_min 8, listen_duration_max 600, so a short pause never ends their turn).'
 const STOPPED = 'The owner pressed Talk again in YouCloned to stop the voice conversation. Do not call converse again until they press Talk. Carry on in text with anything already asked of you.'
@@ -262,6 +272,14 @@ async function refreshLive($, withWords) {
     const w = (u.rateLimits || []).reduce((a, r) => (!a || r.percentUsed > a.percentUsed ? r : a), null)
     if (w) {
       live.claudePct = w.percentUsed
+      // The plan warning from the 49 jobs list (night one): once per reset window, at 90% used.
+      try {
+        const key = String(w.kind) + ':' + String(w.resetsAt || '')
+        if (w.percentUsed >= 90 && (await $.store.get('planWarned')) !== key) {
+          await $.store.set('planWarned', key)
+          $.ui.toast('Your Claude plan is ' + Math.round(w.percentUsed) + '% used. Finish big jobs first, and start fresh chats to make it last.')
+        }
+      } catch {}
       const span = w.kind === 'seven_day' ? 'this week' : w.kind === 'five_hour' ? 'this 5 hours' : 'spend limit'
       let label = 'Claude plan · ' + span
       if (w.resetsAt) {
@@ -275,6 +293,7 @@ async function refreshLive($, withWords) {
       live.claudeAt = await $.clock.now()
     }
   } catch {}
+  withWords = false // same reason: no unasked SkillKey calls; the words gauge updates from SkillKey's own replies
   if (withWords) {
     try {
       const r = await skillKeyCall($, 'word_balance', {})
@@ -295,23 +314,256 @@ async function refreshLive($, withWords) {
 }
 
 let lastName
-// The dashboard's "Set up your clone" steps 1 to 3, from what is on this computer, never assumed:
-// home = the rules file is saved; tools = git (Apple's developer tools or Homebrew), Obsidian, Node,
-// ffmpeg and Wispr Flow are all there; backup = the clone folder is a git repo with a GitHub remote.
+// Night-one setup (hooks/steps.js): each step is checked on this computer, never assumed, and the
+// dashboard and setup_next both read the result.
+//   tools      install-tools --check passes (Git, Node, Python, ffmpeg, Obsidian, gh)
+//   home       the clone folder setup_next saved (its marker file) or the one the interview saved
+//   protection the YouCloned key check is in Git's hooks for every repository
+//   skillkey   SkillKey's tools are in this Claude account
+//   interview  the rules file is saved in the clone folder
+//   skills     every skill in skills-pack.txt is in ~/.claude/skills with its SKILL.md
+//   backup     the folder is a Git repository with a GitHub remote, and setup-backup proved it private
+//   library    the env file holds the library's address and token
+//   voice      VoiceMode's settings file is there (the voice setup writes it last)
+//   feed       the librarian wrote the library's index page in the clone folder
+async function cloneFolder($) {
+  const saved = await $.store.get('folder')
+  return typeof saved === 'string' && saved ? saved : project
+}
+
+const sep = () => (onMac() ? '/' : '\\')
+
+// The owner's saved lessons ride along in every chat, so a NEW chat's first answer already follows them (clean-Mac
+// recording, Oct 17: a fresh chat found the "members, never users" lesson only when asked, after it had answered).
+// memory/INDEX.md first, then each note it lists, newest first, up to LESSONS_MAX characters.
+const LESSONS_MAX = 12000
+async function lessonNotes($) {
+  if (!project) return ''
+  const dir = project + '/memory'
+  let index = ''
+  try { index = await $.fs.read(dir + '/INDEX.md') } catch { return '' }
+  let out = '\n\n## Lessons the owner taught you (follow every one, starting with your first reply)\n\n' + index.trim() + '\n'
+  const names = [...index.matchAll(/\(([^)\s]+\.md)\)|\b([\w.-]+\.md)\b/g)].map(m => m[1] || m[2]).filter(n => n && n !== 'INDEX.md')
+  const seen = new Set()
+  for (const n of names.reverse()) {
+    if (seen.has(n) || n.includes('..') || n.includes('/')) continue
+    seen.add(n)
+    let body = ''
+    try { body = await $.fs.read(dir + '/' + n) } catch { continue }
+    const piece = '\n### ' + n + '\n' + body.trim() + '\n'
+    if (out.length + piece.length > LESSONS_MAX) { out += '\n(More notes are in ' + dir + ': read the ones that match the job before you start it.)\n'; break }
+    out += piece
+  }
+  return out
+}
+
+// Normal chats search the owner's library too, not only the helpers (Oct 17): before answering about the owner's
+// business, offers, customers or past work, look it up there. The command never shows the token.
+let pluginRoot = ''
+function LIBRARY_NOTE() {
+  if (!pluginRoot) return ''
+  const py = onMac() ? 'python3' : 'py -3'
+  return '\n\n## Your library\n\nWhen the owner asks about their business, offers, customers, past emails, pages, books, courses or videos, search their library first and answer from what it finds, naming the source: ' +
+    py + ' "' + pluginRoot + (onMac() ? '/library/feed.py' : '\\library\\feed.py') + '" search "<their question in a few words>". If the library isn\'t set up yet, say so and offer the setup step.' +
+    ' When they ask what you have collected or what is in their library, run the same command with stats instead of search and tell them the counts by kind in plain words.' +
+    ' When they ask when their backup last saved, read the last lines of ' + (onMac() ? home + '/.youcloned/backup.log' : home + '\\.youcloned\\backup.log') + ' and tell them the date and time of the last "backed up" line, or that it hasn\'t run yet.'
+}
+
+
+// Claude Code's user settings file, where bypass permission mode is switched on.
+const settingsFile = () => home + '/.claude/settings.json'
+
+// The Claude Code panel in Cursor (and VS Code) ignores bypass mode in ~/.claude/settings.json unless the editor's
+// own user settings allow it (bnsnstack#268): claudeCode.allowDangerouslySkipPermissions + initialPermissionMode.
+const EDITOR_KEYS = { 'claudeCode.allowDangerouslySkipPermissions': true, 'claudeCode.initialPermissionMode': 'bypassPermissions' }
+
+// The user settings file of each editor installed on this computer (its User folder exists).
+async function editorFiles($) {
+  let base = home + '/.config'
+  if (onMac()) base = home + '/Library/Application Support'
+  else if (/^[A-Za-z]:/.test(home)) base = (await $.env.get('APPDATA')) || home + '/AppData/Roaming'
+  const out = []
+  for (const app of ['Cursor', 'Code']) { if (await $.fs.exists(base + '/' + app + '/User')) out.push(base + '/' + app + '/User/settings.json') }
+  return out
+}
+
+async function noPromptsOn($) {
+  try {
+    if (JSON.parse(await $.fs.read(settingsFile()))?.permissions?.defaultMode !== 'bypassPermissions') return false
+    for (const f of await editorFiles($)) { if (JSON.parse(await $.fs.read(f))?.['claudeCode.allowDangerouslySkipPermissions'] !== true) return false }
+    return true
+  } catch { return false }
+}
+
+// Merges keys into one JSON settings file, backing it up first. False when the file isn't plain JSON
+// (an editor file with comments, say): that file is left alone.
+async function mergeSettings($, file, merge) {
+  let before = null
+  let settings = {}
+  if (await $.fs.exists(file)) {
+    before = await $.fs.read(file)
+    try { settings = before.trim() ? JSON.parse(before) : {} } catch { settings = null }
+    if (!settings || typeof settings !== 'object' || Array.isArray(settings)) return false
+    const stamp = new Date(await $.clock.now()).toISOString().replace(/[:.]/g, '-')
+    await $.fs.write(file + '.youcloned-backup-' + stamp, before)
+  }
+  merge(settings)
+  await $.fs.write(file, JSON.stringify(settings, null, 2) + '\n')
+  return before !== null ? 'backup' : 'new'
+}
+
+// The buyer's answer to the one setup question. Yes merges two keys into their settings file and keeps
+// everything else; the file is backed up first. A file that isn't valid JSON is left alone.
+async function setNoPrompts($, allow) {
+  if (!allow) {
+    await $.store.set('noPromptsAsked', 'no')
+    return 'Left as it is: Claude keeps asking before each step. If they change their mind later, they can say so and you call work_without_prompts with allow true.'
+  }
+  const file = settingsFile()
+  const done = await mergeSettings($, file, settings => {
+    const perms = settings.permissions && typeof settings.permissions === 'object' ? settings.permissions : {}
+    // YouCloned's own tools never ask, even in a chat that stays in the ask-every-time mode (clean-Mac run, Oct 17).
+    const allow = Array.isArray(perms.allow) ? perms.allow.slice() : []
+    for (const r of ['mcp__youcloned__*', 'mcp__plugin_youcloned_youcloned__*']) if (!allow.includes(r)) allow.push(r)
+    settings.permissions = { ...perms, defaultMode: 'bypassPermissions', allow }
+    settings.skipDangerousModePermissionPrompt = true
+  })
+  if (!done) {
+    return 'Nothing changed: their Claude settings file (' + file + ') isn\'t in a form YouCloned can safely edit. Tell them in one sentence, and that they can turn it on themselves later in Claude\'s settings.'
+  }
+  let backup = done === 'backup'
+  const skipped = []
+  for (const f of await editorFiles($)) {
+    const ed = await mergeSettings($, f, settings => Object.assign(settings, EDITOR_KEYS))
+    if (!ed) skipped.push(f)
+    else if (ed === 'backup') backup = true
+  }
+  await $.store.set('noPromptsAsked', 'yes')
+  // The desktop app shows the no-prompts mode only when its own switch is on, and it remembers the mode last picked in
+  // each folder, so the buyer makes two clicks once (clean-Mac run, Oct 17: new chats still asked without them).
+  return 'Done: their settings now let the clone work without stopping to ask. Tell them that in one sentence' + (backup ? ' (their old settings are saved next to the file as a backup)' : '') +
+    ', then walk them through two clicks, one at a time: in the Claude app open Settings, then Claude Code, and switch on "Allow bypass permissions mode"; then in this chat, click the mode menu next to the message box and pick "Bypass permissions". Claude remembers it for this folder, so every new chat here starts that way. If Claude shows a warning the first time, they click to accept it. Then go on with setup.'
+    + (skipped.length ? ' One more short sentence for them: their editor settings file (' + skipped.join(', ') + ') has notes in it YouCloned won\'t touch, so for the Claude panel in Cursor they open Cursor\'s settings, search "Claude Code", tick "Allow Dangerously Skip Permissions" and set "Initial Permission Mode" to bypassPermissions.' : '')
+}
 async function checkSetupSteps($) {
   const has = async (paths) => { for (const p of paths) { if (await $.fs.exists(p)) return true } return false }
-  const homeDone = !!project && (await $.fs.exists(project + '/' + RULES_NAME))
-  let tools = false
+  const folder = await cloneFolder($)
+  const root = $.plugin.root
+  const st = {}
+  // tools
   if (onMac()) {
-    const git = (await run($, ['/usr/bin/xcode-select', '-p'])).exitCode === 0 || (await has(['/opt/homebrew/bin/git', '/usr/local/bin/git']))
-    tools = git && (await has(['/Applications/Obsidian.app', home + '/Applications/Obsidian.app']))
-      && (await has(['/opt/homebrew/bin/node', '/usr/local/bin/node', home + '/.nvm/versions/node']))
-      && (await has(['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg']))
-      && (await has(['/Applications/Wispr Flow.app', home + '/Applications/Wispr Flow.app']))
+    if (await $.fs.exists(root + '/setup/install-tools.sh')) {
+      st.tools = (await runWith($, ['/bin/bash', root + '/setup/install-tools.sh', '--check'], { timeoutMs: 60000 })).exitCode === 0
+    } else {
+      const git = (await run($, ['/usr/bin/xcode-select', '-p'])).exitCode === 0 || (await has(['/opt/homebrew/bin/git', '/usr/local/bin/git']))
+      st.tools = git && (await has(['/Applications/Obsidian.app', home + '/Applications/Obsidian.app']))
+        && (await has(['/opt/homebrew/bin/node', '/usr/local/bin/node', home + '/.nvm/versions/node']))
+        && (await has(['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg']))
+    }
+  } else {
+    st.tools = (await runWith($, ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', root + '\\setup\\install-tools.ps1', '-Check'], { timeoutMs: 60000 })).exitCode === 0
   }
-  let backup = false
-  if (project) { try { backup = /\[remote "[^"]+"\][^[]*url\s*=\s*\S*github\.com/i.test(await $.fs.read(project + '/.git/config')) } catch {} }
-  live.setup = { home: homeDone, tools, backup }
+  st.home = !!folder && ((await $.fs.exists(folder + '/.youcloned-folder')) || (await $.fs.exists(folder + '/' + RULES_NAME)))
+  st.protection = (await $.fs.exists(home + '/.youcloned/git-hooks/pre-commit')) && (await $.fs.exists(home + '/.youcloned/lib/secret-rules.mjs'))
+  if (st.protection) {
+    // --verify plants a fake key in a scratch repository and passes only when the commit is refused.
+    const script = root + (onMac() ? '/setup/guards/install-git-hooks.mjs' : '\\setup\\guards\\install-git-hooks.mjs')
+    // Once the clone folder is a Git repository, prove the check fires in THAT repository (its own hooks setting counts).
+    const repo = folder && (await $.fs.exists(folder + '/.git')) ? folder : ''
+    const r = onMac() ? await runWith($, ['/bin/bash', '-lc', 'node "$0" --verify ${1:+"$1"}', script, repo], { timeoutMs: 90000 })
+      : await runWith($, repo ? ['node', script, '--verify', repo] : ['node', script, '--verify'], { timeoutMs: 90000 })
+    st.protection = r.exitCode === 0
+  }
+  if (!skillKeyServer) { try { await checkSkillKey($) } catch {} }
+  st.skillkey = !!skillKeyServer
+  st.interview = !!folder && (await $.fs.exists(folder + '/' + RULES_NAME))
+  st.skills = false
+  try {
+    const names = (await $.fs.read(root + '/skills-pack.txt')).split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'))
+    st.skills = names.length > 0
+    for (const n of names) { if (!(await $.fs.exists(home + '/.claude/skills/' + n + '/SKILL.md'))) { st.skills = false; break } }
+    if (await $.fs.exists(home + '/.claude/skills/youcloned-setup/SKILL.md')) st.skills = false // the old setup skill, retired by install-skills
+  } catch {}
+  st.backup = false
+  if (folder) {
+    try {
+      st.backup = /\[remote "[^"]+"\][^[]*url\s*=\s*\S*github\.com/i.test(await $.fs.read(folder + '/.git/config'))
+        && (await $.fs.exists(folder + '/.git/youcloned-backup-private'))
+    } catch {}
+  }
+  st.library = false
+  if (folder) {
+    try {
+      const env = await $.fs.read(folder + '/.env')
+      st.library = /^YOUCLONED_LIBRARY_URL=\S+/m.test(env) && /^YOUCLONED_LIBRARY_TOKEN=\S+/m.test(env)
+        && (await (async () => { // library/smoke-test.py writes env= and url= after add, find and remove all passed
+          try {
+            const ok = (await $.fs.read(dataDir() + '/library-ok')).replace(/\r/g, '')
+            const url = (env.match(/^YOUCLONED_LIBRARY_URL=(\S+)/m) || [])[1]
+            return ok.includes('env=' + folder + sep() + '.env\n') && !!url && ok.includes('url=' + url + '\n')
+          } catch { return false }
+        })())
+    } catch {}
+  }
+  // Settings, the engine, and both services' folders (the PC setup writes settings before it downloads the services).
+  st.voice = (await $.fs.exists(home + '/.voicemode/voicemode.env'))
+    && (await has([home + '/.local/bin/voicemode', home + '/.local/bin/voicemode.exe', home + '/AppData/Roaming/uv/tools/voice-mode']))
+    && (await $.fs.exists(home + '/.voicemode/services/whisper')) && (await $.fs.exists(home + '/.voicemode/services/kokoro'))
+    && (await $.fs.exists(home + '/.voicemode/youcloned-voice-ok')) // written by the voice setup only after its speak test passes
+  st.feed = false
+  if (folder) {
+    try { // an index page with something on it, and at least one source recorded as fed
+      const index = await $.fs.read(folder + '/Library/index.md')
+      const fed = JSON.parse(await $.fs.read(folder + '/Library/.fed.json'))
+      const n = ['files', 'hashes', 'parts'].reduce((a, k) => a + (fed && fed[k] && typeof fed[k] === 'object' ? Object.keys(fed[k]).length : 0), 0)
+      st.feed = index.trim().length > 40 && n > 0
+    } catch {}
+  }
+  let skipped = []
+  try { const s = await $.store.get('skipped'); if (Array.isArray(s)) skipped = s.filter(x => CAN_SKIP.has(x)) } catch {}
+  const next = nextStep(st, new Set(skipped))
+  live.setup = {
+    home: st.home, tools: st.tools, backup: st.backup, // read by older dashboards
+    steps: STEPS.map(s => ({ id: s.id, title: s.title, why: s.why, done: !!st[s.id], skipped: !st[s.id] && skipped.includes(s.id) })),
+    next: next ? next.id : null,
+  }
+  return { st, skipped: new Set(skipped), folder }
+}
+
+async function setupNext($, e) {
+  if (e && e.folder) {
+    const f = expandHome(e.folder).replace(/[\\/]+$/, '')
+    if (!/^([A-Za-z]:)?[\\/]/.test(f)) return 'Not saved: the folder must be a full path, such as ' + nightFolder() + '.'
+    try { await $.fs.write(f + '/.youcloned-folder', 'This folder is a YouCloned clone home.\n') } catch (err) { return 'Could not make ' + f + ': ' + String(err).slice(0, 200) }
+    await $.store.set('folder', f)
+    // The starter skills and the library scripts find the clone folder here (first line, full path).
+    try { await $.fs.write(dataDir() + '/vault-path', f + '\n') } catch (err) { return 'Saved the folder, but could not record it for the skills (' + String(err).slice(0, 160) + '). Tell the person in one sentence, then call setup_next with the same folder again.' }
+  }
+  if (e && e.resume) await $.store.set('skipped', []) // "finish my setup": the steps they put off come back
+  if (e && e.skip) {
+    if (!CAN_SKIP.has(e.skip)) return 'The ' + e.skip + ' step can\'t be put off: every step after it needs it.'
+    let s = []
+    try { const v = await $.store.get('skipped'); if (Array.isArray(v)) s = v } catch {}
+    if (!s.includes(e.skip)) s.push(e.skip)
+    await $.store.set('skipped', s)
+  }
+  const { st, skipped, folder } = await checkSetupSteps($)
+  await writeState($)
+  $.ui.invalidate('ui.render')
+  const f = folder || nightFolder()
+  const next = nextStep(st, skipped)
+  if (next && next.id === 'feed') { try { await registerHelpers($) } catch (err) { $.ui.log('feed-me helpers not registered: ' + String(err).slice(0, 200)) } }
+  return setupText(st, skipped, {
+    root: $.plugin.root, home, folder: f, mac: onMac(), defaultFolder: nightFolder(),
+    needsSkillKey: NEEDS_SKILLKEY, envFile: f + sep() + '.env', scratch: home + sep() + '.youcloned' + sep() + 'feeding',
+    python: next && next.id === 'feed' && onMac() ? await findPython($) : '',
+  })
+}
+
+// The night-one default: the same Obsidian Vault folder Jon's clone uses, so the skills pack, the
+// lessons and the env file all agree on one place.
+function nightFolder() {
+  return home + (onMac() ? '/Documents/Obsidian Vault' : '\\Documents\\Obsidian Vault')
 }
 
 // What the dashboard reads: the numbers, the owner's name, this session (for the talk button) and
@@ -324,7 +576,7 @@ async function writeState($) {
     if (!deskSession) {
       try { const old = JSON.parse(await $.fs.read(dataDir() + '/state.json')); mine = { session: old.session, listening: !!old.listening } } catch { mine = {} }
     }
-    await $.fs.write(dataDir() + '/state.json', JSON.stringify({ ...live, name: lastName, ...mine, at: await $.clock.now() }))
+    await $.fs.write(dataDir() + '/state.json', JSON.stringify({ ...live, name: lastName, skillKey: !!skillKeyServer, ...mine, at: await $.clock.now() }))
   } catch {}
 }
 
@@ -832,6 +1084,46 @@ async function registerCrew($, quiet = false) {
   }
 }
 
+// The feed-me helpers: the librarian (Haiku) and the wiki writer (Sonnet). Their instructions are the
+// add-on's agents/<name>.md files. The librarian gets the Gmail connector's two look-up tools under
+// whatever name this Claude gives the connector (the desktop app names it by an id).
+async function registerHelpers($) {
+  const names = []
+  try { for (const t of await $.tool.list()) names.push(typeof t === 'string' ? t : t.name || '') } catch {}
+  try { for (const t of (await $.session.usage({ breakdown: 'summary' }))?.context?.breakdown?.mcpTools || []) names.push(t.name) } catch {}
+  const done = []
+  for (const h of HELPERS) {
+    const file = $.plugin.root + '/agents/' + h.name + '.md'
+    if (!(await $.fs.exists(file))) continue
+    const a = parseAgent(await $.fs.read(file))
+    if (!a || a.name !== h.name) { $.ui.log('feed-me helper ' + h.name + ': its agents file has no name, description or prompt'); continue }
+    const tools = h.name === 'librarian' ? [...new Set([...a.tools, ...gmailReads(names)])] : a.tools
+    await $.agent.register({ name: h.name, description: a.description, prompt: a.prompt, model: a.model, tools, maxTurns: h.maxTurns, omitClaudeMd: true })
+    done.push(h.name)
+  }
+  return done
+}
+
+async function isHelper($, e) {
+  const id = e.agentId
+  if (!id) return null
+  if (helperIds.has(id)) return helperIds.get(id)
+  if (notHelper.has(id)) return null
+  const a = (await $.agent.list()).find(x => x.id === id)
+  const m = a && /^youcloned:(.+)$/.exec(a.type)
+  if (m && HELPERS.some(h => h.name === m[1])) {
+    helperIds.set(id, m[1])
+    return m[1]
+  }
+  if (a) notHelper.add(id)
+  return null
+}
+
+async function helperContext($) {
+  const folder = await cloneFolder($)
+  return { feed: $.plugin.root + '/library/feed.py', scratch: home + '/.youcloned/feeding', library: folder ? folder + '/Library' : '', folder: folder || '' }
+}
+
 // Run now: a helper set up already starts at once. One that isn't yet needs its steps from SkillKey,
 // which Auto mode allows only inside a request, so Claude is asked to run it with the helper tool.
 async function crewNow($, name) {
@@ -933,13 +1225,26 @@ export function register(on) {
       return { deny: 'YouCloned blocked this write: it holds a ' + key + '. Put the key in a git-ignored .env file or your host\'s secret store.' }
     }
     const bans = await loadBans($)
-    const found = bans ? bannedIn(text, bans) : []
+    // The librarian's scratch files hold the owner's own sent emails on their way into the library,
+    // so the owner's banned words (meant for what Claude writes) don't keep them out. Keys still do.
+    const ownWords = e.agentId && (await isHelper($, e)) === 'librarian' && helperJudge('librarian', e, await helperContext($)) === null
+    const found = bans && !ownWords ? bannedIn(text, bans) : []
     if (found.length) return { deny: 'YouCloned blocked this write: ' + bans.message + ' Banned: ' + found.join(', ') + '.' }
     return next(e)
   })
 
   // The safety gate runs first, so no crew call reaches a tool without it. It fails closed.
+  // The feed-me helpers have their own gate: feed.py only, writes only in their own folder, Gmail look-ups only.
   on('tool.call', async ($, e, next) => {
+    const helper = await isHelper($, e)
+    if (helper) {
+      const no = await helperGate($, helper, e, await helperContext($))
+      if (no) {
+        $.ui.log('safety gate refused ' + e.tool + ' for the ' + helper + ': ' + no)
+        return { deny: helperDenyText(helper, no) }
+      }
+      return next(e)
+    }
     const name = await isCrew($, e)
     if (!name) return next(e)
     const why = judge(e, crewDir(name) || '/nowhere')
@@ -950,6 +1255,9 @@ export function register(on) {
     if (e.tool_use_id) gatePassed.add(e.tool_use_id)
     return next(e)
   }).catch(async ($, e, next) => {
+    if (e.agentId && helperIds.has(e.agentId)) {
+      return { deny: helperDenyText(helperIds.get(e.agentId), 'the gate itself failed (' + next.error.kind + '), so the call was refused') }
+    }
     if (e.agentId && (crewIds.has(e.agentId) || !notCrew.has(e.agentId))) {
       return { deny: denyText('the gate itself failed (' + next.error.kind + '), so the call was refused') }
     }
@@ -990,6 +1298,7 @@ export function register(on) {
     interactive = e.isInteractive
     await loadState($)
     try { version = JSON.parse(await $.fs.read($.plugin.root + '/.claude-plugin/plugin.json')).version || '' } catch {}
+    pluginRoot = $.plugin.root
     try { await refreshDrafts($) } catch {}
     await checkSkillKey($)
     try { const saved = await $.store.get('pins'); if (Array.isArray(saved)) pins = saved.filter(k => typeof k === 'string') } catch {}
@@ -1006,6 +1315,20 @@ export function register(on) {
       if (cloneHere && watched) await turnOn($, cwd)
     } catch (err) { $.ui.log('YouCloned clone check failed: ' + String(err)) }
     if (deskSession && onMac()) $.clock.after(3000, () => nudgeDevTools($))
+    try {
+      await $.tool.register({
+        name: 'setup_next',
+        description: 'Night-one setup, one step at a time in the only order that works. Checks every step on this computer and says exactly what to do next. Call it to start or continue setup, after each step, with folder once the person picks their clone folder, or with skip (backup, voice or feed) when they want to do that step later.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            folder: { type: 'string', description: 'The clone folder the person chose, as a full path' },
+            skip: { type: 'string', enum: [...CAN_SKIP], description: 'A step the person wants to do later' },
+            resume: { type: 'boolean', description: 'True when the person says "finish my setup": brings back the steps they put off' },
+          },
+        },
+      })
+    } catch (err) { $.ui.log('setup_next not registered: ' + String(err)) }
     try {
       await $.tool.register({
         name: 'save_setup',
@@ -1031,6 +1354,13 @@ export function register(on) {
     } catch (err) { $.ui.log('load_setup not registered: ' + String(err)) }
     try {
       await $.tool.register({
+        name: 'work_without_prompts',
+        description: 'Saves the person\'s answer to the setup question about letting their clone work without permission prompts. With allow true it turns on Claude Code\'s bypass permission mode in their user settings (backing the file up first, keeping every other setting); with allow false it changes nothing. Call it only with the answer they gave.',
+        inputSchema: { type: 'object', properties: { allow: { type: 'boolean', description: 'true if they said yes, false if they said no' } }, required: ['allow'] },
+      })
+    } catch (err) { $.ui.log('work_without_prompts not registered: ' + String(err)) }
+    try {
+      await $.tool.register({
         name: 'helper',
         description: 'Runs one of the owner\'s YouCloned crew helpers (support or inbox) and says what it started. Call it when the person presses Run now or asks a helper to run.',
         inputSchema: { type: 'object', properties: { name: { type: 'string', enum: CREW.map(c => c.name), description: 'Which helper to run' } }, required: ['name'] },
@@ -1053,9 +1383,11 @@ export function register(on) {
         try { await registerCrew($, true) } catch {}
         $.ui.invalidate('ui.render')
       }
-      await setUpCrew()
-      $.clock.after(15000, setUpCrew)
-      $.clock.after(60000, setUpCrew)
+      try { await registerHelpers($) } catch (err) { $.ui.log('feed-me helpers not registered: ' + String(err).slice(0, 200)) }
+      // These SkillKey look-ups popped up as permission boxes nobody asked for, even after the buyer said yes to
+      // working without prompts (clean-Mac runs, Oct 17), so the add-on never calls SkillKey on its own: the crew is
+      // set up the first time the owner runs a helper (runCrew and crewNow already do that).
+      void setUpCrew
     }
     try {
       await $.command.register({
@@ -1124,14 +1456,14 @@ export function register(on) {
     if (!rules) return result
     const running = version ? 'YouCloned version ' + version + ' is running in this conversation (tell the person this number if they ask which version they have).\n\n' : ''
     const block = { name: 'youcloned', text: running + 'The owner\'s YouCloned rules, from ' + project + '/' + RULES_NAME +
-      '. Follow them in everything you write for this person.\n\n' + rules }
+      '. Follow them in everything you write for this person.\n\n' + rules + '\n\nRules every YouCloned clone follows:\n\n' + UNIVERSAL_RULES + LIBRARY_NOTE() + (await lessonNotes($)) }
     return { ...result, blocks: [...result.blocks, block] }
   })
 
   on('tool.call', { tool: 'mcp__youcloned__save_setup' }, async ($, e) => {
     const problems = checkSetup(e)
     if (problems.length) return { result: 'Not saved. Fix these and call save_setup again:\n- ' + problems.join('\n- ') }
-    const folder = expandHome(e.folder) || await defaultFolder($)
+    const folder = expandHome(e.folder) || (await cloneFolder($)) || await defaultFolder($)
     if (!/^([A-Za-z]:)?[\\/]/.test(folder)) return { result: 'Not saved: the folder must be a full path, such as ' + home + '/YouCloned.' }
     await $.fs.write(folder + '/' + RULES_NAME, rulesMarkdown(e))
     for (const c of CREW) {
@@ -1140,15 +1472,25 @@ export function register(on) {
     }
     project = folder
     await $.store.set('project', folder)
+    if (!(await $.store.get('folder'))) {
+      await $.store.set('folder', folder)
+      try { await $.fs.write(dataDir() + '/vault-path', folder + '\n') } catch {}
+    }
     everywhere = true
     await $.store.set('everywhere', true)
     // Switch on in this same chat: the bar, the dashboard and the crew, so the buyer needs no new chat.
     cloneHere = true
     if (watched) { try { await turnOn($, await openedFolder($)) } catch {} }
+    try { await registerHelpers($) } catch {}
     try { await checkSkillKey($); if (skillKeyServer) await registerCrew($, true) } catch {}
     await refreshDrafts($)
     $.ui.invalidate('ui.render')
     return { result: 'Saved. Rules file: ' + folder + '/' + RULES_NAME + '. Crew folders: ' + folder + '/crew/support and ' + folder + '/crew/inbox. Every new conversation reads the rules file. ' + SYNC_NOTE }
+  })
+
+  on('tool.call', { tool: 'mcp__youcloned__setup_next' }, async ($, e) => ({ result: await setupNext($, e) }))
+  on('tool.call', { tool: 'mcp__youcloned__work_without_prompts' }, async ($, e) => {
+    return { result: await setNoPrompts($, e.allow === true) }
   })
 
   on('tool.call', { tool: 'mcp__youcloned__load_setup' }, async ($) => {
@@ -1157,7 +1499,12 @@ export function register(on) {
     if (!text) return { result: NEEDS_SKILLKEY + ' Tell the person exactly that, and stop.' }
     let devtools = ''
     try { if (onMac() && (await run($, ['/usr/bin/xcode-select', '-p'])).exitCode !== 0) devtools = '\n\nBefore the first question, tell them in one or two short sentences: ' + DEVTOOLS_NOTE + ' They can keep going here while it installs.' } catch {}
-    return { result: text + '\n\nFolder: the default is ' + (await defaultFolder($)) + ' (the folder this conversation is open in, or YouCloned in their home folder). Offer that as the default, and leave folder out of save_setup when they take it.' + devtools }
+    const chosen = await cloneFolder($)
+    const where = chosen ? '\n\nFolder: they already chose ' + chosen + ' in setup. Don\'t ask again; leave folder out of save_setup.'
+      : '\n\nFolder: the default is ' + (await defaultFolder($)) + ' (the folder this conversation is open in, or YouCloned in their home folder). Offer that as the default, and leave folder out of save_setup when they take it.'
+    let noPrompts = ''
+    try { if (!(await $.store.get('noPromptsAsked')) && !(await noPromptsOn($))) noPrompts = '\n\n' + NO_PROMPTS_NOTE } catch {}
+    return { result: text + where + devtools + noPrompts }
   })
 
   // Learns SkillKey's name the moment Claude itself uses it, for apps whose tool list leaves it out.

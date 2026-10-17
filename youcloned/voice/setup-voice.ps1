@@ -202,6 +202,9 @@ if ($LASTEXITCODE -ne 0) { Info 'The voice still works without the keys. The che
 Say 'Testing the voice'
 & (Join-Path $Here 'check-voice.ps1') speak
 $Result = $LASTEXITCODE
+# YouCloned's setup counts the voice step done only after this test passes (marker read by the add-on).
+$VoiceOk = Join-Path $env:USERPROFILE '.voicemode\youcloned-voice-ok'
+if ($Result -eq 0) { New-Item -ItemType Directory -Force -Path (Split-Path $VoiceOk) | Out-Null; Set-Content -LiteralPath $VoiceOk -Value (Get-Date -Format o) -Encoding ASCII } else { Remove-Item -LiteralPath $VoiceOk -ErrorAction SilentlyContinue }
 if ($Result -eq 0) {
   Write-Host ''
   Write-Host 'All set. Open the Claude app again and go back to the guide.' -ForegroundColor Green
