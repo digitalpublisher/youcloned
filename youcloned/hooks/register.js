@@ -7,9 +7,9 @@
 // - Jon's instructions (setup interview, crew) live on SkillKey and load when needed, never as files here.
 
 import { judge, denyText } from './gate.js'
-import { firstKey, writtenText, isEnvFile, commandReason, parseBans, bannedIn } from './guards.js'
+import { firstKey, redactKeys, writtenText, isEnvFile, commandReason, parseBans, bannedIn } from './guards.js'
 import { RULES_NAME, checkSetup, rulesMarkdown } from './rules.js'
-import { STEPS, STEP_IDS, CAN_SKIP, setupText, nextStep, onlyText } from './steps.js'
+import { STEPS, STEP_IDS, EXTRA_STEPS, CAN_SKIP, setupText, nextStep, onlyText } from './steps.js'
 import { HELPERS, parseAgent, gmailReads, helperJudge, helperGate, helperDenyText } from './helpers.js'
 import { UNIVERSAL_RULES } from './universal.js'
 import { topSvg, heroSvg, moneySvg, cardHeadSvg, plateSvg, thumbSvg, PLATE, THUMB, setWidth } from './panel.js'
@@ -187,7 +187,7 @@ async function loadFeed($) {
 
 // Codex's own usage record: the last rate-limit line in its newest session log.
 async function readCodexPlan($) {
-  const r = await run($, ['/bin/sh', '-c', 'f=$(ls -t "' + home + '"/.codex/sessions/*/*/*/*.jsonl 2>/dev/null | head -1); [ -n "$f" ] && tail -c 3000000 "$f" | grep \'"rate_limits"\' | tail -1'])
+  const r = await run($, ['/bin/sh', '-c', 'f=$(ls -t "$1"/.codex/sessions/*/*/*/*.jsonl 2>/dev/null | head -1); [ -n "$f" ] && tail -c 3000000 "$f" | grep \'"rate_limits"\' | tail -1', 'sh', home])
   const find = (o) => { if (!o || typeof o !== 'object') return null; if (o.rate_limits) return o.rate_limits; for (const v of Object.values(o)) { const x = find(v); if (x) return x } return null }
   try {
     const p = (find(JSON.parse(r.stdout)) || {}).primary
@@ -257,11 +257,15 @@ async function drainJobs($) {
   if (!(await $.fs.exists(file))) return
   const text = await $.fs.read(file)
   if (!text.trim()) return
-  await $.fs.write(file, '')
+  // A job addressed to one chat (the dashboard's Talk) waits for that chat; the rest go to whoever reads first.
+  const me = await $.session.id()
+  const mine = [], others = []
   for (const line of text.split('\n')) {
     if (!line.trim()) continue
-    try { await runJob($, JSON.parse(line).text) } catch {}
+    try { const job = JSON.parse(line); (job.session && job.session !== me ? others : mine).push(job) } catch {}
   }
+  await $.fs.write(file, others.map(j => JSON.stringify(j) + '\n').join(''))
+  for (const job of mine) { try { await runJob($, job.text) } catch {} }
 }
 
 // Plan usage from Claude itself, words from SkillKey; written where the dashboard reads them.
@@ -1019,10 +1023,18 @@ async function findCodex($) {
     if (await $.fs.exists(path)) return path
   }
   if (onMac()) { // npm next to a Node from nvm
-    const r = await run($, ['/bin/sh', '-c', 'ls -d "' + home + '"/.nvm/versions/node/*/bin/codex 2>/dev/null | tail -1'])
+    const r = await run($, ['/bin/sh', '-c', 'ls -d "$1"/.nvm/versions/node/*/bin/codex 2>/dev/null | tail -1', 'sh', home])
     if (r.exitCode === 0 && r.stdout.trim()) return r.stdout.trim()
   }
   return null
+}
+
+// Codex from npm is a Node script: the chat's own search path may predate the install, so Codex runs with
+// its own folder (where npm put node too) and the usual tool folders first.
+function codexEnv(bin) {
+  if (!onMac()) return undefined
+  const dir = bin.includes('/') ? bin.slice(0, bin.lastIndexOf('/')) : ''
+  return { PATH: [dir, home + '/.youcloned/tools/node/bin', '/opt/homebrew/bin', '/usr/local/bin', home + '/.local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin'].filter(Boolean).join(':') }
 }
 
 // The optional Codex step (week one): installed, and signed in to the owner's ChatGPT plan.
@@ -1030,9 +1042,9 @@ async function codexStatus($) {
   const bin = await findCodex($)
   if (!bin) return { ready: false }
   let version = ''
-  try { version = ((await $.process.run([bin, '--version'], { timeoutMs: 15000 })).stdout || '').trim().split('\n')[0] } catch {}
+  try { version = ((await $.process.run([bin, '--version'], { timeoutMs: 15000, env: codexEnv(bin) })).stdout || '').trim().split('\n')[0] } catch {}
   try {
-    const r = await $.process.run([bin, 'login', 'status'], { timeoutMs: 15000 })
+    const r = await $.process.run([bin, 'login', 'status'], { timeoutMs: 15000, env: codexEnv(bin) })
     if (r.exitCode === 0 && /logged in/i.test((r.stdout || '') + (r.stderr || ''))) return { ready: true, version }
   } catch {}
   return { ready: false, version: version || 'installed' }
@@ -1058,7 +1070,7 @@ async function codexCheck($, question) {
   } catch {}
   try {
     if (changed && !question) {
-      const r = await $.process.run([bin, 'review', '--uncommitted'], { cwd, timeoutMs: 600000 })
+      const r = await $.process.run([bin, 'review', '--uncommitted'], { cwd, timeoutMs: 600000, env: codexEnv(bin) })
       const text = (r.stdout || '').trim()
       return text || 'Codex finished without a review. What it printed: ' + (r.stderr || '').trim().slice(-1500)
     }
@@ -1069,7 +1081,7 @@ async function codexCheck($, question) {
         'Read the files it mentions. List the problems you find, most serious first, each with the file and what to change. If it looks right, say so in one line.'
     const outFile = home + '/.youcloned/codex-last.md'
     await $.fs.write(outFile, '')
-    const r = await $.process.run([bin, 'exec', '--sandbox', 'read-only', '--skip-git-repo-check', '--ephemeral', '-C', cwd, '-o', outFile, prompt], { cwd, timeoutMs: 600000 })
+    const r = await $.process.run([bin, 'exec', '--sandbox', 'read-only', '--skip-git-repo-check', '--ephemeral', '-C', cwd, '-o', outFile, prompt], { cwd, timeoutMs: 600000, env: codexEnv(bin) })
     const text = (await $.fs.read(outFile)).trim()
     if (text) return text
     return 'Codex finished without an answer (exit ' + r.exitCode + '). What it printed: ' + ((r.stderr || r.stdout || '').trim().slice(-1500))
@@ -1086,6 +1098,8 @@ let codexJob = null
 async function codexJobStart($, task, write) {
   const t = String(task || '').trim()
   if (!t) return 'Say what the job is: codex_job needs a task.'
+  const key = firstKey(t)
+  if (key) return 'Not started: the task holds a ' + key + '. Never hand Codex a key or password. Tell Codex where the key lives (the env file\'s name) instead.'
   if (codexJob) return 'Codex is still on the last job ("' + codexJob.task.slice(0, 80) + '"). Its answer comes into this chat when it finishes.'
   const bin = await findCodex($)
   if (!bin) return 'Codex is not set up on this computer. Offer to set it up: call setup_next with only set to codex.'
@@ -1096,8 +1110,10 @@ async function codexJobStart($, task, write) {
   await $.fs.write(base + '.txt', t)
   const args = ['exec', '--sandbox', write ? 'workspace-write' : 'read-only', '--skip-git-repo-check', '--ephemeral', '-C', cwd, '-o', job.out]
   if (onMac()) {
-    // The task goes in on stdin from its file, so nothing in it is ever read by a shell.
-    const r = await run($, ['/bin/sh', '-c', '( "$0" "$@" - < "' + base + '.txt" > "' + job.log + '" 2>&1; echo $? > "' + job.done + '" ) < /dev/null > /dev/null 2>&1 &', bin, ...args])
+    // The task goes in on stdin from its file, and every path is an argument, so nothing in them is ever
+    // read by a shell (Codex review 5).
+    const r = await runWith($, ['/bin/sh', '-c', 'task=$1 log=$2 done=$3; shift 3; ( "$@" - < "$task" > "$log" 2>&1; echo $? > "$done" ) < /dev/null > /dev/null 2>&1 &',
+      'sh', base + '.txt', job.log, job.done, bin, ...args], { env: codexEnv(bin) })
     if (r.exitCode !== 0) return 'Codex could not start: ' + (r.stderr || '').trim().slice(0, 300)
     codexJob = job
     $.clock.after(15000, () => codexJobPoll($))
@@ -1105,7 +1121,7 @@ async function codexJobStart($, task, write) {
     codexJob = job
     $.clock.after(0, async () => {
       let r = { exitCode: 1, stdout: '', stderr: '' }
-      try { r = await $.process.run([bin, ...args, t], { cwd, timeoutMs: 600000 }) } catch (err) { r.stderr = String(err) }
+      try { r = await $.process.run([bin, ...args, t], { cwd, timeoutMs: 600000, env: codexEnv(bin) }) } catch (err) { r.stderr = String(err) }
       try { await $.fs.write(job.log, ((r.stdout || '') + (r.stderr || '')).slice(-4000)); await $.fs.write(job.done, String(r.exitCode)) } catch {}
       await codexJobPoll($)
     })
@@ -1134,6 +1150,7 @@ async function tailOf($, path) {
 
 async function codexJobFinish($, job, answer) {
   codexJob = null
+  answer = redactKeys(answer)
   try { $.ui.toast('Codex finished its job') } catch {}
   await $.prompt.submit({ text: 'Codex finished the job you handed it ("' + job.task.slice(0, 160) + '"). It said:\n\n' + answer.slice(0, 12000) +
     '\n\nTell the owner in a few short lines what Codex did and what they should look at. ' + (job.write ? 'Check the files it changed before you call the job done. ' : '') + 'If you are in a voice conversation, say it out loud and keep listening.' })
@@ -1146,7 +1163,7 @@ async function codexButton($) {
   const answer = await codexCheck($, '')
   codex = { busy: false, note: 'Codex finished. Its answer is in the chat.' }
   $.ui.invalidate('ui.render')
-  $.prompt.submit({ text: 'The customer pressed Check with Codex. Codex (OpenAI) checked the work and said:\n\n' + answer +
+  $.prompt.submit({ text: 'The customer pressed Check with Codex. Codex (OpenAI) checked the work and said:\n\n' + redactKeys(answer) +
     '\n\nTell the customer in a few lines which points you agree with and what you would change. Do not change anything until they say so.' })
 }
 
@@ -1431,7 +1448,7 @@ export function register(on) {
             folder: { type: 'string', description: 'The clone folder the person chose, as a full path' },
             skip: { type: 'string', enum: [...CAN_SKIP], description: 'A step the person wants to do later' },
             resume: { type: 'boolean', description: 'True when the person says "finish my setup": brings back the steps they put off' },
-            only: { type: 'string', enum: STEP_IDS, description: 'Add just this one step, for someone who likes their clone and wants only this (for example library, voice or backup)' },
+            only: { type: 'string', enum: [...STEP_IDS, ...EXTRA_STEPS.map(s => s.id)], description: 'Add just this one step, for someone who likes their clone and wants only this (for example library, voice, backup, or codex, which is outside the ten)' },
           },
         },
       })
@@ -1645,7 +1662,9 @@ export function register(on) {
   })
 
   on('tool.call', { tool: 'mcp__youcloned__codex_check' }, async ($, e) => {
-    return { result: await codexCheck($, String(e.question || '')) }
+    const key = firstKey(String(e.question || ''))
+    if (key) return { result: 'Not sent: the question holds a ' + key + '. Never hand Codex a key or password.' }
+    return { result: redactKeys(await codexCheck($, String(e.question || ''))) }
   })
 
   on('tool.call', { tool: 'mcp__youcloned__codex_job' }, async ($, e) => {

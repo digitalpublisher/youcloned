@@ -41,6 +41,20 @@ export function firstKey(text) {
   return null
 }
 
+// The text with every key it holds swapped for its kind, for output that goes back into a chat.
+export function redactKeys(text) {
+  let out = String(text ?? '')
+  for (const [rule, expression] of KEY_SHAPE_RULES) { expression.lastIndex = 0; out = out.replace(expression, '[' + rule + ' removed]') }
+  DATABASE_URL_RULE.lastIndex = 0
+  out = out.replace(DATABASE_URL_RULE, (m, user, pass) => isPlaceholder(pass) ? m : m.replace(':' + pass + '@', ':[password removed]@'))
+  GENERIC_ASSIGNMENT.lastIndex = 0
+  out = out.replace(GENERIC_ASSIGNMENT, (m, name, ...rest) => {
+    const value = rest.slice(0, 4).find(part => part !== undefined) ?? ''
+    return value.length >= 16 && !isPlaceholder(value) ? m.replace(value, '[secret removed]') : m
+  })
+  return out
+}
+
 // What a file tool call would put on disk.
 export function writtenText(e) {
   if (e.tool === 'Write') return typeof e.content === 'string' ? e.content : ''

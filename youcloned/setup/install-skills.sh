@@ -76,7 +76,12 @@ for d in "$work/stage/skills"/*/; do
   # A pack skill the owner changed is kept: the old copy goes to ~/.youcloned/skills-backup before the refresh.
   if [ -d "$SKILLS/$name" ] && ! diff -rq "$SKILLS/$name" "$d" >/dev/null 2>&1; then
     keep="$HOME/.youcloned/skills-backup/$(date +%Y%m%d-%H%M%S)"
-    mkdir -p "$keep" && cp -R "$SKILLS/$name" "$keep/$name" && kept=$((kept + 1)) && kept_names="${kept_names:+$kept_names, }$name"
+    # The owner's copy is never deleted unless the backup worked (Codex review 5).
+    if ! { mkdir -p "$keep" && cp -R "$SKILLS/$name" "$keep/$name"; }; then
+      say "STOPPED: could not save a copy of your changed skill $name in $keep, so nothing was replaced. Free some disk space and run this again."
+      exit 1
+    fi
+    kept=$((kept + 1)); kept_names="${kept_names:+$kept_names, }$name"
   fi
   rm -rf "$SKILLS/$name.youcloned-new"
   cp -R "$d" "$SKILLS/$name.youcloned-new"

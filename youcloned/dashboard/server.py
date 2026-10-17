@@ -66,7 +66,7 @@ class Handler(SimpleHTTPRequestHandler):
                 try:
                     os.makedirs(DATA, exist_ok=True)
                     with open(os.path.join(DATA, "jobs.jsonl"), "a") as f:
-                        f.write(json.dumps({"text": TALK, "at": time.time()}) + "\n")
+                        f.write(json.dumps({"text": TALK, "session": state["session"], "at": time.time()}) + "\n")
                     self.send_response(204)
                 except Exception:
                     self.send_response(502)

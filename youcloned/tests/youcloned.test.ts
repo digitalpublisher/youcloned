@@ -3,6 +3,7 @@ import { judge } from '../hooks/gate.js'
 import { claimProblems } from '../hooks/claims.js'
 import { checkSetup } from '../hooks/rules.js'
 import { setupText, STEPS, onlyText } from '../hooks/steps.js'
+import { redactKeys } from '../hooks/guards.js'
 import { helperJudge, helperLinkReason, feedCommandReason, parseAgent } from '../hooks/helpers.js'
 import { normalize } from '../hooks/gate.js'
 
@@ -489,9 +490,12 @@ test('codex_job hands Codex a whole job in the background and brings its answer 
   expect(String(r.result)).toMatch(/runs in the background/)
   // Detached through sh, the task read from its file on stdin, never by a shell.
   const launch = calls.find(a => a[0] === '/bin/sh')
-  expect(launch.slice(3, 7)).toEqual(['codex', 'exec', '--sandbox', 'workspace-write'])
+  expect(launch.slice(7, 11)).toEqual(['codex', 'exec', '--sandbox', 'workspace-write'])
   expect(launch[launch.length - 1]).not.toBe('Fix the price table')
-  expect(launch[2]).toMatch(/- < ".*codex-job-.*\.txt"/)
+  // Every path is an argument; the shell source names none of them (Codex review 5).
+  expect(launch[2]).toContain('- < "$task"')
+  expect(launch[2]).not.toMatch(/codex-job|Users/)
+  expect(launch[4]).toMatch(/codex-job-.*\.txt$/)
   const busy: any = await $.tool.call({ tool: 'mcp__youcloned__codex_job', task: 'Another one' })
   expect(String(busy.result)).toMatch(/still on the last job/)
   await clock.advance(15000)
@@ -501,6 +505,48 @@ test('codex_job hands Codex a whole job in the background and brings its answer 
   expect(submitted.some(t => /Codex finished the job you handed it/.test(t) && /Rewrote the price table/.test(t) && /Check the files it changed/.test(t))).toBe(true)
   const ro: any = await $.tool.call({ tool: 'mcp__youcloned__codex_job', task: 'Read the offer and list gaps' })
   expect(String(ro.result)).toMatch(/read-only/)
+})
+
+test('setup_next takes only: codex, outside the ten, and says when Codex is signed in', async ($, on) => {
+  let signedIn = false
+  sessionStubs(on, { cwd: '/Users/pat/', skillKey: null,
+    process: (argv) => argv[0] === 'codex' ? (argv[1] === 'login' ? { exitCode: signedIn ? 0 : 1, stdout: signedIn ? 'Logged in using ChatGPT' : 'Not logged in', stderr: '' } : { exitCode: 0, stdout: 'codex-cli 1.0', stderr: '' }) : { exitCode: 1, stdout: '', stderr: '' } })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/Users/pat/' })
+  let out = String((await $.tool.call({ tool: 'mcp__youcloned__setup_next', only: 'codex' })).result)
+  expect(out).toMatch(/Codex needs Your tools first|Adding just one step, Codex/)
+  expect(out).not.toMatch(/There is no setup step called codex/)
+  signedIn = true
+  out = String((await $.tool.call({ tool: 'mcp__youcloned__setup_next', only: 'codex' })).result)
+  expect(out).not.toMatch(/There is no setup step called codex/)
+})
+
+test('codex_job and codex_check never take a key, and keys in what Codex says are removed', async ($, on) => {
+  const anthropic = 'sk-' + 'ant-abcdefghijklmnop1234', github = 'gh' + 'p_abcdefghijklmnopqrstuvwx', stripe = 'sk_' + 'live_abcdefghijklmnopqrstu', db = 'postgres://app:' + 'hunter2hunter2@db.example.com/x'
+  sessionStubs(on, { project: PROJECT, process: (argv) => argv[0] === 'codex' ? { exitCode: 0, stdout: 'codex-cli 1.0', stderr: '' } : { exitCode: 0, stdout: '', stderr: '' } })
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  const job: any = await $.tool.call({ tool: 'mcp__youcloned__codex_job', task: 'Use ' + anthropic + ' to call the API' })
+  expect(String(job.result)).toMatch(/Not started: the task holds a anthropic-key/)
+  const chk: any = await $.tool.call({ tool: 'mcp__youcloned__codex_check', question: 'is ' + github + ' valid' })
+  expect(String(chk.result)).toMatch(/Not sent/)
+  const r = redactKeys('Found ' + stripe + ' in .env and ' + db)
+  expect(r).not.toContain(stripe)
+  expect(r).not.toMatch(/hunter2hunter2/)
+  expect(r).toMatch(/removed/)
+})
+
+test('the dashboard\'s Talk, queued for one chat, waits for that chat; other jobs go to whoever reads first', async ($, on) => {
+  const submitted: string[] = []
+  const JOBS = '/Users/pat/.youcloned/jobs.jsonl'
+  const start = JSON.stringify({ text: 'Talk was pressed in YouCloned. call converse', session: 'other-chat' }) + '\n' + JSON.stringify({ text: 'Write my headline' }) + '\n'
+  const { writes, clock } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, read: (path) => path === JOBS ? (writes.get(JOBS) ?? start) : undefined, exists: (path) => path === JOBS ? true : undefined })
+  on('prompt.submit', ($, e) => { submitted.push(String(e.text)); return { text: String(e.text) } })
+  on('http.fetch', () => ({ value: { status: 200, ok: true, headers: {}, text: '{}' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  await clock.advance(5000)
+  console.log('DBG', JSON.stringify([...writes.keys()]), JSON.stringify(submitted))
+  expect(submitted).toContain('Write my headline')
+  expect(submitted.some(t => /Talk was pressed/.test(t))).toBe(false)
+  expect(writes.get(JOBS)).toMatch(/other-chat/)
 })
 
 test('codex_job without Codex offers the optional Codex step', async ($, on) => {

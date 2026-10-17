@@ -110,7 +110,7 @@ export function stepText(step, ctx) {
         ? "/usr/bin/osascript -e 'tell application \"Terminal\" to do script \"/bin/bash \\\"" + as(ctx.root + '/voice/setup-voice.sh') + "\\\"\"' -e 'tell application \"Terminal\" to activate'"
         : 'powershell -NoProfile -Command "Start-Process powershell -ArgumentList \'-NoExit\',\'-NoProfile\',\'-ExecutionPolicy\',\'Bypass\',\'-File\',\'\\\"' + String(ctx.root + '\\voice\\setup-voice.ps1').replace(/'/g, "''") + '\\\"\'"'
       return 'The voice setup runs in its own window because it asks two quick questions and needs Claude closed for a moment. Run this with Bash to open it: ' + open + '. ' +
-        'Tell them, in two short sentences: a window opens and asks them to pick a man\'s or a woman\'s voice, then asks them to quit Claude (Command Q on a Mac); when it says the voice is ready, they open Claude again and type "finish my setup". ' +
+        'Tell them, in two short sentences: a window opens and asks them to pick a man\'s or a woman\'s voice, then asks them to quit Claude (Command Q on a Mac); when it says the voice is ready, they open Claude again and type "' + (ctx.only ? 'set up my voice' : 'finish my setup') + '". ' +
         'Then stop and wait. If they want to do the voice later, call setup_next with skip set to voice.'
     }
     case 'feed': {
@@ -151,7 +151,9 @@ export function onlyText(id, status, ctx) {
     const names = missing.map(n => ALL_STEPS.find(s => s.id === n).title).join(' and ')
     return step.title + ' needs ' + names + ' first. Tell them that in one sentence and offer to do ' + (missing.length > 1 ? 'those' : 'that') + ' first, then this. If they say yes, call setup_next with only set to ' + missing[0] + '.'
   }
-  return 'Adding just one step, ' + step.title + ': ' + step.why + '\nTell them in one short sentence, then do it:\n' + stepText(step, ctx) +
+  // Every "call setup_next" in the step keeps to this one step (Codex review 5), so it never runs on into the full setup.
+  const text = stepText(step, { ...ctx, only: id }).replace(/call setup_next\b(?! with)/g, 'call setup_next with only set to ' + id)
+  return 'Adding just one step, ' + step.title + ': ' + step.why + '\nTell them in one short sentence, then do it:\n' + text +
     '\n\nWhen it is done, call setup_next with only set to ' + id + ' again to check it, and tell them it is added. Leave every other step as it is.'
 }
 
