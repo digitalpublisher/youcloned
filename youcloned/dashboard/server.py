@@ -4,7 +4,8 @@
 GET  /            the dashboard
 GET  /state.json  live numbers the YouCloned add-on writes (plan usage, words, name)
 POST /do          {"text": "..."} queues a job; the add-on puts it into Claude's chat
-POST /talk        asks Isaac's voice relay to start a voice conversation in the owner's YouCloned chat
+POST /talk        starts a voice conversation in the owner's YouCloned chat: through Jon's voice relay where
+                  one runs, otherwise queued like /do so the add-on types it into the chat
 """
 import json, os, sys, time, urllib.request
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
@@ -13,7 +14,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(os.path.expanduser("~"), ".youcloned")
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 4600
 RELAY = "http://127.0.0.1:8771/say"
-TALK = "Talk to Isaac was pressed in YouCloned. Start a voice conversation now: call converse with a short hello and listen (listen_duration_min 8, listen_duration_max 600, so a short pause never ends their turn)."
+TALK = "Talk was pressed in YouCloned. Start a voice conversation now: call converse with a short hello and listen (listen_duration_min 8, listen_duration_max 600, so a short pause never ends their turn)."
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -54,6 +55,7 @@ class Handler(SimpleHTTPRequestHandler):
     def do_POST(self):
         if self.path == "/talk":
             # The talk goes to the chat the add-on last wrote into state.json, through the voice relay.
+            # A buyer's computer has no relay: the talk is queued as a job and the add-on types it in.
             try:
                 state = json.load(open(os.path.join(DATA, "state.json")))
                 body = json.dumps({"session": state["session"], "text": TALK}).encode()
@@ -61,7 +63,13 @@ class Handler(SimpleHTTPRequestHandler):
                 urllib.request.urlopen(req, timeout=3).read()
                 self.send_response(204)
             except Exception:
-                self.send_response(502)
+                try:
+                    os.makedirs(DATA, exist_ok=True)
+                    with open(os.path.join(DATA, "jobs.jsonl"), "a") as f:
+                        f.write(json.dumps({"text": TALK, "at": time.time()}) + "\n")
+                    self.send_response(204)
+                except Exception:
+                    self.send_response(502)
             self.end_headers()
             return
         if self.path != "/do":

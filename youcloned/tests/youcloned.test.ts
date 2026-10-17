@@ -795,7 +795,7 @@ test('in the desktop app the full dashboard loads into the browser pane and the 
   expect(opened).not.toContain('youcloned')
 })
 
-test('Talk to Isaac sends the talk message to this session through the voice relay', async ($, on) => {
+test('Talk sends the talk message to this session through the voice relay where one runs', async ($, on) => {
   const toasts: string[] = []
   const posts: { url: string, body: string }[] = []
   sessionStubs(on, { toasts })
@@ -807,10 +807,34 @@ test('Talk to Isaac sends the talk message to this session through the voice rel
   await ui.unmount()
   expect(posts[0].url).toBe('http://127.0.0.1:8771/say')
   expect(JSON.parse(posts[0].body)).toEqual({ session: 'sess-1', text: expect.stringMatching(/call converse/) })
-  expect(toasts).toContain('Isaac is listening')
+  expect(toasts).toContain('Your clone is listening')
 })
 
-test('while Isaac is in a voice conversation the dashboard state says listening, and stops after', async ($, on) => {
+test('on a buyer\'s computer with no voice relay, Talk types the talk message into this chat', async ($, on) => {
+  const toasts: string[] = []
+  const submitted: string[] = []
+  sessionStubs(on, { toasts })
+  on('prompt.submit', ($, e) => { submitted.push(String(e.text)); return { text: String(e.text) } })
+  on('http.fetch', ($, e) => { if (e.init?.method === 'POST') throw new Error('connection refused'); return { value: { status: 200, ok: true, headers: {}, text: '{}' } } })
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'tab-home' })
+  await ui.post({ key: 'talk', data: { talk: true } })
+  await ui.unmount()
+  expect(submitted.some(t => /^Talk was pressed in YouCloned\..*call converse/.test(t))).toBe(true)
+  expect(toasts).toContain('Your clone is listening')
+})
+
+test('the buyer\'s plain voicemode converse tool lights the dashboard too', async ($, on) => {
+  let during: any = null
+  const { writes } = sessionStubs(on, { toolCall: () => { during = JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}') } })
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/work' })
+  await $.tool.call({ tool: 'mcp__voicemode__converse', input: { message: 'hi' } })
+  expect(during.listening).toBe(true)
+  expect(JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}').listening).toBe(false)
+})
+
+test('while the clone is in a voice conversation the dashboard state says listening, and stops after', async ($, on) => {
   let during: any = null
   const { writes } = sessionStubs(on, { toolCall: () => { during = JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}') } })
   await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/work' })
@@ -820,7 +844,7 @@ test('while Isaac is in a voice conversation the dashboard state says listening,
   expect(JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}').listening).toBe(false)
 })
 
-test('pressing Talk again while Isaac listens stops the voice conversation and tells Isaac why', async ($, on) => {
+test('pressing Talk again while the clone listens stops the voice conversation and tells the clone why', async ($, on) => {
   const toasts: string[] = []
   const posts: string[] = []
   on('tool.call', { tool: 'mcp__plugin_voicemode_voicemode__converse' }, () => new Promise(() => {}))
@@ -835,7 +859,7 @@ test('pressing Talk again while Isaac listens stops the voice conversation and t
   const r: any = await call
   await ui.unmount()
   expect(String(r.deny || r.text)).toMatch(/pressed Talk again/)
-  expect(toasts).toContain('Isaac stopped')
+  expect(toasts).toContain('Your clone stopped listening')
   expect(posts).toEqual([])
 })
 

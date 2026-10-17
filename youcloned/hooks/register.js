@@ -44,7 +44,7 @@ let dashOn = false          // the dashboard and its timers are running for this
 let codexReady = false      // Codex is installed on this computer
 let everywhere = false      // after setup, YouCloned shows in every session unless the owner turns it off
 let live = { claudePct: null, claudeLabel: '', claudeSpan: '', words: null } // numbers the strip and dashboard show
-let listening = false       // Isaac's voice conversation is running in this session
+let listening = false       // the clone's voice conversation is running in this session
 let version = ''            // this plugin's version, from its plugin.json, shown in the strip and told to Claude
 let stopTalk = null         // ends the converse call that is running, when Talk is pressed again
 
@@ -72,8 +72,9 @@ const OWNED_SAMPLE = ['bnsn', 'bookbuilder', 'improver']
 const DASH_PORT = 4600
 const DASH_URL = 'http://localhost:' + DASH_PORT
 const SERVICE = 'ai.bnsn.youcloned.dashboard'
-// Isaac's voice relay on this computer: a message sent to /say for this session is typed into it as
-// "[Voice] ..." and Claude starts the voice conversation.
+// Jon's voice relay, on his computer only: a message sent to /say for this session is typed into it as
+// "[Voice] ..." and Claude starts the voice conversation. A buyer's computer has no relay, so Talk
+// types the talk message into this chat itself (startTalk).
 const RELAY = 'http://127.0.0.1:8771/say'
 const SYNC_NOTE = 'Tell them one more thing in a short sentence or two: to get YouCloned updates on their own, open Customize, then Plugins, then + Add, then Manage marketplaces, click the three dots next to youcloned and switch on Sync automatically. The app can show it on when the marketplace is added and still leave it off.'
 // Asked once during setup (Jon's yes, Oct 12, bnsnstack#88): newer Claude Code moved the bypass switch out of /config.
@@ -82,7 +83,7 @@ const NO_PROMPTS_NOTE = 'Before the first setup question, ask them this once, in
   + 'Say in one short sentence what yes means: Claude stops asking before each file change or command on this computer, and they can switch it back in Claude\'s settings any time. '
   + 'Then call the work_without_prompts tool with allow true for yes or false for no, and go on with setup. Never ask it again.'
 const DEVTOOLS_NOTE = 'Apple\'s developer tools box is waiting behind this window. Click its icon in the Dock (a blue box with a down arrow), then Install. It takes a few minutes and is free.'
-const TALK = 'Talk to Isaac was pressed in YouCloned. Start a voice conversation now: call converse with a short hello and listen (listen_duration_min 8, listen_duration_max 600, so a short pause never ends their turn).'
+const TALK = 'Talk was pressed in YouCloned. Start a voice conversation now: call converse with a short hello and listen (listen_duration_min 8, listen_duration_max 600, so a short pause never ends their turn).'
 const STOPPED = 'The owner pressed Talk again in YouCloned to stop the voice conversation. Do not call converse again until they press Talk. Carry on in text with anything already asked of you.'
 
 // New project: Claude files this session in a sidebar group of its own (the add-on cannot reach the sidebar).
@@ -575,7 +576,7 @@ function nightFolder() {
 }
 
 // What the dashboard reads: the numbers, the owner's name, this session (for the talk button) and
-// whether Isaac is in a voice conversation (for the glow).
+// whether the clone is in a voice conversation (for the glow).
 // Every YouCloned chat writes the numbers, but only a session in Claude's desktop app names itself as
 // the one the dashboard's talk button reaches (the dashboard lives in that app's browser pane).
 async function writeState($) {
@@ -588,19 +589,23 @@ async function writeState($) {
   } catch {}
 }
 
-// Talk is a toggle: a press while Isaac listens stops him, otherwise it starts him.
+// Talk is a toggle: a press while the clone listens stops it, otherwise it starts it.
 async function pressTalk($) {
-  if (listening && stopTalk) { stopTalk(); $.ui.toast('Isaac stopped'); return }
+  if (listening && stopTalk) { stopTalk(); $.ui.toast('Your clone stopped listening'); return }
   await startTalk($)
 }
 
-// Asks the voice relay to start Isaac's voice conversation in this session.
+// Starts the voice conversation in this session: through the voice relay where one runs, otherwise
+// by typing the talk message into this chat as the owner's words.
 async function startTalk($) {
   try {
     const r = await $.http.fetch(RELAY, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ session: await $.session.id(), text: TALK }) })
     if (!r.ok) throw new Error('relay answered ' + r.status)
-    $.ui.toast('Isaac is listening')
-  } catch { $.ui.toast('Isaac\'s voice isn\'t running on this computer') }
+    $.ui.toast('Your clone is listening')
+    return
+  } catch {}
+  try { await $.prompt.submit({ text: TALK, asUser: true }); $.ui.toast('Your clone is listening') }
+  catch { $.ui.toast('Your clone\'s voice isn\'t set up yet. Type "set up my voice" in the chat.') }
 }
 
 async function dashboardUp($) {
@@ -1202,10 +1207,11 @@ function ago(ms, now) {
 }
 
 export function register(on) {
-  // Isaac's voice conversation: the Talk button and the dashboard glow while converse runs.
+  // The clone's voice conversation: the Talk button and the dashboard glow while converse runs.
   // A second press of Talk ends the running call: returning while next is pending aborts it, and the
-  // deny text tells Isaac the owner stopped him, so he does not start listening again on his own.
-  on('tool.call', { tool: 'mcp__plugin_voicemode_voicemode__converse' }, async ($, e, next) => {
+  // deny text tells the clone the owner stopped it, so it does not start listening again on its own.
+  // VoiceMode is a plugin on Jon's computer and a plain "voicemode" server on a buyer's (voice setup).
+  on('tool.call', { tool: /^mcp__(plugin_voicemode_)?voicemode__converse$/ }, async ($, e, next) => {
     listening = true; await writeState($); $.ui.invalidate('ui.render')
     const stopped = new Promise(res => { stopTalk = () => res({ deny: STOPPED }) })
     try { return await Promise.race([next(e), stopped]) } finally {
@@ -1213,7 +1219,7 @@ export function register(on) {
     }
   })
 
-  // The Talk to Isaac button (hooks/talk.js) was pressed.
+  // The Talk button (hooks/talk.js) was pressed.
   on('ui.message', async ($, e, next) => {
     if (!/talk\.js$/.test(String(e.module || ''))) return next(e)
     await pressTalk($)
@@ -1649,7 +1655,7 @@ export function register(on) {
         body.push(pic('Your day: plan left, Codex and BNSN words', heroSvg({ name, left, reset, span: live.claudeSpan, words: live.words, codex: codexReady, codexPlan: live.codex || null, lines })))
         body.push(Client
           ? Client({ key: 'talk', module: './talk.js', props: { listening } })
-          : ycButton('home-talk', listening ? 'Isaac is listening · press to stop' : 'Talk to Isaac', () => pressTalk($), true))
+          : ycButton('home-talk', listening ? 'Your clone is listening · press to stop' : 'Talk to your clone', () => pressTalk($), true))
         body.push(row([ycButton('home-new-project', NEW_PROJECT.label, () => pressJob($, NEW_PROJECT), false)]))
 
         // Not connected (a new buyer, or a switched Claude account): one plain card with the way in.

@@ -458,11 +458,11 @@ body{padding:0;background:var(--ground)}
   document.querySelectorAll("[data-m]").forEach(function (b) { b.addEventListener("click", function () { show(b.dataset.m); }); });
   var all = document.getElementById("allsteps");
   if (all) all.addEventListener("click", function () { var l = document.getElementById("steplist"); l.hidden = !l.hidden; all.textContent = l.hidden ? "See all 9 steps" : "Hide the list"; });
-  // The mark starts Isaac's voice; it glows while Isaac is in the conversation.
+  // The mark starts the clone's voice; it glows while the clone is in the conversation.
   var talkAt = 0;
   document.getElementById("talk").addEventListener("click", function () {
     talkAt = Date.now(); hero.classList.add("live");
-    fetch("/talk", { method: "POST" }).then(function (r) { say(r.ok ? "Isaac is listening" : "Isaac's voice isn't running on this computer"); if (!r.ok) { talkAt = 0; hero.classList.remove("live"); } })
+    fetch("/talk", { method: "POST" }).then(function (r) { say(r.ok ? "Your clone is listening" : "Your clone's voice isn't set up yet. Type \"set up my voice\" in the chat."); if (!r.ok) { talkAt = 0; hero.classList.remove("live"); } })
       .catch(function () { talkAt = 0; hero.classList.remove("live"); say("Could not reach YouCloned"); });
   });
 
