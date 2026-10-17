@@ -29,6 +29,9 @@ def check_for(row, where):
 def run(command, where):
     shell = ["powershell", "-NoProfile", "-Command", command] if where == "pc" else ["/bin/bash", "-c", command]
     env = dict(os.environ)
+    if where == "pc":
+        # Started from a PowerShell 7 window, Windows PowerShell would load 7's modules and lose Get-FileHash.
+        env.pop("PSModulePath", None)
     if where == "mac":
         # Setup puts uv and VoiceMode under Homebrew and ~/.local/bin, which a fresh shell may not have yet.
         env["PATH"] = ":".join(["/opt/homebrew/bin", "/usr/local/bin", os.path.expanduser("~/.local/bin"), env.get("PATH", "")])
