@@ -1038,6 +1038,51 @@ test('words come only from SkillKey\'s "Words left" line, never from another num
   expect(JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}').words ?? null).toBeNull()
 })
 
+test('the dashboard state carries the crew drafts, the library sources and Codex, all read on this computer', async ($, on) => {
+  const fed = JSON.stringify({ library: 'x', hashes: { 'mail:1': 'a', 'page:2': 'b', 'file:notes.md': 'c' }, parts: { 'mail:1': 2 }, files: { 'file:notes.md': 1, 'file:offer.md': 2 } })
+  const { writes, clock } = sessionStubs(on, { project: PROJECT, cwd: PROJECT,
+    files: { [PROJECT + '/YOUCLONED.md']: '# rules', [PROJECT + '/Library/.fed.json']: fed },
+    exists: (path) => path === PROJECT + '/crew/support/drafts' || path === PROJECT + '/crew/inbox/drafts' || undefined,
+    lists: { [PROJECT + '/crew/support/drafts']: ['q1.md', 'q2.md', 'notes.txt'], [PROJECT + '/crew/inbox/drafts']: [] } })
+  on('http.fetch', () => ({ value: { status: 200, ok: true, headers: {}, text: '{}' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  await clock.advance(2000)
+  const st = JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}')
+  expect(st.crewOn).toBe(true)
+  expect(st.crew.map((c: any) => [c.name, c.drafts])).toEqual([['support', 2], ['inbox', 0]])
+  expect(st.crew[0].review).toContain(PROJECT + '/crew/support/drafts')
+  expect(st.crew[0].review).toMatch(/wait for my yes/)
+  expect(st.library.sources).toBe(4)
+  expect(st.codexReady).toBe(false)
+  expect(st.codex ?? null).toBeNull()
+})
+
+test('a fresh buyer\'s dashboard state has no crew, no library count and no made-up numbers', async ($, on) => {
+  const { writes } = sessionStubs(on, { cwd: '/work', skillKey: null })
+  on('http.fetch', () => ({ value: { status: 200, ok: true, headers: {}, text: '{}' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/work' })
+  await $.tool.call({ tool: 'mcp__youcloned__setup_next' })
+  const st = JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}')
+  expect(st.crewOn).toBe(false)
+  expect(st.crew.every((c: any) => c.drafts === 0 && c.review === '')).toBe(true)
+  expect(st.library.sources).toBeNull()
+  expect(JSON.stringify(st)).not.toMatch(/7514|7,514|sample/i)
+})
+
+test('the Codex gauge reads Codex\'s own log on the slow tick once Codex is on this computer', async ($, on) => {
+  const line = JSON.stringify({ type: 'event_msg', payload: { rate_limits: { primary: { used_percent: 30, window_minutes: 10080, resets_at: 1792000000 } } } })
+  const { writes, clock } = sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' },
+    exists: (path) => path === '/Users/pat/.local/bin/codex' || undefined,
+    process: (argv) => ({ exitCode: argv[0] === '/bin/sh' && argv[2].includes('.codex/sessions') ? 0 : 1, stdout: argv[0] === '/bin/sh' && argv[2].includes('.codex/sessions') ? line + '\n' : '', stderr: '' }) })
+  on('http.fetch', () => ({ value: { status: 200, ok: true, headers: {}, text: '{}' } }))
+  await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  await clock.advance(2000)
+  const st = JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}')
+  expect(st.codexReady).toBe(true)
+  expect(st.codex.left).toBe(70)
+  expect(st.codex.label).toMatch(/^Codex · resets /)
+})
+
 test('the New from Jon card shows the online feed, and the saved copy when offline', async ($, on) => {
   const feed = JSON.stringify({ items: [{ id: 'oms-1', title: 'Over My Shoulder: the new crew', note: 'Watch the crew work.', button: 'Show me the crew', job: 'Show me my crew.', watch: 'https://www.youtube.com/watch?v=abc' }] })
   let online = true
