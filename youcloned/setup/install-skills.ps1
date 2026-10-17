@@ -4,7 +4,8 @@
 # skills are never touched. The old "youcloned-setup" skill clashes with this setup, so it is moved to
 # %USERPROFILE%\.youcloned\retired-skills instead of deleted.
 #   install-skills.ps1           install or refresh the pack
-#   install-skills.ps1 -Check    exit 0 only when every skill in skills-pack.txt is installed
+#   install-skills.ps1 -Check    exit 0 only when every skill in skills-pack.txt is installed and the old
+#                                "youcloned-setup" skill has been retired
 # YOUCLONED_SKILLS_ZIP=<file> uses a local zip (tests), checked against YOUCLONED_SKILLS_SHA256 when set.
 # This file stays plain ASCII: Windows PowerShell 5.1 misreads anything else in a script saved without a BOM.
 param([switch]$Check)
@@ -24,6 +25,10 @@ function Test-Pack {
   $missing = 0
   foreach ($n in Get-Names) {
     if (-not (Test-Path -LiteralPath (Join-Path (Join-Path $Skills $n) 'SKILL.md'))) { Write-Host "MISSING $n"; $missing++ }
+  }
+  if (Test-Path -LiteralPath (Join-Path (Join-Path $Skills 'youcloned-setup') 'SKILL.md')) {
+    Write-Host 'OLD youcloned-setup skill is still installed (it clashes with this setup; running this without -Check moves it aside)'
+    $missing++
   }
   return ($missing -eq 0)
 }

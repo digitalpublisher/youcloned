@@ -6,7 +6,8 @@
 # to ~/.youcloned/retired-skills instead of deleted.
 #
 #   install-skills.sh            install or refresh the pack
-#   install-skills.sh --check    exit 0 only when every skill in skills-pack.txt is installed
+#   install-skills.sh --check    exit 0 only when every skill in skills-pack.txt is installed and the old
+#                                "youcloned-setup" skill has been retired
 # YOUCLONED_SKILLS_ZIP=<file> uses a local zip instead of the download (tests); its checksum is still checked
 # against YOUCLONED_SKILLS_SHA256 when that is set.
 set -euo pipefail
@@ -25,6 +26,10 @@ check() {
   while IFS= read -r n; do
     [ -f "$SKILLS/$n/SKILL.md" ] || { say "MISSING $n"; missing=$((missing + 1)); }
   done < <(names)
+  if [ -f "$SKILLS/youcloned-setup/SKILL.md" ]; then
+    say "OLD youcloned-setup skill is still installed (it clashes with this setup; running this without --check moves it aside)"
+    missing=$((missing + 1))
+  fi
   [ "$missing" -eq 0 ]
 }
 
