@@ -8,3 +8,4 @@ description: Set up YouCloned for this person. Interviews them about who they ar
 Call the `load_setup` tool from the youcloned plugin first. It returns the setup interview from SkillKey. Follow what it returns exactly, step by step, and save with the `save_setup` tool when it says to.
 
 If `load_setup` says SkillKey is not connected, tell the person that in one sentence and stop.
+Never fall back to vsl-planner, the BNSN connector or any other tool in place of SkillKey. If SkillKey is missing, the only step is to connect it.

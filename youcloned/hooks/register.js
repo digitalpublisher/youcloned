@@ -76,14 +76,16 @@ const TALK = 'Talk to Isaac was pressed in YouCloned. Start a voice conversation
 const STOPPED = 'The owner pressed Talk again in YouCloned to stop the voice conversation. Do not call converse again until they press Talk. Carry on in text with anything already asked of you.'
 
 // New project: Claude files this session in a sidebar group of its own (the add-on cannot reach the sidebar).
+// A SkillKey skill is never replaced by another tool: if it is missing, the answer is to connect SkillKey.
+const NO_FALLBACK = ' Use only the SkillKey connector for this. If SkillKey is not connected or the skill is not there, tell me to connect SkillKey and stop. Never use vsl-planner, the BNSN connector or any other tool instead.'
 const NEW_PROJECT = { key: 'new-project', label: 'New project', text: 'Start a new project for this session. Ask me its name in one short question. Then, with the Claude app\'s sidebar tools, make a sidebar group with that name (or use the one that already has it), move this session into it, and set this session\'s title to the project name. Then ask what we\'re building first.' }
 // Every skill YouCloned can start. SkillKey adds the ones the owner has bought. The owner pins the
 // ones they use most; those show on the Dashboard and in the strip above Claude's message box.
 const BUILT_IN = [
   { key: 'vsl-lead-writer', label: 'VSL lead', what: 'Your VSL lead, from Jon\'s VSL Lead Writer',
-    text: 'Write my VSL lead with Jon\'s VSL Lead Writer skill. Ask me which offer first if I have more than one.' },
+    text: 'Write my VSL lead with Jon\'s VSL Lead Writer skill. Ask me which offer first if I have more than one.' + NO_FALLBACK },
   { key: 'sales-page', label: 'Sales page', what: 'A sales page for one of your offers',
-    text: 'Build a sales page for one of my offers with Jon\'s sales page skill. Ask me which offer first if I have more than one.' },
+    text: 'Build a sales page for one of my offers with Jon\'s sales page skill. Ask me which offer first if I have more than one.' + NO_FALLBACK },
   { key: 'youtube-video', label: 'YouTube video', what: 'Topic, script in your voice, the edit and two thumbnails',
     text: 'Help me make my next YouTube video: topic, script in my voice, then the edit and two thumbnails.' },
   { key: 'inbox', label: 'Clear my inbox', what: 'Your inbox helper sorts your email and drafts the replies', text: '/youcloned crew inbox' },
@@ -120,7 +122,7 @@ function parseSkillList(text) {
   for (const line of String(text).split('\n')) {
     const m = /^-\s*(.+?)\s*\(skill:\s*"([^"]+)"\):\s*(.*)$/.exec(line.trim())
     if (!m || m[2].startsWith('youcloned-')) continue
-    out.push({ key: m[2], label: m[1], what: m[3], text: 'Run my "' + m[1] + '" skill from SkillKey (start_skill with skill "' + m[2] + '").' })
+    out.push({ key: m[2], label: m[1], what: m[3], text: 'Run my "' + m[1] + '" skill from SkillKey (start_skill with skill "' + m[2] + '").' + NO_FALLBACK })
   }
   return out
 }
