@@ -120,12 +120,14 @@ Running it again keeps the same token. Only add `--new` when the buyer wants a f
 
 ## Step 6: Save the fingerprint
 
-Call `execute_sql` with the project id and this query, with the 64-character line from Step 5 in place of FINGERPRINT:
+Call `execute_sql` with the project id and this query, with the 64-character line from Step 5 in place of FINGERPRINT. Each computer keeps its own fingerprint, so the library opens from every computer the buyer set up, and setting up a new one never locks out the others:
 
 ```sql
-insert into youcloned.settings (k, v) values ('token_sha256', 'FINGERPRINT')
+insert into youcloned.settings (k, v) values ('token_sha256:' || left('FINGERPRINT', 12), 'FINGERPRINT')
 on conflict (k) do update set v = excluded.v;
 ```
+
+If the buyer stops using a computer, its line can be removed: `delete from youcloned.settings where k = 'token_sha256:' || left('<that computer's fingerprint>', 12);`
 
 ## Step 7: Smoke test
 

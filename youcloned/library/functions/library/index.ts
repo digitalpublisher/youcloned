@@ -53,10 +53,16 @@ function sameHex(a: string, b: string): boolean {
 async function authorized(req: Request): Promise<boolean> {
   const token = req.headers.get('x-library-token')
   if (!token) return false
-  const rows = await sql`select v from youcloned.settings where k = 'token_sha256'`
-  const stored = String(rows[0]?.v ?? '').trim().toLowerCase()
-  if (!/^[0-9a-f]{64}$/.test(stored)) return false
-  return sameHex(await sha256Hex(token), stored)
+  // One fingerprint per computer (token_sha256, token_sha256:<label>), so setting up a second computer never locks
+  // out the first (clean-Mac run 4, Oct 17).
+  const rows = await sql`select v from youcloned.settings where k = 'token_sha256' or k like 'token_sha256:%'`
+  const mine = await sha256Hex(token)
+  let ok = false
+  for (const r of rows) {
+    const stored = String(r?.v ?? '').trim().toLowerCase()
+    if (/^[0-9a-f]{64}$/.test(stored) && sameHex(mine, stored)) ok = true
+  }
+  return ok
 }
 
 async function embed(text: string): Promise<string> {
