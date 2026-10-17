@@ -380,7 +380,8 @@
       "buyers": "yes",
       "mac": "to-port",
       "pc": "to-port",
-      "check": null
+      "check": null,
+      "note": "Oct 17 audit (read-only): the live starter pack (youcloned.bnsn.ai/install/skills/youcloned-starter-skills.zip, installed by Step 10 of mac.sh and windows.ps1) holds 4 of the 32 Global skills and none of the 15 in the four yes groups; no Yours-only skill ships. Full list: ~/isaac-voice/course/youcloned-command/portal-plan/skills-split-audit-1017.md. The check comes with the rebuilt pack, once buyer folder names are set."
     },
     {
       "id": "words-buy-more",
