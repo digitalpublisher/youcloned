@@ -333,6 +333,11 @@ test('every clone, Mac or PC, is told to say when it is time to change chats and
   expect(text).toMatch(/timer, reminder or watcher still running/)
   expect(text).toMatch(/promise still owed/)
   expect(text).toMatch(/first save anything worth remembering/)
+  // Jon's own working habits and the memory habit ship to every clone (Oct 17)
+  expect(text).toContain('## How you work for the owner')
+  expect(text).toMatch(/A yes on the wording is not a yes to send/)
+  expect(text).toMatch(/Never change, reset or set a password/)
+  expect(text).toContain('memory/INDEX.md')
   expect(text).toContain('past about 200,000 tokens, or 3 hours since it started')
 })
 
