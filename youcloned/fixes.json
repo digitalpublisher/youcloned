@@ -131,12 +131,15 @@
       "fix": "The voice chat swaps itself when it gets heavy (200k tokens or 3 hours)",
       "jon_file": "~/.local/isaac/chat-rotator/chat_rotator.py",
       "card": "bnsnstack#320",
-      "buyer_file": "chat switch (youcloned#34, PR #35)",
+      "buyer_file": "add-on universal rules, hooks/universal.js (chat switch, youcloned#34, PR #35)",
       "buyers": "adapt",
-      "mac": "to-port",
-      "pc": "to-port",
-      "check": null,
-      "note": "Adds the heavy-chat trigger to the buyer's \"time to change chats\"."
+      "mac": "in-pr",
+      "pc": "in-pr",
+      "check": {
+        "mac": "grep -q \"past about 200,000 tokens\" hooks/universal.js",
+        "pc": "if (Select-String -Quiet -Path hooks\\universal.js -Pattern 'past about 200,000 tokens') { exit 0 } else { exit 1 }"
+      },
+      "note": "Adds the heavy-chat trigger to the buyer's \"time to change chats\". Oct 17: the clone offers to change chats past about 200,000 tokens or three hours since the chat started (PR #35 commit 5abad0b). Measured by the clone in part 1; part 2 of #34 has the add-on measure it. The check passes once PR #35 is merged into the release."
     },
     {
       "id": "voice-10",
@@ -260,11 +263,14 @@
       "fix": "Chat switch: says it's time, writes the handoff, switches on a yes",
       "jon_file": null,
       "card": "youcloned#34",
-      "buyer_file": "add-on universal rules (PR #35)",
+      "buyer_file": "add-on universal rules, hooks/universal.js (PR #35)",
       "buyers": "yes",
       "mac": "in-pr",
-      "pc": "to-port",
-      "check": null
+      "pc": "in-pr",
+      "check": {
+        "mac": "grep -q \"time to change chats\" hooks/universal.js",
+        "pc": "if (Select-String -Quiet -Path hooks\\universal.js -Pattern 'time to change chats') { exit 0 } else { exit 1 }"
+      }
     },
     {
       "id": "agent-f",
