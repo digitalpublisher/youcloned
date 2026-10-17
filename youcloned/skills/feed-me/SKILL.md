@@ -41,7 +41,7 @@ Tell them: "I made a folder called Feed me in your clone folder. Drag in your bo
 
 ## Hand each source to the librarian
 
-Start the librarian with the Agent tool, `subagent_type` `youcloned:librarian`. It runs on a lighter model so the grunt work stays cheap. Every task message starts with the paths, then the one job, for example:
+Start the librarian with the Agent tool, `subagent_type` `youcloned:librarian`. It runs on a lighter model so the grunt work stays cheap. Don't run feed.py yourself in this chat: the collecting belongs to the librarian. Only if the librarian won't start, tell them in one sentence why and run that one feed.py job yourself. Every task message starts with the paths, then the one job, for example:
 
 ```
 FEED: <path>

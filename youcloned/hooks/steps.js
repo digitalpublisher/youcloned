@@ -86,7 +86,7 @@ export function stepText(step, ctx) {
         'When gh is logged in, run with Bash: ' + sh('setup-backup', q(ctx.folder)) + ' (plus their repository address if they gave one). With no address it makes a PRIVATE repository, saves the folder there, and sets a nightly backup. ' +
         'It never makes a public one. When it prints BACKUP READY, call setup_next.'
     case 'library':
-      return TWO_PATHS + 'Ask: do you already have a Supabase account or project you want to use, or should I walk you through the free one I recommend? Either way the library goes in its own section, so nothing already in their project is touched. ' +
+      return TWO_PATHS + 'Before anything else, ask this and wait for the answer: do you already have a Supabase account or project you want to use, or should I walk you through the free one I recommend? Either way the library goes in its own section, so nothing already in their project is touched. ' +
         'Then read ' + q(ctx.root + (ctx.mac ? '/library/setup.md' : '\\library\\setup.md')) + ' and follow it step by step. The env file is ' + ctx.envFile + '. ' +
         'It needs Supabase\'s connector in Claude. When its last check passes, call setup_next.'
     case 'voice': {
