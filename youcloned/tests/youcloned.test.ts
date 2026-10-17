@@ -543,6 +543,10 @@ test('crew instructions come from SkillKey, never from a file in the add-on', as
   const mcpCalls: { server: string, tool: string, args: Record<string, unknown> }[] = []
   sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' }, registered, mcpCalls })
   await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
+  // Nothing is fetched from SkillKey until the owner runs a helper (no unasked permission boxes).
+  expect(registered.length).toBe(0)
+  expect(mcpCalls.length).toBe(0)
+  await $.command.run({ command: 'youcloned', args: 'crew support' })
   expect(registered.map(r => r.name).sort()).toEqual(['inbox', 'support'])
   expect(registered.find(r => r.name === 'support').prompt).toBe('Instructions for youcloned-crew-support')
   expect(mcpCalls.every(c => c.server === SK)).toBe(true)
@@ -702,8 +706,8 @@ test('a helper the SkillKey account does not own stays off and says so', async (
   const registered: { name: string, prompt: string }[] = []
   sessionStubs(on, { project: PROJECT, cwd: PROJECT, files: { [PROJECT + '/YOUCLONED.md']: '# rules' }, registered, owns: (slug) => slug !== 'youcloned-crew-inbox' })
   await $.session.start({ surface: 'terminal', isInteractive: false, cwd: PROJECT })
-  expect(registered.map(r => r.name)).toEqual(['support'])
   const out = await $.command.run({ command: 'youcloned', args: 'crew inbox' })
+  expect(registered.map(r => r.name)).toEqual(['support'])
   expect(out.text).toMatch(/isn't on your SkillKey account yet/)
 })
 
@@ -905,7 +909,9 @@ test('words come only from SkillKey\'s "Words left" line, never from another num
   on('http.fetch', () => ({ value: { status: 404, ok: false, headers: {}, text: '' } }))
   await $.session.start({ surface: 'desktop', isInteractive: false, cwd: PROJECT })
   await clock.advance(3000)
-  expect(JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}').words).toBe(4200)
+  // The add-on never asks SkillKey for the balance on its own (no unasked permission boxes); the gauge waits for a
+  // SkillKey reply that names it, and never takes another number from a reply.
+  expect(JSON.parse(writes.get('/Users/pat/.youcloned/state.json') || '{}').words ?? null).toBeNull()
 })
 
 test('the New from Jon card shows the online feed, and the saved copy when offline', async ($, on) => {
@@ -1081,6 +1087,8 @@ test('in the first minute a SkillKey that is still connecting is not forgotten, 
   expect(store.get('skillKeyServer')).toBe(SK)
   connected = true
   await clock.advance(16000)
+  expect(registered.length).toBe(0) // set up when a helper first runs, never on its own
+  await $.command.run({ command: 'youcloned', args: 'crew support' })
   expect(registered.map(r => r.name).sort()).toEqual(['inbox', 'support'])
   expect(store.get('skillKeyServer')).toBe(SK)
 })
@@ -1145,7 +1153,7 @@ test('the librarian registers on Haiku and the wiki writer on Sonnet, each with 
   expect(lib?.prompt).toMatch(/in:sent/)
   expect(wiki?.prompt).toMatch(/Library\/index\.md/)
   // The crew still comes from SkillKey, beside them.
-  expect(registered.map(r => r.name).sort()).toEqual(['inbox', 'librarian', 'support', 'wiki-writer'])
+  expect(registered.map(r => r.name).sort()).toEqual(['librarian', 'wiki-writer'])
 })
 
 test('the helpers\' gate: feed.py only, writes only in their own folder, Gmail look-ups only', () => {
