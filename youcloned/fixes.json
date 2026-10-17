@@ -203,15 +203,18 @@
     {
       "id": "agent-13",
       "area": "agents",
-      "fix": "Slack clone answers YouCloned and computer questions only from the knowledge base",
+      "fix": "Slack clone answers YouCloned and computer questions only from text it has, never from memory",
       "jon_file": "scripts/isaac/youcloned_platform_guard.py",
       "card": "bnsnstack#315",
-      "buyer_file": "the buyer's Slack clone (Slack lesson)",
+      "buyer_file": "clone-slack-bridge.py in the Your Clone in Slack lesson (installs to ~/.youcloned-slack), version 1.2.1",
       "buyers": "adapt",
-      "mac": "to-port",
-      "pc": "to-port",
-      "check": null,
-      "note": "Answers from the buyer's own knowledge base plus YouCloned's support knowledge."
+      "mac": "in-pr",
+      "pc": "in-pr",
+      "check": {
+        "mac": "[ ! -f \"$HOME/.youcloned-slack/clone-slack-bridge.py\" ] || grep -q \"PLATFORM_RULE\" \"$HOME/.youcloned-slack/clone-slack-bridge.py\"",
+        "pc": "$f = Join-Path $env:USERPROFILE '.youcloned-slack\\clone-slack-bridge.py'; if (-not (Test-Path $f) -or (Select-String -Quiet -SimpleMatch -Path $f -Pattern 'PLATFORM_RULE')) { exit 0 } else { exit 1 }"
+      },
+      "note": "Oct 17 (adapted): the bridge spots a YouCloned, install or computer question (Jon's matching plus any YouCloned mention, Linux, \"Sarah's computer\", \"how do I install it\" and \"set it up\") and adds a rule for that chat: answer only from the rules page and the files the clone has, never from memory, never name a computer to buy or say what runs YouCloned unless that text does. Once a chat gets the rule it keeps it, and a new chat whose thread already asked gets it too. Owner in a direct message: if the text doesn't cover it, say so and point to the YouCloned Setup space. Owner in a channel or a teammate: no members-only link. The rule sits outside the teammate chat's context check, so it never starts a teammate over. Left out for buyers: Jon's KB file (Claire's internal knowledge base doesn't ship) and his carve-out for his own Mac. The bridge source is the lesson bundle (day-one/slack/files, version 1.2.1), outside this repo; the check passes while Slack isn't installed and fails on an installed bridge without the rule. Tests: day-one/slack/tests/test_fixes.py, nine agent-13 checks; Codex reviewed three times, last pass clear."
     },
     {
       "id": "agent-a",
