@@ -293,6 +293,7 @@ async function refreshLive($, withWords) {
       live.claudeAt = await $.clock.now()
     }
   } catch {}
+  if (withWords) { try { if (!(await noPromptsOn($))) withWords = false } catch { withWords = false } } // same reason: no unasked SkillKey boxes
   if (withWords) {
     try {
       const r = await skillKeyCall($, 'word_balance', {})
@@ -1359,9 +1360,16 @@ export function register(on) {
         $.ui.invalidate('ui.render')
       }
       try { await registerHelpers($) } catch (err) { $.ui.log('feed-me helpers not registered: ' + String(err).slice(0, 200)) }
-      await setUpCrew()
-      $.clock.after(15000, setUpCrew)
-      $.clock.after(60000, setUpCrew)
+      // In a chat that still asks before every call, these SkillKey look-ups popped up as permission boxes nobody
+      // asked for (clean-Mac run, Oct 17), so the crew is set up ahead of time only when no prompts are on;
+      // otherwise it's set up the first time the owner runs a helper.
+      let quiet = false
+      try { quiet = await noPromptsOn($) } catch {}
+      if (quiet) {
+        await setUpCrew()
+        $.clock.after(15000, setUpCrew)
+        $.clock.after(60000, setUpCrew)
+      }
     }
     try {
       await $.command.register({

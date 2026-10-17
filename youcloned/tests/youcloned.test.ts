@@ -80,7 +80,8 @@ function sessionStubs(on, opts: { project?: string, agents?: unknown[], files?: 
   on('fs.exists', ($, e) => ({ value: opts.exists?.(e.path) ?? (e.path in (opts.files || {}) || e.path.endsWith('/skills')) }))
   on('fs.list', ($, e) => ({ value: e.path.endsWith('/skills') ? [{ name: 'setup', kind: 'dir', size: 0, mtimeMs: 0, isLink: false }, { name: 'notes.txt', kind: 'file', size: 1, mtimeMs: 0, isLink: false }]
     : (opts.lists?.[e.path] || []).map(name => ({ name, kind: 'file', size: 1, mtimeMs: 0, isLink: false })) }))
-  on('fs.read', ($, e) => ({ value: opts.read?.(e.path) ?? (opts.files || {})[e.path] ?? (e.path.endsWith('SKILL.md') ? 'description: Set up YouCloned. More.' : 'crew prompt') }))
+  // Most tests run as a buyer who said yes to working without prompts (the SkillKey look-ups only run ahead then).
+  on('fs.read', ($, e) => ({ value: opts.read?.(e.path) ?? (opts.files || {})[e.path] ?? (e.path.endsWith('SKILL.md') ? 'description: Set up YouCloned. More.' : e.path.endsWith('/.claude/settings.json') ? '{"permissions":{"defaultMode":"bypassPermissions"}}' : 'crew prompt') }))
   on('fs.write', ($, e) => { writes.set(e.path, e.text); return { value: undefined } })
   const fsx = opts.fsx || fakeFs({})
   on('fs.stat', async ($, e) => fsx.stat(e.path).then(value => ({ value }), (err: Error) => ({ deny: err.message })))
@@ -554,7 +555,7 @@ test('load_setup hands Claude the setup interview from SkillKey, markers and Ski
 const SETTINGS = '/Users/pat/.claude/settings.json'
 
 test('setup asks once whether the clone may work without permission prompts', async ($, on) => {
-  const { store } = sessionStubs(on)
+  const { store } = sessionStubs(on, { read: (path) => path.endsWith('/.claude/settings.json') ? '{}' : undefined })
   await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/work' })
   const first = await $.tool.call({ tool: 'mcp__youcloned__load_setup' })
   expect(first.result).toMatch(/"Let your clone work without stopping to ask permission at every step\?"/)
