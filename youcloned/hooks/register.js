@@ -396,7 +396,11 @@ async function setNoPrompts($, allow) {
   }
   const file = settingsFile()
   const done = await mergeSettings($, file, settings => {
-    settings.permissions = { ...(settings.permissions && typeof settings.permissions === 'object' ? settings.permissions : {}), defaultMode: 'bypassPermissions' }
+    const perms = settings.permissions && typeof settings.permissions === 'object' ? settings.permissions : {}
+    // YouCloned's own tools never ask, even in a chat that stays in the ask-every-time mode (clean-Mac run, Oct 17).
+    const allow = Array.isArray(perms.allow) ? perms.allow.slice() : []
+    for (const r of ['mcp__youcloned__*', 'mcp__plugin_youcloned_youcloned__*']) if (!allow.includes(r)) allow.push(r)
+    settings.permissions = { ...perms, defaultMode: 'bypassPermissions', allow }
     settings.skipDangerousModePermissionPrompt = true
   })
   if (!done) {
@@ -410,12 +414,12 @@ async function setNoPrompts($, allow) {
     else if (ed === 'backup') backup = true
   }
   await $.store.set('noPromptsAsked', 'yes')
-  return 'Done: their clone now works without stopping to ask permission, starting with their next new chat. Tell them that in one sentence' + (backup ? ' (their old settings are saved next to the file as a backup)' : '') + ', then go on with setup.'
+  // The desktop app shows the no-prompts mode only when its own switch is on, and it remembers the mode last picked in
+  // each folder, so the buyer makes two clicks once (clean-Mac run, Oct 17: new chats still asked without them).
+  return 'Done: their settings now let the clone work without stopping to ask. Tell them that in one sentence' + (backup ? ' (their old settings are saved next to the file as a backup)' : '') +
+    ', then walk them through two clicks, one at a time: in the Claude app open Settings, then Claude Code, and switch on "Allow bypass permissions mode"; then in this chat, click the mode menu next to the message box and pick "Bypass permissions". Claude remembers it for this folder, so every new chat here starts that way. If Claude shows a warning the first time, they click to accept it. Then go on with setup.'
     + (skipped.length ? ' One more short sentence for them: their editor settings file (' + skipped.join(', ') + ') has notes in it YouCloned won\'t touch, so for the Claude panel in Cursor they open Cursor\'s settings, search "Claude Code", tick "Allow Dangerously Skip Permissions" and set "Initial Permission Mode" to bypassPermissions.' : '')
 }
-// The dashboard's "Set up your clone" steps 1 to 3, from what is on this computer, never assumed:
-// home = the rules file is saved; tools = git (Apple's developer tools or Homebrew), Obsidian, Node,
-// ffmpeg and Wispr Flow are all there; backup = the clone folder is a git repo with a GitHub remote.
 async function checkSetupSteps($) {
   const has = async (paths) => { for (const p of paths) { if (await $.fs.exists(p)) return true } return false }
   const folder = await cloneFolder($)

@@ -579,7 +579,7 @@ test('a yes merges bypass mode into the settings file, keeps every other setting
   expect(out.result).toMatch(/^Done/)
   const saved = JSON.parse(writes.get(SETTINGS) as string)
   expect(saved.permissions.defaultMode).toBe('bypassPermissions')
-  expect(saved.permissions.allow).toEqual(['Bash(ls:*)'])
+  expect(saved.permissions.allow).toEqual(['Bash(ls:*)', 'mcp__youcloned__*', 'mcp__plugin_youcloned_youcloned__*'])
   expect(saved.model).toBe('opus')
   expect(saved.hooks).toEqual({ PreToolUse: [] })
   expect(saved.skipDangerousModePermissionPrompt).toBe(true)
@@ -593,7 +593,7 @@ test('a yes with no settings file yet creates one with bypass mode on', async ($
   const { writes } = sessionStubs(on)
   await $.session.start({ surface: 'desktop', isInteractive: false, cwd: '/work' })
   await $.tool.call({ tool: 'mcp__youcloned__work_without_prompts', allow: true })
-  expect(JSON.parse(writes.get(SETTINGS) as string)).toEqual({ permissions: { defaultMode: 'bypassPermissions' }, skipDangerousModePermissionPrompt: true })
+  expect(JSON.parse(writes.get(SETTINGS) as string)).toEqual({ permissions: { defaultMode: 'bypassPermissions', allow: ['mcp__youcloned__*', 'mcp__plugin_youcloned_youcloned__*'] }, skipDangerousModePermissionPrompt: true })
 })
 
 test('a no changes nothing, and a settings file that is not valid JSON is left alone', async ($, on) => {
