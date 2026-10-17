@@ -19,20 +19,41 @@ TALK = "Talk to Isaac was pressed in YouCloned. Start a voice conversation now: 
 
 def skip_draft(crew, name):
     """Moves one waiting draft into skipped/, next to drafts/. Only a draft state.json lists for that helper
-    can be named, so no other file on the computer can be reached. True when it moved."""
+    can be named, and drafts/, skipped/ and the draft itself must be plain folders and files inside the
+    helper's folder (no links or junctions), so no other file on the computer can be reached. An earlier
+    skipped draft with the same name is kept: the new one gets a number. True when it moved."""
     try:
         state = json.load(open(os.path.join(DATA, "state.json")))
         helper = next(c for c in state.get("crew") or [] if c.get("name") == crew)
-        if name not in [d.get("name") for d in helper.get("drafts") or []] or os.path.basename(name) != name:
+        if name not in [d.get("name") for d in helper.get("drafts") or []] or os.path.basename(name) != name or name in (".", ".."):
             return False
-        src = os.path.join(helper["dir"], "drafts", name)
-        if not os.path.isfile(src):
+        home = os.path.realpath(helper["dir"])
+        drafts, skipped = os.path.join(helper["dir"], "drafts"), os.path.join(helper["dir"], "skipped")
+        src = os.path.join(drafts, name)
+        if os.path.realpath(drafts) != os.path.join(home, "drafts") or os.path.islink(src) or not os.path.isfile(src):
             return False
-        os.makedirs(os.path.join(helper["dir"], "skipped"), exist_ok=True)
-        os.replace(src, os.path.join(helper["dir"], "skipped", name))
+        os.makedirs(skipped, exist_ok=True)
+        if os.path.realpath(skipped) != os.path.join(home, "skipped"):
+            return False
+        stem, ext = os.path.splitext(name)
+        dst, n = os.path.join(skipped, name), 2
+        while os.path.lexists(dst):
+            dst, n = os.path.join(skipped, "%s-%d%s" % (stem, n, ext)), n + 1
+        os.rename(src, dst)
         return True
     except Exception:
         return False
+
+
+def same_site(headers):
+    """A POST only counts when it comes from the dashboard page itself. Another website's page can't send
+    one: its Origin names that site, and a page can't send JSON here without the browser asking first.
+    The Host check keeps out a web address that was pointed at this computer."""
+    hosts = {"127.0.0.1:%d" % PORT, "localhost:%d" % PORT}
+    origin = headers.get("Origin")
+    if headers.get("Host") not in hosts or (origin is not None and origin not in {"http://" + h for h in hosts}):
+        return False
+    return True
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -71,6 +92,10 @@ class Handler(SimpleHTTPRequestHandler):
         return super().do_GET()
 
     def do_POST(self):
+        json_body = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() == "application/json"
+        if not same_site(self.headers) or (self.path in ("/do", "/skip") and not json_body):
+            self.send_error(403)
+            return
         if self.path == "/talk":
             # The talk goes to the chat the add-on last wrote into state.json, through the voice relay.
             try:

@@ -541,14 +541,14 @@ body{padding:0;background:var(--ground)}
         document.getElementById("st-bar").style.width = Math.round(n * 100 / 9) + "%";
       }
       if ("listening" in s && Date.now() - talkAt > 8000) hero.classList.toggle("live", !!s.listening);
-      if (s.crew) bridge(s.crew);
+      if (s.crew) bridge(s.crew, s.at);
     }).catch(function () {});
   }
   load(); setInterval(load, 2000);
 
   // The Bridge: each helper's live state and every draft waiting on the owner. Approve and Edit go to
   // Claude's chat, where nothing goes out before the owner's yes; Skip moves the draft into skipped/.
-  var skipped = {}, lastCrew = [];
+  var skipped = {}, lastCrew = [], lastAt = 0;
   function ago(ms) {
     if (!ms) return "Not run yet";
     var m = Math.round((Date.now() - ms) / 60000);
@@ -568,15 +568,22 @@ body{padding:0;background:var(--ground)}
     ed.addEventListener("click", function () { send("/youcloned draft edit " + c.name + " " + encodeURIComponent(d.name)); });
     sk.addEventListener("click", function () {
       fetch("/skip", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ crew: c.name, file: d.name }) })
-        .then(function (r) { if (r.ok) { skipped[c.name + "/" + d.name] = 1; bridge(lastCrew); say("Skipped. It's in the helper's skipped folder"); } else say("That draft is no longer waiting"); })
+        .then(function (r) { if (r.ok) { skipped[c.name + "/" + d.name] = 1; bridge(lastCrew, lastAt); say("Skipped. It's in the helper's skipped folder"); } else say("That draft is no longer waiting"); })
         .catch(function () { say("Could not reach YouCloned"); });
     });
     acts.append(ok, ed, sk);
     row.append(who, acts);
     return row;
   }
-  function bridge(crew) {
-    lastCrew = crew;
+  function bridge(crew, at) {
+    lastCrew = crew; lastAt = at;
+    // The add-on writes the crew every 20 seconds while a YouCloned chat is open. Older than 2 minutes
+    // means Claude is closed, so nothing is shown as working.
+    var stale = !at || Date.now() - at > 120000;
+    // A skipped draft stays hidden only until the add-on's list no longer has it; a new draft with the same name shows.
+    Object.keys(skipped).forEach(function (k) {
+      if (!crew.some(function (c) { return (c.drafts || []).some(function (d) { return c.name + "/" + d.name === k; }); })) delete skipped[k];
+    });
     var all = [], waiting = 0;
     crew.forEach(function (c) {
       var left = (c.drafts || []).filter(function (d) { return !skipped[c.name + "/" + d.name]; });
@@ -597,12 +604,12 @@ body{padding:0;background:var(--ground)}
     grid.replaceChildren();
     crew.forEach(function (c) {
       var card = el("div", "panel bot"), top = el("div", "bt");
-      var n = c.waiting || 0;
-      var pill = el("span", n ? "pill warn" : "pill", c.running ? "Working" : n ? n + " need you" : "Up to date");
+      var n = c.waiting || 0, working = c.running && !stale;
+      var pill = el("span", n ? "pill warn" : "pill", working ? "Working" : n ? n + " need you" : stale ? "Open Claude to update" : "Up to date");
       top.append(el("b", null, c.title + " helper"), pill);
-      var run = el("button", "btn sm primary", c.running ? "Working" : "Run now"); run.type = "button"; run.disabled = !!c.running;
+      var run = el("button", "btn sm primary", working ? "Working" : "Run now"); run.type = "button"; run.disabled = working;
       run.addEventListener("click", function () { send("/youcloned crew " + c.name); });
-      card.append(top, el("p", null, c.what), el("div", "score", ago(c.lastRun) + (c.note ? " · " + c.note : "")), run);
+      card.append(top, el("p", null, c.what), el("div", "score", ago(c.lastRun) + (c.note && !stale ? " · " + c.note : "")), run);
       grid.appendChild(card);
     });
   }

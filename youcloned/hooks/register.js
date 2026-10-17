@@ -615,9 +615,11 @@ async function refreshDrafts($) {
   for (const c of CREW) {
     const dir = crewDir(c.name)
     let names = []
-    if (dir && (await $.fs.exists(dir + '/drafts'))) {
+    // A drafts folder or a draft that is a link points somewhere else on the computer, so it is left out.
+    const folder = dir && (await $.fs.exists(dir + '/drafts')) ? (await $.fs.list(dir)).find(x => x.name === 'drafts') : null
+    if (folder && folder.kind === 'dir' && !folder.isLink) {
       const entries = await $.fs.list(dir + '/drafts')
-      names = entries.filter(x => x.kind === 'file' && x.name.endsWith('.md')).sort((a, b) => b.mtimeMs - a.mtimeMs).map(x => x.name)
+      names = entries.filter(x => x.kind === 'file' && !x.isLink && x.name.endsWith('.md')).sort((a, b) => b.mtimeMs - a.mtimeMs).map(x => x.name)
     }
     crew[c.name].drafts = names
     // The dashboard's Needs You list shows the newest drafts with the start of each one.
