@@ -559,6 +559,12 @@ async function setupNext($, e) {
   const f = folder || nightFolder()
   const next = nextStep(st, skipped)
   const target = e && e.only ? String(e.only) : next ? next.id : ''
+  if (target === 'codex') {
+    const c = await codexStatus($)
+    st.codex = c.ready
+    if (!c.ready && c.version) detail.codex = c.version + ', not signed in yet'
+    codexReady = c.ready
+  }
   if (target === 'feed') { try { await registerHelpers($) } catch (err) { $.ui.log('feed-me helpers not registered: ' + String(err).slice(0, 200)) } }
   const ctx = {
     root: $.plugin.root, home, folder: f, mac: onMac(), defaultFolder: nightFolder(),
@@ -1006,11 +1012,30 @@ async function findCodex($) {
     home + '/.local/bin/codex',
     '/opt/homebrew/bin/codex',
     '/usr/local/bin/codex',
+    home + '/.youcloned/tools/node/bin/codex', // npm next to the Node the Tools step downloads
+    home + '\\AppData\\Roaming\\npm\\codex.cmd',
   ]
   for (const path of candidates) {
     if (await $.fs.exists(path)) return path
   }
+  if (onMac()) { // npm next to a Node from nvm
+    const r = await run($, ['/bin/sh', '-c', 'ls -d "' + home + '"/.nvm/versions/node/*/bin/codex 2>/dev/null | tail -1'])
+    if (r.exitCode === 0 && r.stdout.trim()) return r.stdout.trim()
+  }
   return null
+}
+
+// The optional Codex step (week one): installed, and signed in to the owner's ChatGPT plan.
+async function codexStatus($) {
+  const bin = await findCodex($)
+  if (!bin) return { ready: false }
+  let version = ''
+  try { version = ((await $.process.run([bin, '--version'], { timeoutMs: 15000 })).stdout || '').trim().split('\n')[0] } catch {}
+  try {
+    const r = await $.process.run([bin, 'login', 'status'], { timeoutMs: 15000 })
+    if (r.exitCode === 0 && /logged in/i.test((r.stdout || '') + (r.stderr || ''))) return { ready: true, version }
+  } catch {}
+  return { ready: false, version: version || 'installed' }
 }
 
 async function lastAnswer($) {
@@ -1051,6 +1076,67 @@ async function codexCheck($, question) {
   } catch (err) {
     return 'Codex could not run: ' + String(err).slice(0, 400) + '. If it asks you to sign in, open the Codex app once and sign in, then try again.'
   }
+}
+
+// A whole job handed to the owner's Codex. It runs in the background so the clone keeps talking (a voice
+// conversation keeps going), and its answer comes back into this chat when it finishes. One job at a time.
+// On a Mac the job runs detached (no ten-minute cap) and a timer looks for its finish file; on a PC it runs
+// from the timer, up to ten minutes.
+let codexJob = null
+async function codexJobStart($, task, write) {
+  const t = String(task || '').trim()
+  if (!t) return 'Say what the job is: codex_job needs a task.'
+  if (codexJob) return 'Codex is still on the last job ("' + codexJob.task.slice(0, 80) + '"). Its answer comes into this chat when it finishes.'
+  const bin = await findCodex($)
+  if (!bin) return 'Codex is not set up on this computer. Offer to set it up: call setup_next with only set to codex.'
+  const cwd = await $.session.cwd()
+  const base = dataDir() + '/codex-job-' + (await $.clock.now())
+  const job = { task: t, write, cwd, out: base + '.md', log: base + '.log', done: base + '.done', started: await $.clock.now() }
+  await $.fs.write(job.out, '')
+  await $.fs.write(base + '.txt', t)
+  const args = ['exec', '--sandbox', write ? 'workspace-write' : 'read-only', '--skip-git-repo-check', '--ephemeral', '-C', cwd, '-o', job.out]
+  if (onMac()) {
+    // The task goes in on stdin from its file, so nothing in it is ever read by a shell.
+    const r = await run($, ['/bin/sh', '-c', '( "$0" "$@" - < "' + base + '.txt" > "' + job.log + '" 2>&1; echo $? > "' + job.done + '" ) < /dev/null > /dev/null 2>&1 &', bin, ...args])
+    if (r.exitCode !== 0) return 'Codex could not start: ' + (r.stderr || '').trim().slice(0, 300)
+    codexJob = job
+    $.clock.after(15000, () => codexJobPoll($))
+  } else {
+    codexJob = job
+    $.clock.after(0, async () => {
+      let r = { exitCode: 1, stdout: '', stderr: '' }
+      try { r = await $.process.run([bin, ...args, t], { cwd, timeoutMs: 600000 }) } catch (err) { r.stderr = String(err) }
+      try { await $.fs.write(job.log, ((r.stdout || '') + (r.stderr || '')).slice(-4000)); await $.fs.write(job.done, String(r.exitCode)) } catch {}
+      await codexJobPoll($)
+    })
+  }
+  return 'Codex started the job' + (write ? ' and may change files in ' + cwd : ', read-only') + '. It runs in the background: keep going with the owner, and its answer comes into this chat when it finishes.'
+}
+
+async function codexJobPoll($) {
+  const job = codexJob
+  if (!job) return
+  const now = await $.clock.now()
+  if (!(await $.fs.exists(job.done))) {
+    if (now - job.started < 4 * 3600 * 1000) { $.clock.after(15000, () => codexJobPoll($)); return }
+    await codexJobFinish($, job, 'Codex has been on this job for four hours without finishing, so I stopped waiting. What it printed last: ' + (await tailOf($, job.log)))
+    return
+  }
+  let answer = ''
+  try { answer = (await $.fs.read(job.out)).trim() } catch {}
+  if (!answer) answer = 'Codex finished without an answer (exit ' + (await tailOf($, job.done)).trim() + '). What it printed: ' + (await tailOf($, job.log))
+  await codexJobFinish($, job, answer)
+}
+
+async function tailOf($, path) {
+  try { return (await $.fs.read(path)).trim().slice(-1500) } catch { return '' }
+}
+
+async function codexJobFinish($, job, answer) {
+  codexJob = null
+  try { $.ui.toast('Codex finished its job') } catch {}
+  await $.prompt.submit({ text: 'Codex finished the job you handed it ("' + job.task.slice(0, 160) + '"). It said:\n\n' + answer.slice(0, 12000) +
+    '\n\nTell the owner in a few short lines what Codex did and what they should look at. ' + (job.write ? 'Check the files it changed before you call the job done. ' : '') + 'If you are in a voice conversation, say it out loud and keep listening.' })
 }
 
 async function codexButton($) {
@@ -1394,6 +1480,13 @@ export function register(on) {
         inputSchema: { type: 'object', properties: { question: { type: 'string', description: 'What Codex should check; leave out to check the last piece of work' } } },
       })
     } catch (err) { $.ui.log('codex_check not registered: ' + String(err)) }
+    try {
+      await $.tool.register({
+        name: 'codex_job',
+        description: 'Hand a whole job to the owner\'s own Codex (OpenAI), in this folder, in the background. Use it when the owner asks to give a job to Codex, or for a long job during a voice conversation so the conversation keeps going. Its answer comes back into this chat when it finishes. Never put a key or password in the task.',
+        inputSchema: { type: 'object', properties: { task: { type: 'string', description: 'The job, written so Codex can do it alone' }, write: { type: 'boolean', description: 'true lets Codex change files in this folder; leave out for read-only work' } }, required: ['task'] },
+      })
+    } catch (err) { $.ui.log('codex_job not registered: ' + String(err)) }
     if (cloneHere) {
       // SkillKey may still be connecting when a session starts, so the crew is set up after a short wait
       // and again later if a member is still missing.
@@ -1553,6 +1646,10 @@ export function register(on) {
 
   on('tool.call', { tool: 'mcp__youcloned__codex_check' }, async ($, e) => {
     return { result: await codexCheck($, String(e.question || '')) }
+  })
+
+  on('tool.call', { tool: 'mcp__youcloned__codex_job' }, async ($, e) => {
+    return { result: await codexJobStart($, e.task, e.write === true) }
   })
 
   on('command.run', { command: 'youcloned' }, async ($, e) => {

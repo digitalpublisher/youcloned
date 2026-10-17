@@ -27,6 +27,13 @@ export const STEPS = [
 
 export const STEP_IDS = STEPS.map(s => s.id)
 
+// Steps outside the ten, added only when the owner asks for them (setup_next with only).
+// Codex is optional, in week one, with the "clone checks itself" lesson (Jon, Oct 17 4:26pm).
+export const EXTRA_STEPS = [
+  { id: 'codex', title: 'Codex', why: 'OpenAI\'s Codex on your own ChatGPT plan: it checks your clone\'s work, and your clone can hand it a whole job.' },
+]
+const ALL_STEPS = [...STEPS, ...EXTRA_STEPS]
+
 // Steps a buyer may put off and come back to. Setup is "all set" only when every step is done or put off,
 // and the dashboard shows what was put off.
 // Backup can be put off too (clean-Mac run, Oct 17): a GitHub sign-up can be blocked for a while, and nothing after
@@ -50,6 +57,9 @@ const TWO_PATHS = 'Offer both paths: use what they already have, or the free one
 // A tool the Tools step just installed isn't on this chat's search path yet (clean-Mac run, Oct 17), so Mac
 // commands carry the folders Homebrew and the Intel installs use.
 const MAC_PATH = 'PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH" '
+
+// Codex installs with npm, which puts it next to whichever Node the Tools step found or installed.
+const CODEX_PATH = 'PATH="$HOME/.youcloned/tools/node/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH" '
 
 const q = (p) => '"' + String(p).replace(/(["\\$`])/g, '\\$1') + '"'
 
@@ -110,6 +120,16 @@ export function stepText(step, ctx) {
         ', PYTHON ' + (ctx.mac ? q(ctx.python || 'python3') : 'py -3') + '. ' +
         'When at least one source is in the library, have the wiki writer write Library/index.md, then call setup_next. If they want to feed you later, call setup_next with skip set to feed.'
     }
+    case 'codex': {
+      // Codex signs in through the browser and waits for it, so the sign-in runs in its own window.
+      const login = ctx.mac
+        ? "/usr/bin/osascript -e 'tell application \"Terminal\" to do script \"" + CODEX_PATH.replace(/"/g, '\\"') + "codex login\"' -e 'tell application \"Terminal\" to activate'"
+        : 'powershell -NoProfile -Command "Start-Process powershell -ArgumentList \'-NoExit\',\'-NoProfile\',\'-Command\',\'codex login\'"'
+      return 'Codex is optional. Ask first, in one short question: do they have a ChatGPT plan (Plus or higher)? Codex runs on it and has no free version. If they don\'t, say in one sentence that it can wait and stop here. ' +
+        (ctx.detail && ctx.detail.codex ? 'Codex is already installed (' + ctx.detail.codex + '), so skip the install. ' : 'Install it with Bash: ' + (ctx.mac ? CODEX_PATH : '') + 'npm install -g @openai/codex. ') +
+        'Then open the sign-in in its own window with Bash: ' + login + '. Tell them, in two short sentences: a browser page opens, they sign in with ChatGPT, and when the window says they are logged in they come back and type "check Codex". ' +
+        'Then stop and wait. When they come back, call setup_next with only set to codex.'
+    }
     default:
       return ''
   }
@@ -118,17 +138,17 @@ export function stepText(step, ctx) {
 // What each step needs first (Jon, Oct 17: "if you like your clone and you just want to add some things, do this").
 export const NEEDS = {
   tools: [], home: [], protection: ['tools'], skillkey: [], interview: ['home', 'skillkey'], skills: [],
-  backup: ['tools', 'home', 'protection'], library: ['tools', 'home'], voice: ['tools'], feed: ['library'],
+  backup: ['tools', 'home', 'protection'], library: ['tools', 'home'], voice: ['tools'], feed: ['library'], codex: ['tools'],
 }
 
 // One step on its own, for someone who likes their clone and wants to add just this.
 export function onlyText(id, status, ctx) {
-  const step = STEPS.find(s => s.id === id)
-  if (!step) return 'There is no setup step called ' + id + '. The steps are: ' + STEP_IDS.join(', ') + '.'
+  const step = ALL_STEPS.find(s => s.id === id)
+  if (!step) return 'There is no setup step called ' + id + '. The steps are: ' + ALL_STEPS.map(s => s.id).join(', ') + '.'
   if (status[id]) return step.title + ' is already set up on this computer, so there is nothing to add. Tell them that in one sentence.'
   const missing = (NEEDS[id] || []).filter(n => !status[n])
   if (missing.length) {
-    const names = missing.map(n => STEPS.find(s => s.id === n).title).join(' and ')
+    const names = missing.map(n => ALL_STEPS.find(s => s.id === n).title).join(' and ')
     return step.title + ' needs ' + names + ' first. Tell them that in one sentence and offer to do ' + (missing.length > 1 ? 'those' : 'that') + ' first, then this. If they say yes, call setup_next with only set to ' + missing[0] + '.'
   }
   return 'Adding just one step, ' + step.title + ': ' + step.why + '\nTell them in one short sentence, then do it:\n' + stepText(step, ctx) +

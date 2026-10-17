@@ -328,6 +328,15 @@ test('someone who likes their clone can add just one step, and is told what it n
   expect(onlyText('library', { ...done, library: false }, ctx)).toMatch(/Adding just one step, Your library/)
   expect(onlyText('library', done, ctx)).toMatch(/already set up on this computer/)
   expect(onlyText('feed', { ...done, library: false, feed: false }, ctx)).toMatch(/needs Your library first/)
+  // Codex is outside the ten: optional, needs the tools, and asks about a ChatGPT plan first.
+  expect(onlyText('codex', { ...done, tools: false }, ctx)).toMatch(/Codex needs Your tools first/)
+  const codex = onlyText('codex', done, ctx)
+  expect(codex).toMatch(/Adding just one step, Codex/)
+  expect(codex).toMatch(/ChatGPT plan/)
+  expect(codex).toMatch(/npm install -g @openai\/codex/)
+  expect(codex).toMatch(/codex login/)
+  expect(onlyText('codex', { ...done, codex: true }, ctx)).toMatch(/already set up on this computer/)
+  expect(setupText(done, new Set(), ctx)).not.toMatch(/Codex/)
 })
 
 test('the interview saves into the folder setup_next chose, without asking again', async ($, on) => {
@@ -462,6 +471,43 @@ test('/youcloned codex runs Codex read-only and returns its answer', async ($, o
   expect(exec).toBeDefined()
   expect(exec.slice(0, 4)).toEqual(['codex', 'exec', '--sandbox', 'read-only'])
   expect(exec[exec.length - 1]).toMatch(/I wrote copy\/letter.md/)
+})
+
+test('codex_job hands Codex a whole job in the background and brings its answer into the chat', async ($, on) => {
+  const calls: string[][] = []
+  const submitted: string[] = []
+  let finished = false
+  const { clock } = sessionStubs(on, {
+    project: PROJECT,
+    process: (argv) => { calls.push([...argv]); return argv[0] === 'codex' ? { exitCode: 0, stdout: 'codex-cli 1.0', stderr: '' } : { exitCode: 0, stdout: '', stderr: '' } },
+    read: (path) => /codex-job-.*\.md$/.test(path) && finished ? 'Rewrote the price table in pages/prices.md.' : undefined,
+    exists: (path) => path.endsWith('.done') ? finished : undefined,
+  })
+  on('prompt.submit', ($, e) => { submitted.push(String(e.text)); return { text: String(e.text) } })
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  const r: any = await $.tool.call({ tool: 'mcp__youcloned__codex_job', task: 'Fix the price table', write: true })
+  expect(String(r.result)).toMatch(/runs in the background/)
+  // Detached through sh, the task read from its file on stdin, never by a shell.
+  const launch = calls.find(a => a[0] === '/bin/sh')
+  expect(launch.slice(3, 7)).toEqual(['codex', 'exec', '--sandbox', 'workspace-write'])
+  expect(launch[launch.length - 1]).not.toBe('Fix the price table')
+  expect(launch[2]).toMatch(/- < ".*codex-job-.*\.txt"/)
+  const busy: any = await $.tool.call({ tool: 'mcp__youcloned__codex_job', task: 'Another one' })
+  expect(String(busy.result)).toMatch(/still on the last job/)
+  await clock.advance(15000)
+  expect(submitted).toEqual([])
+  finished = true
+  await clock.advance(15000)
+  expect(submitted.some(t => /Codex finished the job you handed it/.test(t) && /Rewrote the price table/.test(t) && /Check the files it changed/.test(t))).toBe(true)
+  const ro: any = await $.tool.call({ tool: 'mcp__youcloned__codex_job', task: 'Read the offer and list gaps' })
+  expect(String(ro.result)).toMatch(/read-only/)
+})
+
+test('codex_job without Codex offers the optional Codex step', async ($, on) => {
+  sessionStubs(on, { project: PROJECT })
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  const r: any = await $.tool.call({ tool: 'mcp__youcloned__codex_job', task: 'Fix it' })
+  expect(String(r.result)).toMatch(/only set to codex/)
 })
 
 test('/youcloned codex says how to get Codex when it is missing', async ($, on) => {
