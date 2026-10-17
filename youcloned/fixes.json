@@ -87,7 +87,7 @@
         "mac": "[ ! -f \"$HOME/.youcloned-phone/speechify-voice.py\" ] || cmp -s voice/speechify-voice.py \"$HOME/.youcloned-phone/speechify-voice.py\"",
         "pc": "$a = Join-Path $env:USERPROFILE '.youcloned-phone\\speechify-voice.py'; $b = Join-Path $PWD 'voice\\speechify-voice.py'; if ((-not (Test-Path -LiteralPath $a)) -or ([Convert]::ToBase64String([IO.File]::ReadAllBytes($a)) -ceq [Convert]::ToBase64String([IO.File]::ReadAllBytes($b)))) { exit 0 } else { exit 1 }"
       },
-      "note": "Ported Oct 17 (same file runs on Mac and PC). Repo test: tools/voice/test_speechify_voice.py. Buyer check still to write with the setup check."
+      "note": "Ported Oct 17 (same file runs on Mac and PC). Repo test: tools/voice/test_speechify_voice.py. Mac and PC checks pass while voice isn't set up and fail on a changed copy (PC proven on a GitHub Windows runner, run 39024529016)."
     },
     {
       "id": "voice-06",
