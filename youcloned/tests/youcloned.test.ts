@@ -253,7 +253,7 @@ test('every clone, Mac or PC, is told to say when it is time to change chats and
   expect(text).toMatch(/timer, reminder or watcher still running/)
   expect(text).toMatch(/promise still owed/)
   expect(text).toMatch(/first save anything worth remembering/)
-  expect(text).toContain('past about 200,000 tokens, or three hours since it started')
+  expect(text).toContain('past about 200,000 tokens, or 3 hours since it started')
 })
 
 test('the clone folder conversation is told which YouCloned version is running', async ($, on) => {
