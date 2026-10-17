@@ -93,7 +93,8 @@ def main():
             pass
     else:
         marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.write_text("smoke test passed\n")
+        # Bound to this env file and this library, so a pass for one clone folder never counts for another.
+        marker.write_text("env=" + str(env_file) + "\nurl=" + url + "\n")
     sys.exit(1 if failed else 0)
 
 

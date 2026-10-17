@@ -439,8 +439,10 @@ async function checkSetupSteps($) {
   if (st.protection) {
     // --verify plants a fake key in a scratch repository and passes only when the commit is refused.
     const script = root + (onMac() ? '/setup/guards/install-git-hooks.mjs' : '\\setup\\guards\\install-git-hooks.mjs')
-    const r = onMac() ? await runWith($, ['/bin/bash', '-lc', 'node "$0" --verify', script], { timeoutMs: 60000 })
-      : await runWith($, ['node', script, '--verify'], { timeoutMs: 60000 })
+    // Once the clone folder is a Git repository, prove the check fires in THAT repository (its own hooks setting counts).
+    const repo = folder && (await $.fs.exists(folder + '/.git')) ? folder : ''
+    const r = onMac() ? await runWith($, ['/bin/bash', '-lc', 'node "$0" --verify ${1:+"$1"}', script, repo], { timeoutMs: 90000 })
+      : await runWith($, repo ? ['node', script, '--verify', repo] : ['node', script, '--verify'], { timeoutMs: 90000 })
     st.protection = r.exitCode === 0
   }
   if (!skillKeyServer) { try { await checkSkillKey($) } catch {} }
@@ -465,12 +467,28 @@ async function checkSetupSteps($) {
     try {
       const env = await $.fs.read(folder + '/.env')
       st.library = /^YOUCLONED_LIBRARY_URL=\S+/m.test(env) && /^YOUCLONED_LIBRARY_TOKEN=\S+/m.test(env)
-        && (await $.fs.exists(dataDir() + '/library-ok')) // written by library/smoke-test.py when add, find and remove all passed
+        && (await (async () => { // library/smoke-test.py writes env= and url= after add, find and remove all passed
+          try {
+            const ok = await $.fs.read(dataDir() + '/library-ok')
+            const url = (env.match(/^YOUCLONED_LIBRARY_URL=(\S+)/m) || [])[1]
+            return ok.includes('env=' + folder + sep() + '.env\n') && !!url && ok.includes('url=' + url + '\n')
+          } catch { return false }
+        })())
     } catch {}
   }
+  // Settings, the engine, and both services' folders (the PC setup writes settings before it downloads the services).
   st.voice = (await $.fs.exists(home + '/.voicemode/voicemode.env'))
     && (await has([home + '/.local/bin/voicemode', home + '/.local/bin/voicemode.exe', home + '/AppData/Roaming/uv/tools/voice-mode']))
-  st.feed = !!folder && (await $.fs.exists(folder + '/Library/index.md')) && (await $.fs.exists(folder + '/Library/.fed.json'))
+    && (await $.fs.exists(home + '/.voicemode/services/whisper')) && (await $.fs.exists(home + '/.voicemode/services/kokoro'))
+  st.feed = false
+  if (folder) {
+    try { // an index page with something on it, and at least one source recorded as fed
+      const index = await $.fs.read(folder + '/Library/index.md')
+      const fed = JSON.parse(await $.fs.read(folder + '/Library/.fed.json'))
+      const n = Array.isArray(fed) ? fed.length : Object.keys((fed && (fed.sources || fed)) || {}).length
+      st.feed = index.trim().length > 40 && n > 0
+    } catch {}
+  }
   let skipped = []
   try { const s = await $.store.get('skipped'); if (Array.isArray(s)) skipped = s.filter(x => CAN_SKIP.has(x)) } catch {}
   const next = nextStep(st, new Set(skipped))

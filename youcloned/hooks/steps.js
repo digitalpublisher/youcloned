@@ -88,7 +88,7 @@ export function stepText(step, ctx) {
       const as = (x) => String(x).replace(/(["\\])/g, '\\$1')
       const open = ctx.mac
         ? "/usr/bin/osascript -e 'tell application \"Terminal\" to do script \"/bin/bash \\\"" + as(ctx.root + '/voice/setup-voice.sh') + "\\\"\"' -e 'tell application \"Terminal\" to activate'"
-        : 'powershell -NoProfile -Command "Start-Process powershell -ArgumentList \'-NoExit\',\'-NoProfile\',\'-ExecutionPolicy\',\'Bypass\',\'-File\',\'' + String(ctx.root + '\\voice\\setup-voice.ps1').replace(/'/g, "''") + '\'"'
+        : 'powershell -NoProfile -Command "Start-Process powershell -ArgumentList \'-NoExit\',\'-NoProfile\',\'-ExecutionPolicy\',\'Bypass\',\'-File\',\'\\\"' + String(ctx.root + '\\voice\\setup-voice.ps1').replace(/'/g, "''") + '\\\"\'"'
       return 'The voice setup runs in its own window because it asks two quick questions and needs Claude closed for a moment. Run this with Bash to open it: ' + open + '. ' +
         'Tell them, in two short sentences: a window opens and asks them to pick a man\'s or a woman\'s voice, then asks them to quit Claude (Command Q on a Mac); when it says the voice is ready, they open Claude again and type "finish my setup". ' +
         'Then stop and wait. If they want to do the voice later, call setup_next with skip set to voice.'
