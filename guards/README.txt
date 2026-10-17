@@ -12,6 +12,7 @@ Run node settings-merge.mjs --uninstall to remove only those entries.
 install-git-hooks.mjs installs or removes the Git hooks.
 Run node install-git-hooks.mjs --install to add them.
 Run node install-git-hooks.mjs --uninstall to remove them.
+Run node install-git-hooks.mjs --verify [repo] to prove a planted test key is refused.
 The Git hooks scan staged content and outgoing commit content.
 Use a git-ignored env file or a host secret store for real keys.
 The guards never print matched key values.

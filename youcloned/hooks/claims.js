@@ -1,7 +1,7 @@
 // The money and promise gate for crew drafts (fix agent-b): a draft a crew member writes for a customer
 // carries no income or earnings figure, no results or timeframe promise, no guarantee of results and no
 // refund, price or discount promise. claimProblems(text) returns the reasons a draft breaks the rule; an
-// empty list means it may be saved. Ported from the support mode of the claim gate on Jon's Mac, so a
+// empty list means it may be saved. Ported from the support mode of the author's claim gate, so a
 // stated price ("$49 a month") or a stated refund policy ("a 14-day money-back guarantee") still passes.
 
 const FIG = '(?:[$€£]\\s?\\d[\\d,.]*\\s?(?:k|m|mm)?\\b|\\b\\d[\\d,.]*\\s?(?:k|m|mm|grand|dollars?|usd)\\b' +
