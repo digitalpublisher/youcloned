@@ -1,26 +1,41 @@
 #!/bin/sh
+# YouCloned key check before a push. A push sends every commit the remote doesn't have yet, not just
+# the newest files, so a key added in an older commit and deleted later would still go up. This scans
+# every file version, commit message and tag being sent (for a new branch: its whole history that isn't
+# already on that remote). Matched values are never printed.
 set -eu
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 rules="$script_dir/../lib/secret-rules.mjs"
+zero=0000000000000000000000000000000000000000
+remote=${1:-}
 temporary=$(mktemp "${TMPDIR:-/tmp}/youcloned-push.XXXXXX")
-names=$(mktemp "${TMPDIR:-/tmp}/youcloned-names.XXXXXX")
-trap 'rm -f "$temporary" "$names"' EXIT HUP INT TERM
+objects=$(mktemp "${TMPDIR:-/tmp}/youcloned-objects.XXXXXX")
+wanted=$(mktemp "${TMPDIR:-/tmp}/youcloned-wanted.XXXXXX")
+list=$(mktemp "${TMPDIR:-/tmp}/youcloned-list.XXXXXX")
+trap 'rm -f "$temporary" "$objects" "$wanted" "$list"' EXIT HUP INT TERM
+
+blocked() {
+  echo "Blocked: $1" >&2
+  exit 1
+}
 
 while read -r local_ref local_sha remote_ref remote_sha; do
-  case "$local_sha" in
-    0000000000000000000000000000000000000000) continue ;;
-  esac
-  case "$remote_sha" in
-    0000000000000000000000000000000000000000) git ls-tree -r --name-only "$local_sha" > "$names" ;;
-    *) git diff --name-only --diff-filter=ACMR "$remote_sha" "$local_sha" > "$names" ;;
-  esac
-  while IFS= read -r file; do
-    [ -n "$file" ] || continue
-    git show "$local_sha:$file" >> "$temporary" 2>/dev/null || true
-    printf '\n' >> "$temporary"
-  done < "$names"
+  [ -n "${local_sha:-}" ] || continue
+  [ "$local_sha" = "$zero" ] && continue
+  set -- "$local_sha" --not
+  if [ -n "${remote_sha:-}" ] && [ "$remote_sha" != "$zero" ] && git cat-file -e "$remote_sha^{commit}" 2>/dev/null; then
+    set -- "$@" "$remote_sha"
+  fi
+  if [ -n "$remote" ]; then set -- "$@" "--remotes=$remote"; fi
+  git rev-list --objects "$@" > "$objects" 2>/dev/null || blocked "YouCloned's key check could not list the commits being pushed."
+  cut -d' ' -f1 < "$objects" | git cat-file --batch-check='%(objecttype) %(objectname)' > "$wanted" || blocked "YouCloned's key check could not read the commits being pushed."
+  awk '$1 == "blob" || $1 == "commit" || $1 == "tag" { print $2 }' "$wanted" >> "$list"
 done
+
+if [ -s "$list" ]; then
+  sort -u "$list" | git cat-file --batch='%(objecttype)' > "$temporary" || blocked "YouCloned's key check could not read the commits being pushed."
+fi
 
 find_node() {
   if [ -f "$script_dir/../lib/node-path" ]; then
